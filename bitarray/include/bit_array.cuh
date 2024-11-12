@@ -20,9 +20,6 @@ class BitArray {
   // Default empty constructor.
   BitArray() = default;
 
-  // Default copy constructor.
-  BitArray(BitArray const&) = default;
-
   // Deleted copy assignment.
   BitArray& operator=(BitArray const&) = delete;
 
@@ -37,10 +34,7 @@ class BitArray {
    * number of bits.
    * \param size Number of bits the bit array contains.
    */
-  __host__ BitArray(size_t const size) noexcept
-      : bit_size_(size), size_((bit_size_ >> 5) + 1) {
-    gpuErrchk(cudaMalloc(&d_data_, size_ * sizeof(uint32_t)));
-  }
+  __host__ BitArray(size_t const size);
 
   /*!
    * \brief Constructor. Creates a bit array that holds a specific, fixed
@@ -48,37 +42,29 @@ class BitArray {
    * \param size Number of bits the bit array contains.
    * \param init_value Value to which the bits are set.
    */
-  __host__ BitArray(size_t const size, bool const init_value) noexcept
-      : bit_size_(size), size_((bit_size_ >> 5) + 1) {
-    gpuErrchk(cudaMalloc(&d_data_, size_ * sizeof(uint32_t)));
-    gpuErrchk(cudaMemset(d_data_, init_value ? ~(0UL) : 0UL,
-                         size_ * sizeof(uint32_t)));
-  }
+  __host__ BitArray(size_t const size, bool const init_value);
+
+  /*!
+   * \brief Copy constructor.
+   */
+  __host__ BitArray(BitArray const&);
 
   // Destructor
-  ~BitArray() { gpuErrchk(cudaFree(d_data_)); }
+  __host__ ~BitArray();
 
   /*!
    * \brief Access operator to read to a bit of the bit array.
    * \param index Index of the bit to be read to in the bit array.
    * \return boolean representing the bit.
    */
-  __device__ [[nodiscard]] bool access(size_t const index) const noexcept {
-    // Get position in 32-bit word
-    uint8_t const offset = index & uint32_t(0b11111);
-    // Get relevant word, shift and return bit
-    return (d_data_[index >> 5] >> offset) & 1UL;
-  }
+  __device__ [[nodiscard]] bool access(size_t const index) const noexcept;
 
   /*!
    * \brief Access operator to write to a whole word of the bit array.
    * \param index Index of a bit that is inside the word to be written to.
-   * \param value Word to be written.
+   * \param value Word to be written, where the first bit is at the left.
    */
-  __device__ void write_word(size_t const index,
-                             uint32_t const value) noexcept {
-    d_data_[index / (sizeof(uint32_t) * 8)] = value;
-  }
+  __device__ void write_word(size_t const index, uint32_t const value) noexcept;
 
   /*!
    * \brief Direct access to one word of the raw data of the bit
@@ -90,26 +76,21 @@ class BitArray {
    * returned.
    * \return index-th word of the raw bit vector data.
    */
-  __device__ uint32_t word(size_t const index) const noexcept {
-    return d_data_[index / (sizeof(uint32_t) * 8)];
-  }
+  __device__ uint32_t word(size_t const index) const noexcept;
 
   /*!
    * \brief Get the size of the bit array in
    * bits.
    * \return Size of the bit array in bits.
    */
-  __host__ __device__ [[nodiscard]] size_t size() const noexcept {
-    return bit_size_;
-  }
+  __host__ __device__ [[nodiscard]] size_t size() const noexcept;
 
  private:
-  // Size of the bit array in bits.
-  size_t bit_size_ = 0;
-  // Size of the underlying data used to store the bits.
-  size_t size_ = 0;
-  // Array of 32-bit words used to store the content of the bit array.
-  uint32_t* d_data_;
+  size_t bit_size_ = 0; /*!< Size of the array in bits.*/
+  size_t size_ = 0;  /*!< Size of the underlying data used to store the bits.*/
+  uint32_t* d_data_; /*!< Array of 32-bit words used to store the content of the
+                        bit array.*/
+  bool is_copy_;     /*!< Flag to signal whether current object is a copy.*/
 
 };  // class BitArray
 

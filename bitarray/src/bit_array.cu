@@ -33,7 +33,7 @@ __device__ [[nodiscard]] bool BitArray::access(
     size_t const index) const noexcept {
   assert(index < bit_size_);
   // Get position in 32-bit word
-  uint8_t const offset = index & uint32_t(0b11111);
+  uint8_t const offset = 31 - (index & uint32_t(0b11111));
   // Get relevant word, shift and return bit
   return (d_data_[index >> 5] >> offset) & 1UL;
 }
@@ -41,12 +41,12 @@ __device__ [[nodiscard]] bool BitArray::access(
 __device__ void BitArray::write_word(size_t const index,
                                      uint32_t const value) noexcept {
   assert(index < bit_size_);
-  d_data_[index / (sizeof(uint32_t) * 8)] = ~value;
+  d_data_[index / (sizeof(uint32_t) * 8)] = value;
 }
 
 __device__ uint32_t BitArray::word(size_t const index) const noexcept {
   assert(index < bit_size_);
-  return ~d_data_[index / (sizeof(uint32_t) * 8)];
+  return d_data_[index / (sizeof(uint32_t) * 8)];
 }
 
 __host__ __device__ [[nodiscard]] size_t BitArray::size() const noexcept {

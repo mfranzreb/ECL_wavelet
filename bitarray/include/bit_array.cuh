@@ -5,15 +5,8 @@
 
 namespace ecl {
 
-/*!\brief Fixed size GPU bit array for usage in the wavelet tree.
- *
- *
- * **Important:** If you plan on accessing the data directly, note that the
- * bits are stored in reverse order in the 32-bit words. This saves a
- * subtraction, when shifting the bits for access. To be more precise, the
- * bits are stored as follows (for simplicity, shown for 8-bit words):
- *
- * | 7 6 5 4 3 2 1 0 | 15 14 13 12 11 10 9 8 | 23 22 21 20 19 18 17 16 | ...
+/*!
+ * \brief Fixed size GPU bit array for usage in the wavelet tree.
  */
 class BitArray {
  public:
@@ -69,9 +62,6 @@ class BitArray {
   /*!
    * \brief Direct access to one word of the raw data of the bit
    * vector.
-   *
-   * Note that the raw data does not contain the bits from left to right. A
-   * detailed description can be found at the top of this file.
    * \param index Index of a bit that is inside the word that should be
    * returned.
    * \return index-th word of the raw bit vector data.

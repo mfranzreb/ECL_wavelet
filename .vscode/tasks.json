@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build bitarray tests",
+      "type": "shell",
+      "command": "cmake",
+      "dependsOn": ["CMake Configure", "Build target bitarray tests"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "CMake Configure",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["-DCMAKE_BUILD_TYPE=Debug", "-S", ".", "-B", "./build"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Build target bitarray tests",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "./build", "--target", "ecl_BA_tests"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}

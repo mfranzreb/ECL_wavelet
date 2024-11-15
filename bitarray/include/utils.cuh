@@ -12,7 +12,7 @@ __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
   }
 }
 
-__host__ std::pair<int, int> getLaunchConfig(size_t num_warps) {
+__host__ std::pair<int, int> inline getLaunchConfig(size_t num_warps) {
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, 0);
   int warps_per_sm = prop.maxThreadsPerMultiProcessor / 32;
@@ -26,6 +26,7 @@ __host__ std::pair<int, int> getLaunchConfig(size_t num_warps) {
     return {1, num_warps * 32};
   }
   //? Overthinking it?
+  return {1, max_block_size * 32};
 }
 
 /*!
@@ -43,7 +44,7 @@ __host__ __device__ inline T getPrevPowTwo(T n) {
     return 0;
   }
   if constexpr (sizeof(T) == 8) {
-    return (1ULL << (sizeof(T) - __clzll(n) - 1))
+    return (1ULL << (sizeof(T) - __clzll(n) - 1));
   } else {
     return (1UL << (sizeof(T) - __clz(n) - 1));
   }

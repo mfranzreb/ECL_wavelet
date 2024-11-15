@@ -1,56 +1,109 @@
 #include <cassert>
 #include <cstdint>
+#include <numeric>
+#include <vector>
 
 #include "bit_array.cuh"
 #include "utils.cuh"
 
 namespace ecl {
-__host__ BitArray::BitArray(size_t const size)
-    : bit_size_(size), size_((bit_size_ >> 5) + 1), is_copy_(false) {
-  gpuErrchk(cudaMalloc(&d_data_, size_ * sizeof(uint32_t)));
+__host__ BitArray::BitArray(std::vector<size_t> const& sizes)
+    : num_arrays_(sizes.size()), is_copy_(false) {
+  // Allocate memory for sizes on the device
+  gpuErrchk(cudaMallocManaged(&d_bit_sizes_, sizes.size() * sizeof(size_t)));
+  gpuErrchk(cudaMemcpy(d_bit_sizes_, sizes.data(),
+                       sizes.size() * sizeof(size_t), cudaMemcpyHostToDevice));
+
+  std::vector<size_t> array_sizes(sizes.size());
+  for (size_t i = 0; i < sizes.size(); ++i) {
+    array_sizes[i] = (sizes[i] >> 5) + 1;
+  }
+  gpuErrchk(cudaMalloc(&d_sizes_, array_sizes.size() * sizeof(size_t)));
+  gpuErrchk(cudaMemcpy(d_sizes_, array_sizes.data(),
+                       array_sizes.size() * sizeof(size_t),
+                       cudaMemcpyHostToDevice));
+
+  size_t total_size = 0;
+  for (auto const& size : array_sizes) {
+    total_size += size;
+  }
+  gpuErrchk(cudaMalloc(&d_data_, total_size * sizeof(uint32_t)));
+  total_size_ = total_size;
+
+  // perform exclusive sum to get the offsets
+  std::exclusive_scan(array_sizes.begin(), array_sizes.end(),
+                      array_sizes.begin(), 0);
+
+  gpuErrchk(cudaMalloc(&d_offsets_, array_sizes.size() * sizeof(size_t)));
+  gpuErrchk(cudaMemcpy(d_offsets_, array_sizes.data(),
+                       array_sizes.size() * sizeof(size_t),
+                       cudaMemcpyHostToDevice));
 }
 
-__host__ BitArray::BitArray(size_t const size, bool const init_value)
-    : bit_size_(size), size_((bit_size_ >> 5) + 1), is_copy_(false) {
-  gpuErrchk(cudaMalloc(&d_data_, size_ * sizeof(uint32_t)));
-  gpuErrchk(
-      cudaMemset(d_data_, init_value ? ~(0UL) : 0UL, size_ * sizeof(uint32_t)));
+__host__ BitArray::BitArray(std::vector<size_t> const& sizes,
+                            bool const init_value)
+    : BitArray(sizes) {
+  gpuErrchk(cudaMemset(d_data_, init_value ? ~(0UL) : 0UL,
+                       total_size_ * sizeof(uint32_t)));
 }
 
 __host__ BitArray::BitArray(BitArray const& other)
-    : bit_size_(other.bit_size_),
-      size_(other.size_),
-      is_copy_(true),
-      d_data_(other.d_data_) {}
+    : num_arrays_(other.num_arrays_),
+      total_size_(other.total_size_),
+      d_bit_sizes_(other.d_bit_sizes_),
+      d_sizes_(other.d_sizes_),
+      d_data_(other.d_data_),
+      d_offsets_(other.d_offsets_),
+      is_copy_(true) {}
+
+__host__ BitArray::BitArray(BitArray&& other) noexcept {
+  num_arrays_ = other.num_arrays_;
+  total_size_ = other.total_size_;
+  d_bit_sizes_ = other.d_bit_sizes_;
+  d_sizes_ = other.d_sizes_;
+  d_data_ = other.d_data_;
+  d_offsets_ = other.d_offsets_;
+  is_copy_ = other.is_copy_;
+  other.d_data_ = nullptr;
+}
 
 __host__ BitArray::~BitArray() {
   if (not is_copy_) {
     gpuErrchk(cudaFree(d_data_));
+    gpuErrchk(cudaFree(d_bit_sizes_));
+    gpuErrchk(cudaFree(d_offsets_));
+    gpuErrchk(cudaFree(d_sizes_));
   }
 }
 
 __device__ [[nodiscard]] bool BitArray::access(
-    size_t const index) const noexcept {
-  assert(index < bit_size_);
+    size_t const array_index, size_t const index) const noexcept {
+  size_t const array_bit_size = d_bit_sizes_[array_index];
+  assert(index < array_bit_size);
   // Get position in 32-bit word
   uint8_t const offset = 31 - (index & uint32_t(0b11111));
   // Get relevant word, shift and return bit
-  return (d_data_[index >> 5] >> offset) & 1UL;
+  return (d_data_[d_offsets_[array_index] + (index >> 5)] >> offset) & 1UL;
 }
 
-__device__ void BitArray::write_word(size_t const index,
+__device__ void BitArray::write_word(size_t const array_index,
+                                     size_t const index,
                                      uint32_t const value) noexcept {
-  assert(index < bit_size_);
-  d_data_[index / (sizeof(uint32_t) * 8)] = value;
+  size_t const array_bit_size = d_bit_sizes_[array_index];
+  assert(index < array_bit_size);
+  d_data_[d_offsets_[array_index] + (index / (sizeof(uint32_t) * 8))] = value;
 }
 
-__device__ uint32_t BitArray::word(size_t const index) const noexcept {
-  assert(index < bit_size_);
-  return d_data_[index / (sizeof(uint32_t) * 8)];
+__device__ uint32_t BitArray::word(size_t const array_index,
+                                   size_t const index) const noexcept {
+  size_t const array_bit_size = d_bit_sizes_[array_index];
+  assert(index < array_bit_size);
+  return d_data_[d_offsets_[array_index] + (index / (sizeof(uint32_t) * 8))];
 }
 
-__host__ __device__ [[nodiscard]] size_t BitArray::size() const noexcept {
-  return bit_size_;
+__host__ __device__ [[nodiscard]] size_t BitArray::size(
+    size_t const array_index) const noexcept {
+  return d_bit_sizes_[array_index];
 }
 
 }  // namespace ecl

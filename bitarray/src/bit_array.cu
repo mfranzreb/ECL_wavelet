@@ -9,8 +9,14 @@
 namespace ecl {
 __host__ BitArray::BitArray(std::vector<size_t> const& sizes)
     : num_arrays_(sizes.size()), is_copy_(false) {
+  // if any of the sizes is 0, abort
+  for (auto const& size : sizes) {
+    assert(size > 0);
+  }
+  bit_sizes_ = sizes;
+
   // Allocate memory for sizes on the device
-  gpuErrchk(cudaMallocManaged(&d_bit_sizes_, sizes.size() * sizeof(size_t)));
+  gpuErrchk(cudaMalloc(&d_bit_sizes_, sizes.size() * sizeof(size_t)));
   gpuErrchk(cudaMemcpy(d_bit_sizes_, sizes.data(),
                        sizes.size() * sizeof(size_t), cudaMemcpyHostToDevice));
 
@@ -51,6 +57,7 @@ __host__ BitArray::BitArray(BitArray const& other)
     : num_arrays_(other.num_arrays_),
       total_size_(other.total_size_),
       d_bit_sizes_(other.d_bit_sizes_),
+      bit_sizes_(other.bit_sizes_),
       d_sizes_(other.d_sizes_),
       d_data_(other.d_data_),
       d_offsets_(other.d_offsets_),
@@ -60,6 +67,7 @@ __host__ BitArray::BitArray(BitArray&& other) noexcept {
   num_arrays_ = other.num_arrays_;
   total_size_ = other.total_size_;
   d_bit_sizes_ = other.d_bit_sizes_;
+  bit_sizes_ = other.bit_sizes_;
   d_sizes_ = other.d_sizes_;
   d_data_ = other.d_data_;
   d_offsets_ = other.d_offsets_;
@@ -78,34 +86,65 @@ __host__ BitArray::~BitArray() {
 
 __device__ [[nodiscard]] bool BitArray::access(
     size_t const array_index, size_t const index) const noexcept {
-  size_t const array_bit_size = d_bit_sizes_[array_index];
-  assert(index < array_bit_size);
+  assert(array_index < num_arrays_);
+  assert(index < d_bit_sizes_[array_index]);
   // Get position in 32-bit word
   uint8_t const offset = 31 - (index & uint32_t(0b11111));
   // Get relevant word, shift and return bit
   return (d_data_[d_offsets_[array_index] + (index >> 5)] >> offset) & 1UL;
 }
 
-__device__ void BitArray::write_word(size_t const array_index,
-                                     size_t const index,
-                                     uint32_t const value) noexcept {
-  size_t const array_bit_size = d_bit_sizes_[array_index];
-  assert(index < array_bit_size);
+__device__ void BitArray::writeWord(size_t const array_index,
+                                    size_t const index,
+                                    uint32_t const value) noexcept {
+  assert(array_index < num_arrays_);
+  assert(index < d_sizes_[array_index]);
+  d_data_[d_offsets_[array_index] + index] = value;
+}
+
+__device__ void BitArray::writeWordAtBit(size_t const array_index,
+                                         size_t const index,
+                                         uint32_t const value) noexcept {
+  assert(array_index < num_arrays_);
+  assert(index < d_bit_sizes_[array_index]);
   d_data_[d_offsets_[array_index] + (index / (sizeof(uint32_t) * 8))] = value;
 }
 
 __device__ uint32_t BitArray::word(size_t const array_index,
                                    size_t const index) const noexcept {
-  size_t const array_bit_size = d_bit_sizes_[array_index];
-  assert(index < array_bit_size);
+  assert(array_index < num_arrays_);
+  assert(index < d_sizes_[array_index]);
+  return d_data_[d_offsets_[array_index] + index];
+}
+
+__device__ uint32_t BitArray::wordAtBit(size_t const array_index,
+                                        size_t const index) const noexcept {
+  assert(array_index < num_arrays_);
+  assert(index < d_bit_sizes_[array_index]);
   return d_data_[d_offsets_[array_index] + (index / (sizeof(uint32_t) * 8))];
 }
 
-__host__ __device__ [[nodiscard]] size_t BitArray::size(
+__device__ [[nodiscard]] size_t BitArray::size(
     size_t const array_index) const noexcept {
+  assert(array_index < num_arrays_);
   return d_bit_sizes_[array_index];
 }
 
+__host__ [[nodiscard]] size_t BitArray::sizeHost(
+    size_t const array_index) const noexcept {
+  assert(array_index < num_arrays_);
+  return bit_sizes_[array_index];
+}
+
+__device__ [[nodiscard]] size_t BitArray::sizeInWords(
+    size_t const array_index) const noexcept {
+  assert(array_index < num_arrays_);
+  return d_sizes_[array_index];
+}
+
+__host__ __device__ [[nodiscard]] size_t BitArray::numArrays() const noexcept {
+  return num_arrays_;
+}
 }  // namespace ecl
 
 /******************************************************************************/

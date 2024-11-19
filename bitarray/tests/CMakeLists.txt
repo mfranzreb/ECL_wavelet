@@ -1,4 +1,4 @@
-set(TARGET ecl_BA_tests)
+set(TARGET ecl_BA_RS_tests)
 
 # Collect all the source files in the ./tests directory
 file(GLOB TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/*.cu")

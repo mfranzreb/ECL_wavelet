@@ -17,9 +17,19 @@ __global__ void accessKernel(BitArray bit_array, size_t array_index,
   *output = bit_array.access(array_index, index);
 }
 
+__global__ void writeWordAtBitKernel(BitArray bit_array, size_t array_index,
+                                     size_t index, uint32_t value) {
+  bit_array.writeWordAtBit(array_index, index, value);
+}
+
 __global__ void writeWordKernel(BitArray bit_array, size_t array_index,
                                 size_t index, uint32_t value) {
-  bit_array.write_word(array_index, index, value);
+  bit_array.writeWord(array_index, index, value);
+}
+
+__global__ void wordAtBitKernel(BitArray bit_array, size_t array_index,
+                                size_t index, uint32_t* output) {
+  *output = bit_array.wordAtBit(array_index, index);
 }
 
 __global__ void wordKernel(BitArray bit_array, size_t array_index, size_t index,
@@ -31,27 +41,28 @@ using BitArrayBoolTest = BitArrayTest<bool>;
 // Test the constructor that initializes with a specific size
 TEST_F(BitArrayBoolTest, ConstructorWithSize) {
   BitArray bit_array(std::vector<size_t>{64});
-  EXPECT_EQ(bit_array.size(0), 64);
+  EXPECT_EQ(bit_array.sizeHost(0), 64);
   // Additional checks could go here if necessary
   std::vector<size_t> sizes{2, 4, 8, 64, 128, 1024};
   BitArray new_bit_array(sizes);
   for (size_t i = 0; i < sizes.size(); ++i) {
-    EXPECT_EQ(new_bit_array.size(i), sizes[i]);
+    EXPECT_EQ(new_bit_array.sizeHost(i), sizes[i]);
   }
 }
 
-// Test the constructor that initializes with a specific size and initial value
+// Test the constructor that initializes with a specific size and initial
+// value
 TEST_F(BitArrayBoolTest, ConstructorWithSizeAndInitValue) {
   BitArray bit_array(std::vector<size_t>{64}, true);
   for (size_t i = 0; i < 64; ++i) {
     accessKernel<<<1, 1>>>(bit_array, 0, i, result);
-    cudaDeviceSynchronize();
+    kernelCheck();
     EXPECT_TRUE(*result);
   }
   BitArray bit_array_false(std::vector<size_t>{64}, false);
   for (size_t i = 0; i < 64; ++i) {
     accessKernel<<<1, 1>>>(bit_array_false, 0, i, result);
-    cudaDeviceSynchronize();
+    kernelCheck();
     EXPECT_FALSE(*result);
   }
 
@@ -61,7 +72,7 @@ TEST_F(BitArrayBoolTest, ConstructorWithSizeAndInitValue) {
   for (size_t i = 0; i < sizes.size(); ++i) {
     for (size_t j = 0; j < sizes[i]; ++j) {
       accessKernel<<<1, 1>>>(new_bit_array, i, j, result);
-      cudaDeviceSynchronize();
+      kernelCheck();
       EXPECT_TRUE(*result);
     }
   }
@@ -69,7 +80,7 @@ TEST_F(BitArrayBoolTest, ConstructorWithSizeAndInitValue) {
   for (size_t i = 0; i < sizes.size(); ++i) {
     for (size_t j = 0; j < sizes[i]; ++j) {
       accessKernel<<<1, 1>>>(new_bit_array_false, i, j, result);
-      cudaDeviceSynchronize();
+      kernelCheck();
       EXPECT_FALSE(*result);
     }
   }
@@ -81,8 +92,8 @@ TEST_F(BitArrayBoolTest, AccessAndWriteBits) {
   uint8_t bits_in_last_word = 5;
   BitArray bit_array(
       std::vector<size_t>{32 * (num_words - 1) + bits_in_last_word}, false);
-  // for each word in the bit array, set a random bit, and check that accessing
-  // it works.
+  // for each word in the bit array, set a random bit, and check that
+  // accessing it works.
   for (int i = 0; i < num_words; ++i) {
     uint8_t bit;
     if (i == num_words - 1) {
@@ -91,16 +102,16 @@ TEST_F(BitArrayBoolTest, AccessAndWriteBits) {
       bit = rand() % 32;
     }
     uint32_t word = 1UL << (31 - bit);
-    writeWordKernel<<<1, 1>>>(bit_array, 0, 32 * i, word);
-    cudaDeviceSynchronize();
+    writeWordAtBitKernel<<<1, 1>>>(bit_array, 0, 32 * i, word);
+    kernelCheck();
     accessKernel<<<1, 1>>>(bit_array, 0, 32 * i + bit, result);
-    cudaDeviceSynchronize();
+    kernelCheck();
     EXPECT_TRUE(*result);
     // check that all other bits are unchanged
     for (int j = 32 * i; j < 32 * (i + 1); ++j) {
-      if (j != 32 * i + bit && j < bit_array.size(0)) {
+      if (j != 32 * i + bit && j < bit_array.sizeHost(0)) {
         accessKernel<<<1, 1>>>(bit_array, 0, j, result);
-        cudaDeviceSynchronize();
+        kernelCheck();
         EXPECT_FALSE(*result);
       }
     }
@@ -110,19 +121,20 @@ TEST_F(BitArrayBoolTest, AccessAndWriteBits) {
   std::vector<size_t> sizes{2, 4, 8, 64, 128, 1024};
   BitArray new_bit_array(sizes, false);
 
-  writeWordKernel<<<1, 1>>>(new_bit_array, 2, 0, 1UL << 30);
+  writeWordAtBitKernel<<<1, 1>>>(new_bit_array, 2, 0, 1UL << 30);
+  kernelCheck();
   accessKernel<<<1, 1>>>(new_bit_array, 2, 0, result);
-  cudaDeviceSynchronize();
+  kernelCheck();
   EXPECT_FALSE(*result);
   accessKernel<<<1, 1>>>(new_bit_array, 2, 1, result);
-  cudaDeviceSynchronize();
+  kernelCheck();
   EXPECT_TRUE(*result);
   // check that all other arrays are unchanged
   for (size_t i = 0; i < sizes.size(); ++i) {
     if (i != 2) {
       for (size_t j = 0; j < sizes[i]; ++j) {
         accessKernel<<<1, 1>>>(new_bit_array, i, j, result);
-        cudaDeviceSynchronize();
+        kernelCheck();
         EXPECT_FALSE(*result);
       }
     }
@@ -135,26 +147,26 @@ TEST_F(BitArrayWordTest, Word) {
   BitArray bit_array(std::vector<size_t>{64}, false);
   uint32_t word = (1UL << 10) - 9;
 
-  writeWordKernel<<<1, 1>>>(bit_array, 0, 0, word);
-  cudaDeviceSynchronize();
-  wordKernel<<<1, 1>>>(bit_array, 0, 0, result);
-  cudaDeviceSynchronize();
+  writeWordAtBitKernel<<<1, 1>>>(bit_array, 0, 0, word);
+  kernelCheck();
+  wordAtBitKernel<<<1, 1>>>(bit_array, 0, 0, result);
+  kernelCheck();
   EXPECT_EQ(*result, word);
 
   std::vector<size_t> sizes{2, 4, 8, 64, 128, 1024};
   BitArray new_bit_array(sizes, false);
-  writeWordKernel<<<1, 1>>>(new_bit_array, 2, 0, word);
-  cudaDeviceSynchronize();
-  wordKernel<<<1, 1>>>(new_bit_array, 2, 0, result);
-  cudaDeviceSynchronize();
+  writeWordAtBitKernel<<<1, 1>>>(new_bit_array, 2, 0, word);
+  kernelCheck();
+  wordAtBitKernel<<<1, 1>>>(new_bit_array, 2, 0, result);
+  kernelCheck();
   EXPECT_EQ(*result, word);
 
   // check that all other arrays are unchanged
   for (size_t i = 0; i < sizes.size(); ++i) {
     if (i != 2) {
       for (size_t j = 0; j < sizes[i]; j += 32) {
-        wordKernel<<<1, 1>>>(new_bit_array, i, j, result);
-        cudaDeviceSynchronize();
+        wordAtBitKernel<<<1, 1>>>(new_bit_array, i, j, result);
+        kernelCheck();
         EXPECT_EQ(*result, 0);
       }
     }

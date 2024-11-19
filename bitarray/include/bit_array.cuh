@@ -56,22 +56,41 @@ class BitArray {
   /*!
    * \brief Access operator to write to a whole word of the bit array.
    * \param array_index Index of the bit array to be written to.
+   * \param index Index of the word to be written to.
+   * \param value Word to be written.
+   */
+  __device__ void writeWord(size_t const array_index, size_t const index,
+                            uint32_t const value) noexcept;
+
+  /*!
+   * \brief Access operator to write to a whole word of the bit array.
+   * \param array_index Index of the bit array to be written to.
    * \param index Index of a bit that is inside the word to be written to.
    * \param value Word to be written, where the first bit is at the left.
    */
-  __device__ void write_word(size_t const array_index, size_t const index,
-                             uint32_t const value) noexcept;
+  __device__ void writeWordAtBit(size_t const array_index, size_t const index,
+                                 uint32_t const value) noexcept;
 
   /*!
    * \brief Direct access to one word of the raw data of the bit
-   * vector.
+   * array.
    * \param array_index Index of the bit array to be read from.
-   * \param index Index of a bit that is inside the word that should be
-   * returned.
-   * \return index-th word of the raw bit vector data.
+   * \param index Index of the word that should be returned.
+   * \return index-th word of the raw bit array data.
    */
   __device__ [[nodiscard]] uint32_t word(size_t const array_index,
                                          size_t const index) const noexcept;
+
+  /*!
+   * \brief Direct access to one word of the raw data of the bit
+   * array.
+   * \param array_index Index of the bit array to be read from.
+   * \param index Index of a bit that is inside the word that should be
+   * returned.
+   * \return index-th word of the raw bit array data.
+   */
+  __device__ [[nodiscard]] uint32_t wordAtBit(
+      size_t const array_index, size_t const index) const noexcept;
 
   /*!
    * \brief Get the size of the bit array in
@@ -79,8 +98,19 @@ class BitArray {
    * \param array_index Index of the bit array to get the size of.
    * \return Size of the bit array in bits.
    */
-  __host__ __device__ [[nodiscard]] size_t size(
+  __device__ [[nodiscard]] size_t size(size_t const array_index) const noexcept;
+
+  __host__ [[nodiscard]] size_t sizeHost(
       size_t const array_index) const noexcept;
+
+  __device__ [[nodiscard]] size_t sizeInWords(
+      size_t const array_index) const noexcept;
+
+  /*!
+   * \brief Get the number of bit arrays stored in the global array.
+   * \return Number of bit arrays stored in the global array.
+   */
+  __host__ __device__ [[nodiscard]] size_t numArrays() const noexcept;
 
   // TODO: add counter per copied class
   // TODO template word size
@@ -88,6 +118,8 @@ class BitArray {
   size_t num_arrays_;   /*!< Number of bit arrays stored in the global array.*/
   size_t total_size_;   /*!< Total size of the global array in words.*/
   size_t* d_bit_sizes_; /*!< Size of each array in bits.*/
+  std::vector<size_t>
+      bit_sizes_; /*!< Size of each array in bits. Only acessible from host.*/
   size_t* d_sizes_;
   /*!< Size of the underlying data used to store the bits.*/  // OPT: could
                                                               // be infered

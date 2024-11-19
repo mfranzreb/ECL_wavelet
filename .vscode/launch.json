@@ -5,12 +5,35 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug bitarray tests",
+      "name": "Debug bitarray tests CUDA",
       "type": "cuda-gdb",
       "request": "launch",
-      "program": "${workspaceFolder}/build/bitarray/tests/ecl_BA_tests",
+      "program": "${workspaceFolder}/build/bitarray/tests/ecl_BA_RS_tests",
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build bitarray tests"
+    },
+    {
+      "name": "Debug bitarray tests",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bitarray/tests/ecl_BA_RS_tests",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        }
+      ],
       "preLaunchTask": "build bitarray tests"
     }
   ]

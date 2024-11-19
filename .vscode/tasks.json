@@ -13,7 +13,14 @@
       "label": "CMake Configure",
       "type": "shell",
       "command": "cmake",
-      "args": ["-DCMAKE_BUILD_TYPE=Debug", "-S", ".", "-B", "./build"],
+      "args": [
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DBUILD_TESTS=ON",
+        "-S",
+        ".",
+        "-B",
+        "./build"
+      ],
       "group": {
         "kind": "build",
         "isDefault": true
@@ -23,7 +30,7 @@
       "label": "Build target bitarray tests",
       "type": "shell",
       "command": "cmake",
-      "args": ["--build", "./build", "--target", "ecl_BA_tests"],
+      "args": ["--build", "./build", "--target", "ecl_BA_RS_tests"],
       "group": {
         "kind": "build",
         "isDefault": true

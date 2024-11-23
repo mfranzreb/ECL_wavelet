@@ -67,6 +67,12 @@
     "stop_token": "cpp",
     "thread": "cpp",
     "cinttypes": "cpp",
-    "variant": "cpp"
+    "variant": "cpp",
+    "strstream": "cpp",
+    "bitset": "cpp",
+    "complex": "cpp",
+    "cfenv": "cpp",
+    "typeindex": "cpp",
+    "*.ipp": "cpp"
   }
 }

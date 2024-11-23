@@ -22,19 +22,15 @@ __global__ void writeWordAtBitKernel(BitArray bit_array, size_t array_index,
   bit_array.writeWordAtBit(array_index, index, value);
 }
 
-__global__ void writeWordKernel(BitArray bit_array, size_t array_index,
-                                size_t index, uint32_t value) {
-  bit_array.writeWord(array_index, index, value);
-}
-
 __global__ void wordAtBitKernel(BitArray bit_array, size_t array_index,
                                 size_t index, uint32_t* output) {
   *output = bit_array.wordAtBit(array_index, index);
 }
 
-__global__ void wordKernel(BitArray bit_array, size_t array_index, size_t index,
-                           uint32_t* output) {
-  *output = bit_array.word(array_index, index);
+__global__ void partialWordKernel(BitArray bit_array, size_t array_index,
+                                  size_t index, uint8_t bit_index,
+                                  uint32_t* output) {
+  *output = bit_array.partialWord(array_index, index, bit_index);
 }
 
 using BitArrayBoolTest = BitArrayTest<bool>;
@@ -101,7 +97,7 @@ TEST_F(BitArrayBoolTest, AccessAndWriteBits) {
     } else {
       bit = rand() % 32;
     }
-    uint32_t word = 1UL << (31 - bit);
+    uint32_t word = 1UL << bit;
     writeWordAtBitKernel<<<1, 1>>>(bit_array, 0, 32 * i, word);
     kernelCheck();
     accessKernel<<<1, 1>>>(bit_array, 0, 32 * i + bit, result);
@@ -121,7 +117,7 @@ TEST_F(BitArrayBoolTest, AccessAndWriteBits) {
   std::vector<size_t> sizes{2, 4, 8, 64, 128, 1024};
   BitArray new_bit_array(sizes, false);
 
-  writeWordAtBitKernel<<<1, 1>>>(new_bit_array, 2, 0, 1UL << 30);
+  writeWordAtBitKernel<<<1, 1>>>(new_bit_array, 2, 0, 1UL << 1);
   kernelCheck();
   accessKernel<<<1, 1>>>(new_bit_array, 2, 0, result);
   kernelCheck();
@@ -171,5 +167,26 @@ TEST_F(BitArrayWordTest, Word) {
       }
     }
   }
+}
+
+TEST_F(BitArrayWordTest, PartialWord) {
+  BitArray bit_array(std::vector<size_t>{64}, false);
+  uint32_t word = ~0;
+
+  writeWordAtBitKernel<<<1, 1>>>(bit_array, 0, 0, word);
+  kernelCheck();
+  partialWordKernel<<<1, 1>>>(bit_array, 0, 0, 4, result);
+  kernelCheck();
+  EXPECT_EQ(*result, 0b1111);
+
+  word = 0b1010'1010'1010'1010'1010'1010'1010'1010;
+  writeWordAtBitKernel<<<1, 1>>>(bit_array, 0, 0, word);
+  kernelCheck();
+  partialWordKernel<<<1, 1>>>(bit_array, 0, 0, 4, result);
+  kernelCheck();
+  EXPECT_EQ(*result, 0b1010);
+  partialWordKernel<<<1, 1>>>(bit_array, 0, 0, 9, result);
+  kernelCheck();
+  EXPECT_EQ(*result, 0b0'1010'1010);
 }
 }  // namespace ecl

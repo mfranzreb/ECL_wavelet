@@ -5,8 +5,8 @@ project(ECLWavelet VERSION 0.1.0 LANGUAGES CXX CUDA)
 
 option(BUILD_TESTS "Build tests" OFF)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CUDA_STANDARD 20)
 
 #if in Debug mode, enable CUDA debugging
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
@@ -34,7 +34,6 @@ message(STATUS "CUDAToolkit_FLAGS: ${CMAKE_CUDA_FLAGS}")
 
 if(BUILD_TESTS)
     add_subdirectory(third_party/googletest)
-    find_package(GTest REQUIRED)
     add_subdirectory(bitarray/tests)
     #add_subdirectory(tree/tests)
     enable_testing()

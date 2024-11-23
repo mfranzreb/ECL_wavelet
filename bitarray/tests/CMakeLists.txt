@@ -14,11 +14,11 @@ target_link_libraries(${TARGET}
     PRIVATE ecl_bitarray
     OpenMP::OpenMP_CXX
     CUDA::cudart
-    GTest::GTest 
-    GTest::Main
+    gtest
+    gtest_main
 )
 
-target_compile_features(${TARGET} PUBLIC cxx_std_17)
+target_compile_features(${TARGET} PUBLIC cxx_std_20)
 
 set_property(TARGET ${TARGET} PROPERTY CUDA_ARCHITECTURES native)
 

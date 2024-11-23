@@ -8,6 +8,11 @@ namespace ecl {
 
 /*!
  * \brief Fixed size GPU bit array for usage in the wavelet tree.
+ * **Important:** If you plan on accessing the data directly, note that the
+ * bits are stored in reverse order in the 32-bit words. To be more precise, the
+ * bits are stored as follows (for simplicity, shown for 8-bit words):
+ *
+ * | 7 6 5 4 3 2 1 0 | 15 14 13 12 11 10 9 8 | 23 22 21 20 19 18 17 16 | ...
  */
 class BitArray {
  public:
@@ -57,7 +62,8 @@ class BitArray {
    * \brief Access operator to write to a whole word of the bit array.
    * \param array_index Index of the bit array to be written to.
    * \param index Index of the word to be written to.
-   * \param value Word to be written.
+   * \param value Word to be written. Least significant bit corresponds to the
+   * first bit of the word.
    */
   __device__ void writeWord(size_t const array_index, size_t const index,
                             uint32_t const value) noexcept;
@@ -66,7 +72,8 @@ class BitArray {
    * \brief Access operator to write to a whole word of the bit array.
    * \param array_index Index of the bit array to be written to.
    * \param index Index of a bit that is inside the word to be written to.
-   * \param value Word to be written, where the first bit is at the left.
+   * \param value Word to be written. Least significant bit corresponds to the
+   * first bit of the word.
    */
   __device__ void writeWordAtBit(size_t const array_index, size_t const index,
                                  uint32_t const value) noexcept;
@@ -76,7 +83,8 @@ class BitArray {
    * array.
    * \param array_index Index of the bit array to be read from.
    * \param index Index of the word that should be returned.
-   * \return index-th word of the raw bit array data.
+   * \return index-th word of the raw bit array data. Least significant bit
+   * corresponds to the first bit of the word.
    */
   __device__ [[nodiscard]] uint32_t word(size_t const array_index,
                                          size_t const index) const noexcept;
@@ -87,11 +95,25 @@ class BitArray {
    * \param array_index Index of the bit array to be read from.
    * \param index Index of a bit that is inside the word that should be
    * returned.
-   * \return index-th word of the raw bit array data.
+   * \return index-th word of the raw bit array data. Least significant bit
+   * corresponds to the first bit of the word.
    */
   __device__ [[nodiscard]] uint32_t wordAtBit(
       size_t const array_index, size_t const index) const noexcept;
 
+  /*!
+   * \brief Direct access to one word of the raw data of the bit
+   * array.
+   * \param array_index Index of the bit array to be read from.
+   * \param index Index of the word that should be accessed.
+   * \param bit_index Index up to which the bits should be returned. Exclusive.
+   * \return index-th word of the raw bit array data, with the bits [0,
+   * bit_index) left unchanged, and all others set to 0. Least significant bit
+   * corresponds to the first bit of the word.
+   */
+  __device__ [[nodiscard]] uint32_t partialWord(
+      size_t const array_index, size_t const index,
+      uint8_t const bit_index) const noexcept;
   /*!
    * \brief Get the size of the bit array in
    * bits.
@@ -100,9 +122,16 @@ class BitArray {
    */
   __device__ [[nodiscard]] size_t size(size_t const array_index) const noexcept;
 
+  /*! @copydoc size(size_t const) */
   __host__ [[nodiscard]] size_t sizeHost(
       size_t const array_index) const noexcept;
 
+  /*!
+   * \brief Get the size of the bit array in
+   * words.
+   * \param array_index Index of the bit array to get the size of.
+   * \return Size of the bit array in words.
+   */
   __device__ [[nodiscard]] size_t sizeInWords(
       size_t const array_index) const noexcept;
 

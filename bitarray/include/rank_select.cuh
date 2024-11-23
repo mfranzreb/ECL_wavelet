@@ -53,11 +53,12 @@ class RankSelect {
    * \param index Index the rank of zeros is computed for.
    * \param t_id Thread ID, has to start at 0.
    * \param num_threads Number of threads accessing the function.
-   * \return Number of zeros (rank) before position \c index.
+   * \return Number of zeros (rank) before position \c index, i.e. in the slice
+   * [0, i).
    */
   __device__ [[nodiscard]] size_t rank0(uint32_t const array_index,
-                                        size_t index, int t_id,
-                                        int num_threads) const;
+                                        size_t const index, uint32_t const t_id,
+                                        uint32_t const num_threads);
 
   /*!
    * \brief Computes rank of ones.
@@ -66,26 +67,28 @@ class RankSelect {
    * \param t_id Thread ID, has to start at 0.
    * \param num_threads Number of threads accessing the function. Right now 32
    * is assumed
-   * \return Numbers of ones (rank) before position \c index.
+   * \return Numbers of ones (rank) before position \c index, i.e. in the slice
+   * [0, i).
    */
   __device__ [[nodiscard]] size_t rank1(uint32_t const array_index,
-                                        size_t index, int t_id,
-                                        int num_threads) const;
+                                        size_t const index, uint32_t const t_id,
+                                        uint32_t const num_threads);
 
   /*!
    * \brief Get position of i-th zero or one. Starting from 1.
    * \tparam Value 0 for zeros, 1 for ones.
-   * * \param array_index Index of the bit array to be used.
-   * \param i Rank of zero/one the position is searched for.
+   * \param array_index Index of the bit array to be used.
+   * \param i i-th zero or one.
    * \param local_t_id Thread ID, has to start at 0.
    * \param num_threads Number of threads accessing the function. Right now 32
    * is assumed.
-   * \return Position of the i-th zero/one.
+   * \return Position of the i-th zero/one. If i is larger than the number of
+   * zeros/ones, the function returns the size of the bit array.
    */
-  template <int Value>
+  template <uint32_t Value>
   __device__ [[nodiscard]] size_t select(uint32_t const array_index, size_t i,
-                                         int const local_t_id,
-                                         int const num_threads);
+                                         uint32_t const local_t_id,
+                                         uint32_t const num_threads);
 
   /*!
    * \brief Get the number of L1 blocks for a bit array.
@@ -95,6 +98,8 @@ class RankSelect {
   __device__ [[nodiscard]] size_t getNumL1Blocks(
       uint32_t const array_index) const;
 
+  /*! @copydoc RankSelect::getNumL1Blocks
+   */
   __host__ [[nodiscard]] size_t getNumL1BlocksHost(
       uint32_t const array_index) const;
 
@@ -106,7 +111,17 @@ class RankSelect {
   __device__ [[nodiscard]] size_t getNumL2Blocks(
       uint32_t const array_index) const;
 
+  /*! @copydoc RankSelect::getNumL2Blocks
+   */
   __host__ [[nodiscard]] size_t getNumL2BlocksHost(
+      uint32_t const array_index) const;
+
+  /*!
+   * \brief Get the number of L2 blocks in the last L1 block for a bit array.
+   * \param array_index Index of the bit array to be used.
+   * \return Number of L2 blocks in the last L1 block.
+   */
+  __device__ [[nodiscard]] size_t getNumLastL2Blocks(
       uint32_t const array_index) const;
 
   /*!
@@ -131,11 +146,17 @@ class RankSelect {
    * \brief Get an L1 entry for a bit array.
    * \param array_index Index of the bit array to be used.
    * \param index Local index of the L1 entry to be returned.
-   * \return Pointer to L1 entry.
+   * \return L1 entry.
    */
   __device__ [[nodiscard]] RankSelectConfig::L1_TYPE getL1Entry(
       uint32_t const array_index, size_t const index) const;
 
+  /*!
+   * \brief Get a device pointer to an L1 entry for a bit array.
+   * \param array_index Index of the bit array to be used.
+   * \param index Local index of the L1 entry to be returned.
+   * \return Pointer to L1 entry.
+   */
   __host__ [[nodiscard]] RankSelectConfig::L1_TYPE* getL1EntryPointer(
       uint32_t const array_index, size_t const index) const;
 
@@ -165,23 +186,26 @@ class RankSelect {
  private:
   /*!
    * \brief Helper function to share a variable between all threads in a warp.
-   * \tparam T Type of the variable to be shared.
-   * \param condition Condition to be met for sharing the variable. Only one
-   * thread should fulfill it.
+   * \tparam T Type of the variable to be shared. Must be an integral or
+   * floating point type.
+   * \param condition Condition to be met for sharing the
+   * variable. Only one thread should fulfill it.
    * \param var Variable to be shared.
+   * \param mask Mask representing the threads that should share the variable.
    */
   template <typename T>
-  __device__ void shareVar(bool condition, size_t& var);
+  __device__ void shareVar(bool condition, T& var, uint32_t const mask);
 
   /*!
-   * \brief Get the position of the n-th 0 or 1 bit in a word.
+   * \brief Get the position of the n-th 0 or 1 bit in a word, starting from the
+   * least significant bit.
    * \tparam Value 0 for zeros, 1 for ones.
-   * \param n Rank of the bit.
+   * \param n Rank of the bit. Starts from 1.
    * \param word Word the bit is in.
-   * \return Position of the n-th bit.
+   * \return Position of the n-th bit. Starts from 0.
    */
-  template <int Value>
-  __device__ [[nodiscard]] size_t getNBitPos(size_t n, uint32_t word);
+  template <uint32_t Value>
+  __device__ [[nodiscard]] uint8_t getNBitPos(uint8_t const n, uint32_t word);
 
   RankSelectConfig::L1_TYPE*
       d_l1_indices_; /*!< Device pointer to L1 indices for all arrays.*/
@@ -216,15 +240,16 @@ __host__ RankSelect createRankSelectStructures(BitArray&& bit_array);
  * \brief Fill L2 indices and prepare L1 indices for prefix sum.
  * \param rank_select RankSelect object to fill indices for.
  * \param array_index Index of the bit array to be used.
- * \param num_blocks Number of blocks the kernel is called with.
- * \param entries_per_warp Number of entries to be processed by a warp.
  */
 __global__ void calculateL2EntriesKernel(RankSelect rank_select,
-                                         uint32_t const array_index,
-                                         uint32_t const entries_per_warp);
+                                         uint32_t const array_index);
 
+/*!
+ * \brief Fill L2 indices for last L1 block of a bit array.
+ * \param rank_select RankSelect object to do the calculation for.
+ * \param array_index Index of the bit array to be used.
+ */
 __global__ void calculateLastL1BlockKernel(RankSelect rank_select,
                                            uint32_t const array_index,
-                                           uint32_t const entries_per_warp,
                                            uint8_t const num_last_l2_blocks);
 }  // namespace ecl

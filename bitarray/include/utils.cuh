@@ -77,6 +77,12 @@ __host__ std::pair<int, int> inline getLaunchConfig(size_t num_warps,
   return best_match;  // Return the best match found
 }
 
+__host__ inline int getMaxBlockSize() {
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, 0);
+  return prop.maxThreadsPerBlock;
+}
+
 /*!
  * \brief Find the previous power of two that is smaller or equal to n.
  * \tparam T Type of the number to find the previous power of two for. Must be
@@ -132,8 +138,11 @@ __host__ inline int getWarpSize() {
   return prop.warpSize;
 }
 
+#define gpuErrchkInternal(ans, file, line) \
+  { gpuAssert((ans), file, line); }
+
 #define kernelCheck() kernelCheckFunc(__FILE__, __LINE__)
 __host__ inline void kernelCheckFunc(const char *file, int line) {
-  gpuErrchk(cudaDeviceSynchronize());
-  gpuErrchk(cudaPeekAtLastError());
+  gpuErrchkInternal(cudaDeviceSynchronize(), file, line);
+  gpuErrchkInternal(cudaPeekAtLastError(), file, line);
 }

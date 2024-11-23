@@ -89,7 +89,7 @@ __device__ [[nodiscard]] bool BitArray::access(
   assert(array_index < num_arrays_);
   assert(index < d_bit_sizes_[array_index]);
   // Get position in 32-bit word
-  uint8_t const offset = 31 - (index & uint32_t(0b11111));
+  uint8_t const offset = index & uint32_t(0b11111);
   // Get relevant word, shift and return bit
   return (d_data_[d_offsets_[array_index] + (index >> 5)] >> offset) & 1UL;
 }
@@ -122,6 +122,15 @@ __device__ uint32_t BitArray::wordAtBit(size_t const array_index,
   assert(array_index < num_arrays_);
   assert(index < d_bit_sizes_[array_index]);
   return d_data_[d_offsets_[array_index] + (index / (sizeof(uint32_t) * 8))];
+}
+
+__device__ [[nodiscard]] uint32_t BitArray::partialWord(
+    size_t const array_index, size_t const index,
+    uint8_t const bit_index) const noexcept {
+  assert(array_index < num_arrays_);
+  assert(index < d_sizes_[array_index]);
+  assert(bit_index <= 32);
+  return word(array_index, index) & ((1UL << bit_index) - 1);
 }
 
 __device__ [[nodiscard]] size_t BitArray::size(

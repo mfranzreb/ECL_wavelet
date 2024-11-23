@@ -18,7 +18,7 @@ target_link_libraries(${TARGET}
     CUDA::cudart
 )
 
-target_compile_features(${TARGET} PUBLIC cxx_std_17)
+target_compile_features(${TARGET} PUBLIC cxx_std_20)
 
 set_property(TARGET ${TARGET} PROPERTY CUDA_ARCHITECTURES native)
 

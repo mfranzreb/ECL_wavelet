@@ -341,7 +341,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
     max_size = std::max(max_size, sizes[i]);
     helpers.emplace_back(random_nums[i]);
   }
-  BitArray bit_array(sizes);
+  BitArray bit_array(sizes, false);
   // For each array, go through each word and set it to a random number
   random_nums.resize((max_size + 31) / 32);
   generateRandomNums(random_nums, 0U, std::numeric_limits<uint32_t>::max());

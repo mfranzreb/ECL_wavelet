@@ -178,7 +178,7 @@ __device__ [[nodiscard]] size_t RankSelect::select(uint32_t const array_index,
   size_t current_val = 0;
   uint32_t active_threads = ~0;
   active_threads = __ballot_sync(active_threads, j < num_l1_blocks);
-  for (; j < num_l1_blocks; j += num_threads) {
+  while (j < num_l1_blocks) {
     if constexpr (Value == 0) {
       current_val =
           j * RankSelectConfig::L1_BIT_SIZE - d_l1_indices_[l1_offset + j];
@@ -193,8 +193,8 @@ __device__ [[nodiscard]] size_t RankSelect::select(uint32_t const array_index,
       j = result - 1;
       break;
     }
-    active_threads =
-        __ballot_sync(active_threads, (j + num_threads) < num_l1_blocks);
+    j += num_threads;
+    active_threads = __ballot_sync(active_threads, j < num_l1_blocks);
   }
   shareVar<size_t>(result != 0, result, ~0);
   if (result != 0) {
@@ -221,7 +221,7 @@ __device__ [[nodiscard]] size_t RankSelect::select(uint32_t const array_index,
   active_threads = ~0;
   j = local_t_id + 1;
   active_threads = __ballot_sync(active_threads, j < l1_block_length);
-  for (; j < l1_block_length; j += num_threads) {
+  while (j < l1_block_length) {
     if constexpr (Value == 0) {
       current_val =
           j * RankSelectConfig::L2_BIT_SIZE -
@@ -240,8 +240,9 @@ __device__ [[nodiscard]] size_t RankSelect::select(uint32_t const array_index,
       j = result - 1;
       break;
     }
-    active_threads =
-        __ballot_sync(active_threads, (j + num_threads) < l1_block_length);
+    j += num_threads;
+    __syncwarp(active_threads);
+    active_threads = __ballot_sync(active_threads, j < l1_block_length);
   }
   shareVar<size_t>(result != 0, result, ~0);
   if (result != 0) {
@@ -274,12 +275,22 @@ __device__ [[nodiscard]] size_t RankSelect::select(uint32_t const array_index,
       result == 0 ? bit_array_.size(array_index) - current_bit
                   : RankSelectConfig::L2_BIT_SIZE;
   result = 0;
-  active_threads = ~0;
-  j = local_t_id * sizeof(uint32_t) * 8;
-  active_threads = __ballot_sync(active_threads, j < l2_block_length);
+  j = 0;
+
   __shared__ typename cub::WarpScan<uint32_t>::TempStorage temp_storage;
+  cub::WarpScan<uint32_t> warp_scan(temp_storage);
   for (; j < l2_block_length; j += num_threads * sizeof(uint32_t) * 8) {
-    uint32_t word = bit_array_.wordAtBit(array_index, current_bit + j);
+    auto const bit_index = current_bit + j + sizeof(uint32_t) * 8 * local_t_id;
+    uint32_t word;
+    if (bit_index - current_bit >= l2_block_length) {
+      if constexpr (Value == 0) {
+        word = ~0;
+      } else {
+        word = 0;
+      }
+    } else {
+      word = bit_array_.wordAtBit(array_index, bit_index);
+    }
     uint32_t num_vals = 0;
     if constexpr (Value == 0) {
       num_vals = 32 - __popc(word);
@@ -289,7 +300,7 @@ __device__ [[nodiscard]] size_t RankSelect::select(uint32_t const array_index,
     uint32_t cum_vals = 0;
 
     // inclusive prefix sum
-    cub::WarpScan<uint32_t>(temp_storage).InclusiveSum(num_vals, cum_vals);
+    warp_scan.InclusiveSum(num_vals, cum_vals);
     __syncwarp();
 
     // Check if the i-th zero/one is in the current word
@@ -299,20 +310,16 @@ __device__ [[nodiscard]] size_t RankSelect::select(uint32_t const array_index,
       // 1-indexed to distinguish from having found nothing, which is 0.
       // TODO: faster implementations possible
       i -= vals_at_start;
-      result = getNBitPos<Value>(i, word) + current_bit + j + 1;
+      result = getNBitPos<Value>(i, word) + bit_index + 1;
     }
     // communicate the result to all threads
-    shareVar<size_t>(result != 0, result, active_threads);
+    shareVar<size_t>(result != 0, result, ~0);
     if (result != 0) {
       break;
     }
     // if no result found, update i
     i -= cum_vals;
-    shareVar<size_t>(local_t_id == 31 - __clz(active_threads), i,
-                     active_threads);
-    active_threads =
-        __ballot_sync(active_threads,
-                      j + num_threads * sizeof(uint32_t) * 8 < l2_block_length);
+    shareVar<size_t>(local_t_id == (warpSize - 1), i, ~0);
   }
   shareVar<size_t>(result != 0, result, ~0);
 
@@ -430,10 +437,11 @@ __device__ void RankSelect::shareVar(bool condition, T& var,
                                      uint32_t const mask) {
   static_assert(std::is_integral<T>::value or std::is_floating_point<T>::value,
                 "T must be an integral or floating-point type.");
+  __syncwarp(mask);
   uint32_t src_thread = __ballot_sync(mask, condition);
   // Get the value from the first thread that fulfills the condition
   src_thread = __ffs(src_thread) - 1;
-  __syncwarp();
+  __syncwarp(mask);
   var = __shfl_sync(mask, var, src_thread);
 }
 
@@ -542,6 +550,10 @@ __global__ void calculateL2EntriesKernel(RankSelect rank_select,
   assert(blockDim.x % warpSize == 0);
   __shared__ RankSelectConfig::L2_TYPE
       l2_entries[RankSelectConfig::NUM_L2_PER_L1];
+  __shared__ union {
+    typename cub::WarpReduce<RankSelectConfig::L2_TYPE>::TempStorage reduce;
+    typename cub::WarpScan<RankSelectConfig::L2_TYPE>::TempStorage scan;
+  } cub_storage;
 
   uint32_t const warp_id = threadIdx.x / warpSize;
   uint32_t const local_t_id = threadIdx.x % warpSize;
@@ -550,6 +562,7 @@ __global__ void calculateL2EntriesKernel(RankSelect rank_select,
   // find L1 block index
   uint32_t const l1_index = blockIdx.x;
 
+  cub::WarpReduce<RankSelectConfig::L2_TYPE> warp_reduce(cub_storage.reduce);
   for (uint32_t i = warp_id; i < RankSelectConfig::NUM_L2_PER_L1;
        i += num_warps) {
     RankSelectConfig::L2_TYPE num_ones = 0;
@@ -563,11 +576,9 @@ __global__ void calculateL2EntriesKernel(RankSelect rank_select,
     }
 
     // Warp reduction
-    __shared__ typename cub::WarpReduce<RankSelectConfig::L2_TYPE>::TempStorage
-        reduce_storage;
-    RankSelectConfig::L2_TYPE const total_ones =
-        cub::WarpReduce<RankSelectConfig::L2_TYPE>(reduce_storage)
-            .Sum(num_ones);
+    RankSelectConfig::L2_TYPE const total_ones = warp_reduce.Sum(num_ones);
+    __syncwarp();
+
     if (local_t_id == 0) {
       l2_entries[i] = total_ones;
     }
@@ -575,15 +586,21 @@ __global__ void calculateL2EntriesKernel(RankSelect rank_select,
 
   __syncthreads();
   // perform warp exclusive sum of l2 entries
-  __shared__ typename cub::WarpScan<RankSelectConfig::L2_TYPE>::TempStorage
-      scan_storage;
-  if (threadIdx.x < RankSelectConfig::NUM_L2_PER_L1) {
-    RankSelectConfig::L2_TYPE l2_entry = l2_entries[threadIdx.x];
+  // Make sure that a whole warp executes the scan
+  // TODO: right now unnecessary, since NUM_L2_PER_L1 is 32
+  uint32_t needed_threads = (RankSelectConfig::NUM_L2_PER_L1 + 31) & ~31;
+  if (threadIdx.x < needed_threads) {
+    RankSelectConfig::L2_TYPE l2_entry;
+    if (threadIdx.x < RankSelectConfig::NUM_L2_PER_L1) {
+      l2_entry = l2_entries[threadIdx.x];
+    } else {
+      l2_entry = 0;
+    }
     // last thread writes it's entry to the following L1 block
     if (threadIdx.x == RankSelectConfig::NUM_L2_PER_L1 - 1) {
       rank_select.writeL1Index(array_index, l1_index + 1, l2_entry);
     }
-    cub::WarpScan<RankSelectConfig::L2_TYPE>(scan_storage)
+    cub::WarpScan<RankSelectConfig::L2_TYPE>(cub_storage.scan)
         .ExclusiveSum(l2_entry, l2_entry);
 
     // last thread adds it's entry to the following L1 block
@@ -607,6 +624,10 @@ __global__ void calculateLastL1BlockKernel(RankSelect rank_select,
   assert(blockDim.x % warpSize == 0);
   __shared__ RankSelectConfig::L2_TYPE
       l2_entries[RankSelectConfig::NUM_L2_PER_L1];
+  __shared__ union {
+    typename cub::WarpReduce<RankSelectConfig::L2_TYPE>::TempStorage reduce;
+    typename cub::WarpScan<RankSelectConfig::L2_TYPE>::TempStorage scan;
+  } cub_storage;
 
   //?benign data race?
   rank_select.writeNumLastL2Blocks(array_index, num_last_l2_blocks);
@@ -617,6 +638,8 @@ __global__ void calculateLastL1BlockKernel(RankSelect rank_select,
 
   auto const l1_start_word = (rank_select.getNumL1Blocks(array_index) - 1) *
                              RankSelectConfig::L1_WORD_SIZE;
+
+  cub::WarpReduce<RankSelectConfig::L2_TYPE> warp_reduce(cub_storage.reduce);
   for (uint32_t i = warp_id; i < num_last_l2_blocks; i += num_warps) {
     RankSelectConfig::L2_TYPE num_ones = 0;
     size_t const start_word =
@@ -631,12 +654,9 @@ __global__ void calculateLastL1BlockKernel(RankSelect rank_select,
       num_ones += __popc(word);
     }
 
-    __shared__ typename cub::WarpReduce<RankSelectConfig::L2_TYPE>::TempStorage
-        reduce_storage;
     // Warp reduction
-    RankSelectConfig::L2_TYPE const total_ones =
-        cub::WarpReduce<RankSelectConfig::L2_TYPE>(reduce_storage)
-            .Sum(num_ones);
+    RankSelectConfig::L2_TYPE const total_ones = warp_reduce.Sum(num_ones);
+    __syncwarp();
     if (local_t_id == 0) {
       l2_entries[i] = total_ones;
     }
@@ -644,22 +664,26 @@ __global__ void calculateLastL1BlockKernel(RankSelect rank_select,
 
   __syncthreads();
   // perform warp exclusive sum of l2 entries
-  // TODO Use same storage for all?
-  __shared__ typename cub::WarpScan<RankSelectConfig::L2_TYPE>::TempStorage
-      scan_storage;
+  uint32_t needed_threads = (num_last_l2_blocks + 31) & ~31;
+  if (threadIdx.x < needed_threads) {
+    RankSelectConfig::L2_TYPE l2_entry;
+    if (threadIdx.x < num_last_l2_blocks) {
+      l2_entry = l2_entries[threadIdx.x];
+    } else {
+      l2_entry = 0;
+    }
 
-  if (threadIdx.x < num_last_l2_blocks) {
-    RankSelectConfig::L2_TYPE l2_entry = l2_entries[threadIdx.x];
-
-    cub::WarpScan<RankSelectConfig::L2_TYPE>(scan_storage)
+    cub::WarpScan<RankSelectConfig::L2_TYPE>(cub_storage.scan)
         .ExclusiveSum(l2_entry, l2_entry);
 
     // All threads write their result to global memory
-    rank_select.writeL2Index(array_index,
-                             (rank_select.getNumL1Blocks(array_index) - 1) *
-                                     RankSelectConfig::NUM_L2_PER_L1 +
-                                 threadIdx.x,
-                             l2_entry);
+    if (threadIdx.x < num_last_l2_blocks) {
+      rank_select.writeL2Index(array_index,
+                               (rank_select.getNumL1Blocks(array_index) - 1) *
+                                       RankSelectConfig::NUM_L2_PER_L1 +
+                                   threadIdx.x,
+                               l2_entry);
+    }
   }
   return;
 }

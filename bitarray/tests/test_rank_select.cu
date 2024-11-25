@@ -487,7 +487,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
                                    RankSelectConfig::L1_BIT_SIZE + 1,
                                    2 * RankSelectConfig::L1_BIT_SIZE - 1,
                                    2 * RankSelectConfig::L1_BIT_SIZE + 1};
-  BitArray bit_array(sizes);
+  BitArray bit_array(sizes, false);
   auto num_arrays = bit_array.numArrays();
 
   std::vector<RankSelectHelper> helpers;
@@ -580,7 +580,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
     max_size = std::max(max_size, sizes[i]);
     helpers.emplace_back(random_nums[i]);
   }
-  BitArray bit_array(sizes);
+  BitArray bit_array(sizes, false);
   // For each array, go through each word and set it to a random number
   random_nums.resize((max_size + 31) / 32);
   generateRandomNums(random_nums, 0U, std::numeric_limits<uint32_t>::max());

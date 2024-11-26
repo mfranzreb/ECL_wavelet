@@ -523,7 +523,7 @@ __host__ RankSelect createRankSelectStructures(BitArray&& bit_array) {
       calculateL2EntriesKernel<<<num_blocks, block_size>>>(rank_select, i);
       kernelCheck();
 
-      if (num_last_l2_blocks != 1) {
+      if (num_last_l2_blocks > 1) {
         block_size =
             std::min(maxThreadsPerBlockLastL1Kernel, getMaxBlockSize());
         block_size = std::min(block_size, num_last_l2_blocks * 32);

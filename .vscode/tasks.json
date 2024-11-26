@@ -10,12 +10,21 @@
       "problemMatcher": []
     },
     {
+      "label": "build bitarray benchmarks",
+      "type": "shell",
+      "command": "cmake",
+      "dependsOn": ["CMake Configure", "Build target bitarray benchmarks"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
       "label": "CMake Configure",
       "type": "shell",
       "command": "cmake",
       "args": [
         "-DCMAKE_BUILD_TYPE=Debug",
         "-DBUILD_TESTS=ON",
+        "-DBUILD_BENCHMARKS=ON",
         "-S",
         ".",
         "-B",
@@ -31,6 +40,16 @@
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "./build", "--target", "ecl_BA_RS_tests"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Build target bitarray benchmarks",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "./build", "--target", "ecl_RS_benchmarks"],
       "group": {
         "kind": "build",
         "isDefault": true

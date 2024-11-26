@@ -1,0 +1,103 @@
+{
+    "context": {
+      "date": "2024-11-25T12:07:25-06:00",
+      "host_name": "denver",
+      "executable": "./build/bitarray/benchmark/ecl_RS_benchmarks",
+      "num_cpus": 12,
+      "mhz_per_cpu": 2432,
+      "cpu_scaling_enabled": false,
+      "caches": [
+        {
+          "type": "Data",
+          "level": 1,
+          "size": 32768,
+          "num_sharing": 1
+        },
+        {
+          "type": "Instruction",
+          "level": 1,
+          "size": 32768,
+          "num_sharing": 1
+        },
+        {
+          "type": "Unified",
+          "level": 2,
+          "size": 262144,
+          "num_sharing": 1
+        },
+        {
+          "type": "Unified",
+          "level": 3,
+          "size": 12582912,
+          "num_sharing": 6
+        }
+      ],
+      "load_avg": [0.300781,0.225586,0.325195],
+      "library_version": "v1.9.0-21-g62a321d6",
+      "library_build_type": "release",
+      "json_schema_version": 1
+    },
+    "benchmarks": [
+      {
+        "name": "BM_RankSelectConstruction/33554432",
+        "family_index": 0,
+        "per_family_instance_index": 0,
+        "run_name": "BM_RankSelectConstruction/33554432",
+        "run_type": "iteration",
+        "repetitions": 1,
+        "repetition_index": 0,
+        "threads": 1,
+        "iterations": 1199,
+        "real_time": 5.8572005091764789e-01,
+        "cpu_time": 5.7016259132610514e-01,
+        "time_unit": "ms",
+        "param.size": 3.3554432000000000e+07
+      },
+      {
+        "name": "BM_RankSelectConstruction/1073741824",
+        "family_index": 0,
+        "per_family_instance_index": 1,
+        "run_name": "BM_RankSelectConstruction/1073741824",
+        "run_type": "iteration",
+        "repetitions": 1,
+        "repetition_index": 0,
+        "threads": 1,
+        "iterations": 82,
+        "real_time": 8.7670344396539761e+00,
+        "cpu_time": 8.5403768902439055e+00,
+        "time_unit": "ms",
+        "param.size": 1.0737418240000000e+09
+      },
+      {
+        "name": "BM_RankSelectConstruction/4294967296",
+        "family_index": 0,
+        "per_family_instance_index": 2,
+        "run_name": "BM_RankSelectConstruction/4294967296",
+        "run_type": "iteration",
+        "repetitions": 1,
+        "repetition_index": 0,
+        "threads": 1,
+        "iterations": 21,
+        "real_time": 3.3637232568469784e+01,
+        "cpu_time": 3.3577124761904741e+01,
+        "time_unit": "ms",
+        "param.size": 4.2949672960000000e+09
+      },
+      {
+        "name": "BM_RankSelectConstruction/8589934592",
+        "family_index": 0,
+        "per_family_instance_index": 3,
+        "run_name": "BM_RankSelectConstruction/8589934592",
+        "run_type": "iteration",
+        "repetitions": 1,
+        "repetition_index": 0,
+        "threads": 1,
+        "iterations": 10,
+        "real_time": 6.7148818203713745e+01,
+        "cpu_time": 6.6748699900000119e+01,
+        "time_unit": "ms",
+        "param.size": 8.5899345920000000e+09
+      }
+    ]
+  }
+  

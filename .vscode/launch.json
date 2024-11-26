@@ -59,6 +59,46 @@
         }
       ],
       "preLaunchTask": "build bitarray tests"
+    },
+    {
+      "name": "Debug bitarray benchmarks CUDA",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bitarray/benchmark/ecl_RS_benchmarks",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build bitarray benchmarks"
+    },
+    {
+      "name": "Debug bitarray benchmarks",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bitarray/benchmark/ecl_RS_benchmarks",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build bitarray benchmarks"
+    },
+    {
+      "name": "Debug plot",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/plot_benchmarks.py",
+      "args": ["benchmark.json", "."],
+      "console": "integratedTerminal"
     }
   ]
 }

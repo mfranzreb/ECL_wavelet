@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <limits>
 
+#define WS 32
+
 #define gpuErrchk(ans) \
   { gpuAssert((ans), __FILE__, __LINE__); }
 __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
@@ -33,17 +35,16 @@ __host__ std::pair<int, int> inline getLaunchConfig(size_t num_warps,
                                                     int max_block_size) {
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, 0);
-  int const warpSize = prop.warpSize;
-  int min_block_size_warps = min_block_size / warpSize;
-  int warps_per_sm = prop.maxThreadsPerMultiProcessor / warpSize;
-  int warps_per_block = prop.maxThreadsPerBlock / warpSize;
+  int min_block_size_warps = min_block_size / WS;
+  int warps_per_sm = prop.maxThreadsPerMultiProcessor / WS;
+  int warps_per_block = prop.maxThreadsPerBlock / WS;
   // find max block size that can still fully load an SM
   max_block_size = std::min(warps_per_block, max_block_size / 32);
   while (warps_per_sm % max_block_size != 0) {
     max_block_size -= 1;
   }
   if (num_warps <= max_block_size) {
-    return {1, num_warps * warpSize};
+    return {1, num_warps * WS};
   }
   std::pair<int, int> best_match = {-1, -1};
   int best_difference =
@@ -63,14 +64,14 @@ __host__ std::pair<int, int> inline getLaunchConfig(size_t num_warps,
 
     // Check if this is a perfect match
     if (num_warps % block_size == 0) {
-      return {num_blocks, block_size * warpSize};
+      return {num_blocks, block_size * WS};
     }
 
     // Otherwise, calculate the difference and update best match if needed
     int difference = num_warps - block_size * num_blocks;
     if (difference > 0 and difference < best_difference) {
       best_difference = difference;
-      best_match = {num_blocks, block_size * warpSize};
+      best_match = {num_blocks, block_size * WS};
     }
   }
 
@@ -130,12 +131,6 @@ __host__ __device__ inline T powTwo(T n) {
   static_assert(std::is_integral<T>::value or std::is_signed<T>::value,
                 "T must be an unsigned integral type.");
   return 2 << n;
-}
-
-__host__ inline int getWarpSize() {
-  cudaDeviceProp prop;
-  cudaGetDeviceProperties(&prop, 0);
-  return prop.warpSize;
 }
 
 #define gpuErrchkInternal(ans, file, line) \

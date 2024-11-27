@@ -240,16 +240,10 @@ __host__ RankSelect createRankSelectStructures(BitArray&& bit_array);
  * \brief Fill L2 indices and prepare L1 indices for prefix sum.
  * \param rank_select RankSelect object to fill indices for.
  * \param array_index Index of the bit array to be used.
+ * \param num_last_l2_blocks Number of L2 blocks in the last L1 block.
  */
 __global__ void calculateL2EntriesKernel(RankSelect rank_select,
-                                         uint32_t const array_index);
+                                         uint32_t const array_index,
+                                         uint8_t const num_last_l2_blocks);
 
-/*!
- * \brief Fill L2 indices for last L1 block of a bit array.
- * \param rank_select RankSelect object to do the calculation for.
- * \param array_index Index of the bit array to be used.
- */
-__global__ void calculateLastL1BlockKernel(RankSelect rank_select,
-                                           uint32_t const array_index,
-                                           uint8_t const num_last_l2_blocks);
 }  // namespace ecl

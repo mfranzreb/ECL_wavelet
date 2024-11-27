@@ -4,6 +4,7 @@
 
 #include "utils.cuh"
 
+// TODO pad array to each cache line
 namespace ecl {
 
 /*!

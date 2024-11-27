@@ -5,6 +5,7 @@ project(ECLWavelet VERSION 0.1.0 LANGUAGES CXX CUDA)
 
 option(BUILD_TESTS "Build tests" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(PROFILE "Enable profiling" OFF)
 
 
 set(CMAKE_CXX_STANDARD 20)
@@ -39,6 +40,10 @@ if(BUILD_BENCHMARKS)
     add_subdirectory(third_party/benchmark)
     add_subdirectory(bitarray/benchmark)
     #add_subdirectory(tree/benchmark)
+endif()
+
+if(PROFILE AND CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo --ptxas-options=-v")
 endif()
 
 if(BUILD_TESTS)

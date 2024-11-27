@@ -60,25 +60,25 @@ __global__ void writeWordsParallelKernel(BitArray bit_array, size_t array_index,
 
 __global__ void rank0Kernel(RankSelect rank_select, uint32_t array_index,
                             size_t index, size_t *output) {
-  assert(blockDim.x == warpSize);
+  assert(blockDim.x == WS);
   *output = rank_select.rank0(array_index, index, threadIdx.x, blockDim.x);
 }
 
 __global__ void rank1Kernel(RankSelect rank_select, uint32_t array_index,
                             size_t index, size_t *output) {
-  assert(blockDim.x == warpSize);
+  assert(blockDim.x == WS);
   *output = rank_select.rank1(array_index, index, threadIdx.x, blockDim.x);
 }
 
 __global__ void select0Kernel(RankSelect rank_select, uint32_t array_index,
                               size_t index, size_t *output) {
-  assert(blockDim.x == warpSize);
+  assert(blockDim.x == WS);
   *output = rank_select.select<0>(array_index, index, threadIdx.x, blockDim.x);
 }
 
 __global__ void select1Kernel(RankSelect rank_select, uint32_t array_index,
                               size_t index, size_t *output) {
-  assert(blockDim.x == warpSize);
+  assert(blockDim.x == WS);
   *output = rank_select.select<1>(array_index, index, threadIdx.x, blockDim.x);
 }
 

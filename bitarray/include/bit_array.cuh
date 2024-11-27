@@ -4,7 +4,6 @@
 
 #include "utils.cuh"
 
-// TODO pad array to each cache line
 namespace ecl {
 
 /*!
@@ -89,6 +88,17 @@ class BitArray {
    */
   __device__ [[nodiscard]] uint32_t word(size_t const array_index,
                                          size_t const index) const noexcept;
+
+  /*!
+   * \brief Direct access to two words of the raw data of the bit
+   * array.
+   * \param array_index Index of the bit array to be read from.
+   * \param index Index of the first word that should be returned.
+   * \return index-th and index-th + 1 words of the raw bit array data. Least
+   * significant bit corresponds to the first bit of each word.
+   */
+  __device__ [[nodiscard]] uint64_t twoWords(size_t const array_index,
+                                             size_t const index) const noexcept;
 
   /*!
    * \brief Direct access to one word of the raw data of the bit

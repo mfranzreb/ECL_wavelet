@@ -21,8 +21,14 @@ __host__ BitArray::BitArray(std::vector<size_t> const& sizes)
                        sizes.size() * sizeof(size_t), cudaMemcpyHostToDevice));
 
   std::vector<size_t> array_sizes(sizes.size());
+  std::vector<size_t> array_offsets(sizes.size());
+
+  // Pad arrays to 128 bytes (32 words)
   for (size_t i = 0; i < sizes.size(); ++i) {
-    array_sizes[i] = (sizes[i] >> 5) + 1;
+    auto size_in_words =
+        (sizes[i] + sizeof(uint32_t) * 8 - 1) / (sizeof(uint32_t) * 8);
+    array_sizes[i] = size_in_words;
+    array_offsets[i] = size_in_words + (size_in_words % 32);
   }
   gpuErrchk(cudaMalloc(&d_sizes_, array_sizes.size() * sizeof(size_t)));
   gpuErrchk(cudaMemcpy(d_sizes_, array_sizes.data(),
@@ -30,19 +36,19 @@ __host__ BitArray::BitArray(std::vector<size_t> const& sizes)
                        cudaMemcpyHostToDevice));
 
   size_t total_size = 0;
-  for (auto const& size : array_sizes) {
+  for (auto const& size : array_offsets) {
     total_size += size;
   }
   gpuErrchk(cudaMalloc(&d_data_, total_size * sizeof(uint32_t)));
   total_size_ = total_size;
 
   // perform exclusive sum to get the offsets
-  std::exclusive_scan(array_sizes.begin(), array_sizes.end(),
-                      array_sizes.begin(), 0);
+  std::exclusive_scan(array_offsets.begin(), array_offsets.end(),
+                      array_offsets.begin(), 0);
 
-  gpuErrchk(cudaMalloc(&d_offsets_, array_sizes.size() * sizeof(size_t)));
-  gpuErrchk(cudaMemcpy(d_offsets_, array_sizes.data(),
-                       array_sizes.size() * sizeof(size_t),
+  gpuErrchk(cudaMalloc(&d_offsets_, array_offsets.size() * sizeof(size_t)));
+  gpuErrchk(cudaMemcpy(d_offsets_, array_offsets.data(),
+                       array_offsets.size() * sizeof(size_t),
                        cudaMemcpyHostToDevice));
 }
 
@@ -115,6 +121,14 @@ __device__ uint32_t BitArray::word(size_t const array_index,
   assert(array_index < num_arrays_);
   assert(index < d_sizes_[array_index]);
   return d_data_[d_offsets_[array_index] + index];
+}
+
+__device__ uint64_t BitArray::twoWords(size_t const array_index,
+                                       size_t const index) const noexcept {
+  assert(array_index < num_arrays_);
+  assert(index + 1 < d_sizes_[array_index]);
+  return reinterpret_cast<const uint64_t*>(
+      d_data_)[d_offsets_[array_index] + index];
 }
 
 __device__ uint32_t BitArray::wordAtBit(size_t const array_index,

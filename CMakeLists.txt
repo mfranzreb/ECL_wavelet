@@ -26,6 +26,10 @@ find_package(OpenMP REQUIRED)
 
 find_package(CUDAToolkit REQUIRED)
 
+if(PROFILE AND CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo --ptxas-options=-v")
+endif()
+
 # Add locations of other CMakelists.txt (one per call)
 add_subdirectory(bitarray)
 
@@ -42,9 +46,6 @@ if(BUILD_BENCHMARKS)
     #add_subdirectory(tree/benchmark)
 endif()
 
-if(PROFILE AND CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo --ptxas-options=-v")
-endif()
 
 if(BUILD_TESTS)
     add_subdirectory(third_party/googletest)

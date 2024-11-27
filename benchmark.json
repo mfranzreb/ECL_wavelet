@@ -1,6 +1,6 @@
 {
   "context": {
-    "date": "2024-11-27T04:36:13-06:00",
+    "date": "2024-11-27T13:37:15-06:00",
     "host_name": "denver",
     "executable": "./build/bitarray/benchmark/ecl_RS_benchmarks",
     "num_cpus": 12,
@@ -32,7 +32,7 @@
         "num_sharing": 6
       }
     ],
-    "load_avg": [0.609375,0.487793,0.316406],
+    "load_avg": [0.472168,0.286621,0.132324],
     "library_version": "v1.9.0-21-g62a321d6",
     "library_build_type": "release",
     "json_schema_version": 1
@@ -47,9 +47,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 1237,
-      "real_time": 5.5722222562198709e-01,
-      "cpu_time": 5.5413765076798704e-01,
+      "iterations": 1259,
+      "real_time": 5.5771032729237158e-01,
+      "cpu_time": 5.4421034074662433e-01,
       "time_unit": "ms",
       "param.size": 3.3554432000000000e+07
     },
@@ -62,9 +62,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 87,
-      "real_time": 8.2790932535118920e+00,
-      "cpu_time": 8.0010359540229867e+00,
+      "iterations": 90,
+      "real_time": 7.9737700664231346e+00,
+      "cpu_time": 7.7400002888888899e+00,
       "time_unit": "ms",
       "param.size": 1.0737418240000000e+09
     },
@@ -77,9 +77,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 22,
-      "real_time": 3.1460494723763656e+01,
-      "cpu_time": 3.1387486363636409e+01,
+      "iterations": 23,
+      "real_time": 3.0295831262660414e+01,
+      "cpu_time": 3.0242664652173971e+01,
       "time_unit": "ms",
       "param.size": 4.2949672960000000e+09
     },
@@ -92,9 +92,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 11,
-      "real_time": 6.3493235639973797e+01,
-      "cpu_time": 6.2330032181818233e+01,
+      "iterations": 12,
+      "real_time": 6.0056487496088572e+01,
+      "cpu_time": 5.9944068333333433e+01,
       "time_unit": "ms",
       "param.size": 8.5899345920000000e+09
     }

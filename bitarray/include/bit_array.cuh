@@ -93,7 +93,7 @@ class BitArray {
    * \brief Direct access to two words of the raw data of the bit
    * array.
    * \param array_index Index of the bit array to be read from.
-   * \param index Index of the first word that should be returned.
+   * \param index Index of the first word that should be returned. Must be even.
    * \return index-th and index-th + 1 words of the raw bit array data. Least
    * significant bit corresponds to the first bit of each word.
    */

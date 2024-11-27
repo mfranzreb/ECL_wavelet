@@ -127,8 +127,9 @@ __device__ uint64_t BitArray::twoWords(size_t const array_index,
                                        size_t const index) const noexcept {
   assert(array_index < num_arrays_);
   assert(index + 1 < d_sizes_[array_index]);
+  assert(index % 2 == 0 or index == 0);
   return reinterpret_cast<const uint64_t*>(
-      d_data_)[d_offsets_[array_index] + index];
+      d_data_)[(d_offsets_[array_index] + index) / 2];
 }
 
 __device__ uint32_t BitArray::wordAtBit(size_t const array_index,

@@ -466,7 +466,8 @@ __device__ [[nodiscard]] uint8_t RankSelect::getNBitPos(uint8_t const n,
 }
 
 __host__ RankSelect createRankSelectStructures(BitArray&& bit_array) {
-  // build structure
+  // OPT: Optimize constructor. Takes around 3% of function time.
+  //  build structure
   RankSelect rank_select(std::move(bit_array));
 
   struct cudaFuncAttributes funcAttrib;
@@ -556,12 +557,11 @@ __global__ void calculateL2EntriesKernel(RankSelect rank_select,
                                 i * RankSelectConfig::L2_WORD_SIZE;
 
       size_t const end_word = start_word + RankSelectConfig::L2_WORD_SIZE;
-      for (size_t j = start_word + local_t_id; j < end_word; j += WS) {
+      for (size_t j = start_word + 2 * local_t_id; j < end_word; j += 2 * WS) {
         // Global memory load
-        //? Benefits from shmem? no
         // load as 64 bits.
-        uint32_t const word = rank_select.bit_array_.word(array_index, j);
-        num_ones += __popc(word);
+        uint64_t const word = rank_select.bit_array_.twoWords(array_index, j);
+        num_ones += __popcll(word);
       }
 
       // Warp reduction

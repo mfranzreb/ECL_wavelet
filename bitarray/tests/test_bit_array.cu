@@ -33,6 +33,11 @@ __global__ void partialWordKernel(BitArray bit_array, size_t array_index,
   *output = bit_array.partialWord(array_index, index, bit_index);
 }
 
+__global__ void twoWordsKernel(BitArray bit_array, size_t array_index,
+                               size_t index, uint64_t* output) {
+  *output = bit_array.twoWords(array_index, index);
+}
+
 using BitArrayBoolTest = BitArrayTest<bool>;
 // Test the constructor that initializes with a specific size
 TEST_F(BitArrayBoolTest, ConstructorWithSize) {
@@ -188,5 +193,38 @@ TEST_F(BitArrayWordTest, PartialWord) {
   partialWordKernel<<<1, 1>>>(bit_array, 0, 0, 9, result);
   kernelCheck();
   EXPECT_EQ(*result, 0b0'1010'1010);
+}
+
+using BitArrayTwoWordsTest = BitArrayTest<uint64_t>;
+TEST_F(BitArrayTwoWordsTest, TwoWords) {
+  BitArray bit_array(std::vector<size_t>{66'000}, false);
+  uint32_t word = ~0;
+
+  for (size_t i = 0; i < 2048; i += 2) {
+    twoWordsKernel<<<1, 1>>>(bit_array, 0, i, result);
+    kernelCheck();
+    EXPECT_EQ(*result, 0);
+  }
+
+  writeWordAtBitKernel<<<1, 1>>>(bit_array, 0, 0, word);
+  kernelCheck();
+  twoWordsKernel<<<1, 1>>>(bit_array, 0, 0, result);
+  kernelCheck();
+  EXPECT_EQ(*result, 0xFFFFFFFF);
+
+  writeWordAtBitKernel<<<1, 1>>>(bit_array, 0, 0, 0);
+  writeWordAtBitKernel<<<1, 1>>>(bit_array, 0, 32, word);
+  kernelCheck();
+  twoWordsKernel<<<1, 1>>>(bit_array, 0, 0, result);
+  kernelCheck();
+  EXPECT_EQ(*result, 0xFFFFFFFF'00000000);
+
+  word = 0b1010'1010'1010'1010'1010'1010'1010'1010;
+  writeWordAtBitKernel<<<1, 1>>>(bit_array, 0, 0, word);
+  writeWordAtBitKernel<<<1, 1>>>(bit_array, 0, 32, 0);
+  kernelCheck();
+  twoWordsKernel<<<1, 1>>>(bit_array, 0, 0, result);
+  kernelCheck();
+  EXPECT_EQ(*result, 0b1010'1010'1010'1010'1010'1010'1010'1010);
 }
 }  // namespace ecl

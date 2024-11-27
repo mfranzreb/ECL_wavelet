@@ -278,7 +278,6 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
     RankSelect rank_select = createRankSelectStructures(std::move(bit_array));
 
     // check that all indices are 0
-    // for (uint32_t i = 0; i < rank_select.bit_array_.numArrays(); ++i) {
     size_t num_l1_blocks = rank_select.getNumL1BlocksHost(0);
     for (uint32_t j = 0; j < num_l1_blocks; ++j) {
       getL1EntryKernel<<<1, 1>>>(rank_select, 0, j, result);
@@ -291,7 +290,6 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
       kernelCheck();
       EXPECT_EQ(*result, 0);
     }
-    //}
   }
   BitArray bit_array(std::vector<size_t>{1, RankSelectConfig::L2_BIT_SIZE + 1,
                                          2 * RankSelectConfig::L2_BIT_SIZE - 1,

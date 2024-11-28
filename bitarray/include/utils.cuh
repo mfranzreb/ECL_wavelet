@@ -133,6 +133,16 @@ __host__ __device__ inline T powTwo(T n) {
   return 2 << n;
 }
 
+// TODO: Add at entrypoints of library
+__host__ inline void checkWarpSize() {
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, 0);
+  if (prop.warpSize != WS) {
+    fprintf(stderr, "Warp size must be 32, but is %d\n", prop.warpSize);
+    exit(EXIT_FAILURE);
+  }
+}
+
 #define gpuErrchkInternal(ans, file, line) \
   { gpuAssert((ans), file, line); }
 

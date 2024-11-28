@@ -12,6 +12,7 @@ namespace ecl {
 
 __host__ RankSelect::RankSelect(BitArray const&& bit_array) noexcept
     : bit_array_(bit_array), is_copy_(false) {
+  cudaFuncSetCacheConfig(calculateL2EntriesKernel, cudaFuncCachePreferL1);
   // Compute the number of L1 blocks.
   num_l1_blocks_.resize(bit_array_.numArrays());
   for (size_t i = 0; i < bit_array_.numArrays(); ++i) {
@@ -494,7 +495,7 @@ __host__ RankSelect createRankSelectStructures(BitArray&& bit_array) {
     if (num_l2_blocks == 1) {
       continue;
     }
-    //?launch in separate streams?: yes, one per level
+    // TODO launch in separate streams
 
     if (num_l1_blocks == 1) {
       size_t block_size =

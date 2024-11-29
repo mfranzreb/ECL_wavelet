@@ -105,6 +105,26 @@ __host__ RankSelect::RankSelect(RankSelect const& other) noexcept
       total_num_l2_blocks_(other.total_num_l2_blocks_),
       is_copy_(true) {}
 
+__host__ RankSelect& RankSelect::operator=(RankSelect&& other) noexcept {
+  bit_array_ = std::move(other.bit_array_);
+  d_l1_indices_ = other.d_l1_indices_;
+  other.d_l1_indices_ = nullptr;
+  d_l2_indices_ = other.d_l2_indices_;
+  other.d_l2_indices_ = nullptr;
+  d_l1_offsets_ = other.d_l1_offsets_;
+  other.d_l1_offsets_ = nullptr;
+  d_l2_offsets_ = other.d_l2_offsets_;
+  other.d_l2_offsets_ = nullptr;
+  d_num_last_l2_blocks_ = other.d_num_last_l2_blocks_;
+  other.d_num_last_l2_blocks_ = nullptr;
+  d_num_l1_blocks_ = other.d_num_l1_blocks_;
+  other.d_num_l1_blocks_ = nullptr;
+  total_num_l2_blocks_ = other.total_num_l2_blocks_;
+  other.is_copy_ = true;
+  is_copy_ = false;
+  return *this;
+}
+
 __host__ RankSelect::~RankSelect() {
   if (not is_copy_) {
     gpuErrchk(cudaFree(d_l1_indices_));
@@ -531,9 +551,9 @@ __host__ RankSelect createRankSelectStructures(BitArray&& bit_array) {
   return rank_select;
 }
 
-__global__ void calculateL2EntriesKernel(RankSelect rank_select,
-                                         uint32_t const array_index,
-                                         uint8_t const num_last_l2_blocks) {
+__global__ __launch_bounds__(1024, 2) void calculateL2EntriesKernel(
+    RankSelect rank_select, uint32_t const array_index,
+    uint8_t const num_last_l2_blocks) {
   assert(blockDim.x % WS == 0);
   __shared__ RankSelectConfig::L2_TYPE
       l2_entries[RankSelectConfig::NUM_L2_PER_L1];

@@ -30,7 +30,7 @@ struct RankSelectConfig {
  */
 class RankSelect {
  public:
-  BitArray const bit_array_; /*!< Bitarray the object wraps.*/
+  BitArray bit_array_; /*!< Bitarray the object wraps.*/
 
   /*!
    * \brief Constructor. Creates the auxiliary information for efficient rank
@@ -44,6 +44,12 @@ class RankSelect {
    * \param other \c RankSelect object to be copied.
    */
   __host__ RankSelect(RankSelect const& other) noexcept;
+
+  /*!
+   * \brief Move assignment operator.
+   * \param other \c RankSelect object to be moved.
+   */
+  __host__ RankSelect& operator=(RankSelect&& other) noexcept;
 
   __host__ ~RankSelect();
 

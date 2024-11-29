@@ -73,12 +73,33 @@ __host__ BitArray::BitArray(BitArray&& other) noexcept {
   num_arrays_ = other.num_arrays_;
   total_size_ = other.total_size_;
   d_bit_sizes_ = other.d_bit_sizes_;
+  other.d_bit_sizes_ = nullptr;
   bit_sizes_ = other.bit_sizes_;
   d_sizes_ = other.d_sizes_;
+  other.d_sizes_ = nullptr;
   d_data_ = other.d_data_;
-  d_offsets_ = other.d_offsets_;
-  is_copy_ = other.is_copy_;
   other.d_data_ = nullptr;
+  d_offsets_ = other.d_offsets_;
+  other.d_offsets_ = nullptr;
+  is_copy_ = other.is_copy_;
+  other.is_copy_ = true;
+}
+
+__host__ BitArray& BitArray::operator=(BitArray&& other) noexcept {
+  num_arrays_ = other.num_arrays_;
+  total_size_ = other.total_size_;
+  d_bit_sizes_ = other.d_bit_sizes_;
+  other.d_bit_sizes_ = nullptr;
+  bit_sizes_ = other.bit_sizes_;
+  d_sizes_ = other.d_sizes_;
+  other.d_sizes_ = nullptr;
+  d_data_ = other.d_data_;
+  other.d_data_ = nullptr;
+  d_offsets_ = other.d_offsets_;
+  other.d_offsets_ = nullptr;
+  is_copy_ = other.is_copy_;
+  other.is_copy_ = true;
+  return *this;
 }
 
 __host__ BitArray::~BitArray() {

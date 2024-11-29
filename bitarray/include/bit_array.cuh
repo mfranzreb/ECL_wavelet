@@ -46,6 +46,12 @@ class BitArray {
    * \brief Move constructor.
    */
   __host__ BitArray(BitArray&&) noexcept;
+
+  /*!
+   * \brief Move assignment operator.
+   */
+  __host__ BitArray& operator=(BitArray&& other) noexcept;
+
   // Destructor
   __host__ ~BitArray();
 

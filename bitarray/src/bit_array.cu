@@ -28,7 +28,7 @@ __host__ BitArray::BitArray(std::vector<size_t> const& sizes)
     auto size_in_words =
         (sizes[i] + sizeof(uint32_t) * 8 - 1) / (sizeof(uint32_t) * 8);
     array_sizes[i] = size_in_words;
-    array_offsets[i] = size_in_words + (size_in_words % 32);
+    array_offsets[i] = (size_in_words + 31) & ~31;
   }
   gpuErrchk(cudaMalloc(&d_sizes_, array_sizes.size() * sizeof(size_t)));
   gpuErrchk(cudaMemcpy(d_sizes_, array_sizes.data(),

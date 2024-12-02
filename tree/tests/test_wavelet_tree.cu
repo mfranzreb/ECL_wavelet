@@ -374,8 +374,62 @@ TYPED_TEST(WaveletTreeTest, accessRandom) {
     std::generate(indices.begin(), indices.end(), [&]() { return dis(gen); });
 
     auto results = wt.access(indices);
-    for (size_t i = 0; i < indices.size(); ++i) {
-      EXPECT_EQ(data[indices[i]], results[i]);
+    for (size_t j = 0; j < indices.size(); ++j) {
+      EXPECT_EQ(data[indices[j]], results[j]);
+    }
+  }
+}
+
+TYPED_TEST(WaveletTreeTest, rank) {
+  std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  std::vector<TypeParam> data(100);
+  for (size_t i = 0; i < data.size(); ++i) {
+    data[i] = i % alphabet.size();
+  }
+  WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet));
+
+  std::vector<RankSelectQuery<TypeParam>> queries;
+  for (size_t i = 0; i < data.size(); ++i) {
+    queries.push_back({i, data[i]});
+  }
+  auto results = wt.rank(queries);
+  for (size_t i = 0; i < data.size(); ++i) {
+    EXPECT_EQ(i / 10, results[i]);
+  }
+}
+
+TYPED_TEST(WaveletTreeTest, rankRandom) {
+  for (int i = 0; i < 10; i++) {
+    // Random data size between 1000 and 1'000'000
+    size_t data_size = 1000 + (rand() % 1000000);
+    size_t alphabet_size =
+        std::min(3 + (rand() % (data_size - 3)),
+                 size_t(std::numeric_limits<TypeParam>::max()));
+
+    auto [alphabet, data] =
+        generateRandomAlphabetAndData<TypeParam>(alphabet_size, data_size);
+    alphabet_size = alphabet.size();
+    auto alphabet_copy = alphabet;
+
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet));
+
+    // Create 100 random rank queries
+    std::vector<RankSelectQuery<TypeParam>> queries(100);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<size_t> dis_index(0, data_size - 1);
+    std::uniform_int_distribution<TypeParam> dis_alphabet(0, alphabet_size - 1);
+    std::generate(queries.begin(), queries.end(), [&]() {
+      return RankSelectQuery<TypeParam>{dis_index(gen),
+                                        alphabet_copy[dis_alphabet(gen)]};
+    });
+
+    auto queries_copy = queries;
+    auto results = wt.rank(queries_copy);
+    for (size_t j = 0; j < queries.size(); ++j) {
+      EXPECT_EQ(std::count(data.begin(), data.begin() + queries[j].index_,
+                           queries[j].symbol_),
+                results[j]);
     }
   }
 }
@@ -405,7 +459,7 @@ TYPED_TEST(WaveletTreeTest, fillLevelRandom) {
     uint8_t start_bit = rand() % num_bits;
     // Fill all levels from start_bit to 0
     std::vector<size_t> sizes(start_bit + 1, data_size);
-    BitArray ba(sizes);
+    BitArray ba(sizes, false);
     for (uint8_t level = 0; level <= start_bit; ++level) {
       fillLevelKernel<TypeParam><<<1, 32>>>(ba, d_data, data_size, level);
       kernelCheck();
@@ -416,6 +470,7 @@ TYPED_TEST(WaveletTreeTest, fillLevelRandom) {
         level_should[i] = getBit(start_bit - level, data[i]);
       }
     }
+    cudaFree(d_data);
   }
 */
 }  // namespace ecl

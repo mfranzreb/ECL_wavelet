@@ -164,17 +164,19 @@ TEST_F(RankSelectBoolTest, RankSelectConstructor) {
     size_t rand_2 = rand() % 32;
     sizes.push_back(8 * sizeof(uint32_t) * rand_1 + rand_2);
   }
-  BitArray bit_array(sizes);
+  BitArray bit_array(sizes, false);
   RankSelect rank_select(std::move(bit_array));
 }
 
 using RankSelectBlocksTest = RankSelectTest<size_t>;
 TEST_F(RankSelectBlocksTest, RankSelectIndexSizes) {
-  BitArray bit_array(std::vector<size_t>{
-      1, RankSelectConfig::L2_BIT_SIZE - 1, RankSelectConfig::L2_BIT_SIZE + 1,
-      2 * RankSelectConfig::L2_BIT_SIZE - 1, RankSelectConfig::L1_BIT_SIZE - 1,
-      RankSelectConfig::L1_BIT_SIZE + 1,
-      2 * RankSelectConfig::L1_BIT_SIZE - 1});
+  BitArray bit_array(std::vector<size_t>{1, RankSelectConfig::L2_BIT_SIZE - 1,
+                                         RankSelectConfig::L2_BIT_SIZE + 1,
+                                         2 * RankSelectConfig::L2_BIT_SIZE - 1,
+                                         RankSelectConfig::L1_BIT_SIZE - 1,
+                                         RankSelectConfig::L1_BIT_SIZE + 1,
+                                         2 * RankSelectConfig::L1_BIT_SIZE - 1},
+                     false);
   RankSelect rank_select(std::move(bit_array));
 
   for (uint32_t i = 0; i < 5; ++i) {
@@ -226,11 +228,13 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexSizes) {
 }
 
 TEST_F(RankSelectBlocksTest, RankSelectIndexWriting) {
-  BitArray bit_array(std::vector<size_t>{
-      1, RankSelectConfig::L2_BIT_SIZE - 1, RankSelectConfig::L2_BIT_SIZE + 1,
-      2 * RankSelectConfig::L2_BIT_SIZE - 1, RankSelectConfig::L1_BIT_SIZE - 1,
-      RankSelectConfig::L1_BIT_SIZE + 1,
-      2 * RankSelectConfig::L1_BIT_SIZE - 1});
+  BitArray bit_array(std::vector<size_t>{1, RankSelectConfig::L2_BIT_SIZE - 1,
+                                         RankSelectConfig::L2_BIT_SIZE + 1,
+                                         2 * RankSelectConfig::L2_BIT_SIZE - 1,
+                                         RankSelectConfig::L1_BIT_SIZE - 1,
+                                         RankSelectConfig::L1_BIT_SIZE + 1,
+                                         2 * RankSelectConfig::L1_BIT_SIZE - 1},
+                     false);
   RankSelect rank_select(std::move(bit_array));
 
   // Check that all entries of all arrays are initialized to 0

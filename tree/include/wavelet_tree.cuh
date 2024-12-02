@@ -15,7 +15,7 @@ namespace ecl {
 template <typename T>
 struct RankSelectQuery {
   size_t index_;
-  T* symbol_;
+  T symbol_;
 };
 
 template <typename T>
@@ -85,8 +85,7 @@ class WaveletTree {
    * \param queries Vector of rank queries.
    * \return Vector of ranks.
    */
-  __host__ std::vector<size_t> rank(
-      std::vector<RankSelectQuery<T>> const& queries);
+  __host__ std::vector<size_t> rank(std::vector<RankSelectQuery<T>>& queries);
 
   /*!
    * \brief Select queries on the wavelet tree.
@@ -140,10 +139,6 @@ class WaveletTree {
   size_t num_levels_; /*!< Number of levels in the wavelet tree*/
   bool is_copy_;      /*!< Flag to signal whether current object is a copy*/
 };
-
-template <typename T>
-__host__ WaveletTree<T> createWaveletTree(T* const data, size_t const data_size,
-                                          std::vector<T>&& alphabet);
 
 template <typename T>
 __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,

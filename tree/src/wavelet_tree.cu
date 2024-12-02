@@ -158,6 +158,8 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   gpuErrchk(cudaFree(d_data));
   gpuErrchk(cudaFree(d_sorted_data));
+  gpuErrchk(cudaFree(d_alphabet));
+  gpuErrchk(cudaFree(d_temp_storage));
 
   // build rank and select structures from bit-vectors
   rank_select_ = RankSelect(std::move(bit_array));
@@ -211,6 +213,7 @@ __host__ std::vector<T> WaveletTree<T>::access(
   std::vector<T> results(num_indices);
   gpuErrchk(cudaMemcpy(results.data(), d_results, num_indices * sizeof(T),
                        cudaMemcpyDeviceToHost));
+  gpuErrchk(cudaFree(d_indices));
   gpuErrchk(cudaFree(d_results));
 
 #pragma omp parallel for
@@ -222,10 +225,45 @@ __host__ std::vector<T> WaveletTree<T>::access(
 
 template <typename T>
 __host__ std::vector<size_t> WaveletTree<T>::rank(
-    std::vector<RankSelectQuery<T>> const& queries) {
-  // 1 warp per query
-  // group characters together to reduce memory access
-  return std::vector<size_t>(1);
+    std::vector<RankSelectQuery<T>>& queries) {
+  // launch kernel with 1 warp per index
+  size_t const num_queries = queries.size();
+  auto [num_blocks, threads_per_block] = getLaunchConfig(num_queries, 32, 1024);
+
+  // allocate space for results
+  size_t* d_results;
+  gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(size_t)));
+
+  // Convert query symbols to minimal alphabet
+#pragma omp parallel for
+  for (size_t i = 0; i < num_queries; ++i) {
+    auto const symbol_index =
+        std::lower_bound(alphabet_.begin(), alphabet_.end(),
+                         queries[i].symbol_) -
+        alphabet_.begin();
+    assert(symbol_index < alphabet_size_);
+    queries[i].symbol_ = static_cast<T>(symbol_index);
+  }
+
+  // Copy queries to device
+  RankSelectQuery<T>* d_queries;
+  gpuErrchk(cudaMalloc(&d_queries, num_queries * sizeof(RankSelectQuery<T>)));
+  gpuErrchk(cudaMemcpy(d_queries, queries.data(),
+                       num_queries * sizeof(RankSelectQuery<T>),
+                       cudaMemcpyHostToDevice));
+
+  rankKernel<T><<<num_blocks, threads_per_block>>>(*this, d_queries,
+                                                   num_queries, d_results);
+  kernelCheck();
+
+  // copy results back to host
+  std::vector<size_t> results(num_queries);
+  gpuErrchk(cudaMemcpy(results.data(), d_results, num_queries * sizeof(size_t),
+                       cudaMemcpyDeviceToHost));
+  gpuErrchk(cudaFree(d_queries));
+  gpuErrchk(cudaFree(d_results));
+
+  return results;
 }
 
 template <typename T>
@@ -308,12 +346,6 @@ __device__ size_t WaveletTree<T>::getNumLevels() const {
 template <typename T>
 __device__ size_t WaveletTree<T>::getCounts(size_t i) const {
   return d_counts_[i];
-}
-
-template <typename T>
-__host__ WaveletTree<T> createWaveletTree(T* const data, size_t const data_size,
-                                          std::vector<T>&& alphabet) {
-  WaveletTree<T> tree(data, data_size, std::move(alphabet));
 }
 
 template <typename T>
@@ -405,7 +437,39 @@ template <typename T>
 __global__ void rankKernel(WaveletTree<T> tree,
                            RankSelectQuery<T>* const queries,
                            size_t const num_queries, size_t* const ranks) {
-  // for l = to to code length
+  assert(blockDim.x % WS == 0);
+  uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
+  uint32_t const num_warps = gridDim.x * blockDim.x / WS;
+  uint32_t const local_t_id = threadIdx.x % WS;
+
+  for (uint32_t i = global_warp_id; i < num_queries; i += num_warps) {
+    RankSelectQuery<T> query = queries[i];
+
+    uint32_t char_start = 0;
+    uint32_t char_end = tree.getAlphabetSize();
+    uint32_t char_split;
+    uint32_t start, pos;
+    for (uint32_t l = 0; l < tree.getNumLevels(); ++l) {
+      if (char_end - char_start == 1) {
+        break;
+      }
+      // TODO: could be done in parallel, and combined if index is less than L2
+      // block size
+      start = tree.rank_select_.rank0(l, tree.getCounts(char_start), local_t_id,
+                                      WS);
+      pos = tree.rank_select_.rank0(
+          l, tree.getCounts(char_start) + query.index_, local_t_id, WS);
+      char_split = char_start + getPrevPowTwo(char_end - char_start);
+      if (query.symbol_ < char_split) {
+        query.index_ = pos - start;
+        char_end = char_split;
+      } else {
+        query.index_ -= pos - start;
+        char_start = char_split;
+      }
+    }
+    ranks[i] = query.index_;
+  }
 }
 
 template <typename T>

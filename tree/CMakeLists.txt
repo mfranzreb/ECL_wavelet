@@ -1,11 +1,11 @@
-set(TARGET ECL_wavelet_tree)
+set(TARGET ecl_wavelet_tree)
 
 # Collect all the source files
 file(GLOB WT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu")
 
-add_library(${TARGET} SHARED ${WT_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/include/wavelet_tree.cuh")  
+add_library(${TARGET} STATIC ${WT_SOURCES})  
 
-include_directories(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/include")
+include_directories(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_SOURCE_DIR}/bitarray/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -14,12 +14,12 @@ target_include_directories(${TARGET}
 
 
 target_link_libraries(${TARGET}
-    PRIVATE ECL_bitarray
+    PRIVATE ecl_bitarray
     OpenMP::OpenMP_CXX
     CUDA::cudart
 )
 
-target_compile_features(${TARGET} PUBLIC cxx_std_17)
+target_compile_features(${TARGET} PUBLIC cxx_std_20)
 
 set_property(TARGET ${TARGET} PROPERTY CUDA_ARCHITECTURES native)
 

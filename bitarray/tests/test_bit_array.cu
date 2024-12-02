@@ -110,7 +110,7 @@ TEST_F(BitArrayBoolTest, AccessAndWriteBits) {
     EXPECT_TRUE(*result);
     // check that all other bits are unchanged
     for (int j = 32 * i; j < 32 * (i + 1); ++j) {
-      if (j != 32 * i + bit && j < bit_array.sizeHost(0)) {
+      if (j != 32 * i + bit and j < bit_array.sizeHost(0)) {
         accessKernel<<<1, 1>>>(bit_array, 0, j, result);
         kernelCheck();
         EXPECT_FALSE(*result);

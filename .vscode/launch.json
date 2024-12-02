@@ -99,6 +99,38 @@
       "program": "${workspaceFolder}/plot_benchmarks.py",
       "args": ["benchmark.json", "."],
       "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug tree tests CUDA",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/tree/tests/ecl_WT_tests",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build tree tests"
+    },
+    {
+      "name": "Debug tree tests",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/tree/tests/ecl_WT_tests",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build tree tests"
     }
   ]
 }

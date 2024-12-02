@@ -545,6 +545,7 @@ __device__ [[nodiscard]] uint8_t RankSelect::getNBitPos(uint8_t const n,
   }
 }
 
+//? CC7.5 has max threads/SM = 1024, so launch bounds ignored.
 __global__ __launch_bounds__(1024, 2) void calculateL2EntriesKernel(
     RankSelect rank_select, uint32_t const array_index,
     uint8_t const num_last_l2_blocks) {

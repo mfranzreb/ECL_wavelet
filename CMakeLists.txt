@@ -33,7 +33,7 @@ endif()
 # Add locations of other CMakelists.txt (one per call)
 add_subdirectory(bitarray)
 
-#add_subdirectory(tree)
+add_subdirectory(tree)
 
 
 message(STATUS "OpenMP_CXX_FLAGS: ${OpenMP_CXX_FLAGS}")
@@ -50,6 +50,6 @@ endif()
 if(BUILD_TESTS)
     add_subdirectory(third_party/googletest)
     add_subdirectory(bitarray/tests)
-    #add_subdirectory(tree/tests)
+    add_subdirectory(tree/tests)
     enable_testing()
 endif()

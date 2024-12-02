@@ -9,7 +9,7 @@
 
 template <uint32_t Value>
 size_t getNBitPos(size_t n,uint32_t word) {
-  static_assert(Value == 0 || Value == 1, "Template parameter must be 0 or 1");
+  static_assert(Value == 0 or Value == 1, "Template parameter must be 0 or 1");
   if constexpr (Value == 0) {
     // Find the position of the n-th zero in the word
     for (int i = 1; i < n; i++) {

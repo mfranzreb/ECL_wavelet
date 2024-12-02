@@ -33,11 +33,16 @@ class RankSelect {
   BitArray bit_array_; /*!< Bitarray the object wraps.*/
 
   /*!
+   * \brief Default constructor.
+   */
+  __host__ RankSelect() noexcept = default;
+
+  /*!
    * \brief Constructor. Creates the auxiliary information for efficient rank
    * and select queries.
    * \param bit_array \c BitArray to be used for queries.
    */
-  __host__ RankSelect(BitArray const&& bit_array) noexcept;
+  __host__ RankSelect(BitArray&& bit_array) noexcept;
 
   /*!
    * \brief Copy constructor.
@@ -234,13 +239,6 @@ class RankSelect {
   bool is_copy_; /*!< Flag to signal whether current object is a
                     copy.*/
 };  // class RankSelect
-
-/*!
- * \brief Create the necessary structures for rank and select queries.
- * \param bit_array BitArray to be used for queries.
- * \return RankSelect object with the necessary structures.
- */
-__host__ RankSelect createRankSelectStructures(BitArray&& bit_array);
 
 /*!
  * \brief Fill L2 indices and prepare L1 indices for prefix sum.

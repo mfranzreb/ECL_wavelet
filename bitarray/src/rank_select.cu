@@ -10,8 +10,9 @@
 
 namespace ecl {
 
-__host__ RankSelect::RankSelect(BitArray const&& bit_array) noexcept
-    : bit_array_(bit_array), is_copy_(false) {
+// OPT: Optimize non-kernel constructor. Takes around 3% of function time.
+__host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
+    : bit_array_(std::move(bit_array)), is_copy_(false) {
   cudaFuncSetCacheConfig(calculateL2EntriesKernel, cudaFuncCachePreferL1);
   // Compute the number of L1 blocks.
   num_l1_blocks_.resize(bit_array_.numArrays());
@@ -92,6 +93,61 @@ __host__ RankSelect::RankSelect(BitArray const&& bit_array) noexcept
                        cudaMemcpyHostToDevice));
 
   l2_offsets_ = std::move(num_l2_blocks);
+
+  struct cudaFuncAttributes funcAttrib;
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
+  int maxThreadsPerBlockL2Kernel = funcAttrib.maxThreadsPerBlock;
+
+  // TODO loop unnecessary for wavelet tree
+  // Get maximum storage needed for device sums
+  size_t temp_storage_bytes = 0;
+  for (uint32_t i = 0; i < bit_array_.numArrays(); i++) {
+    auto const num_l1_blocks = getNumL1BlocksHost(i);
+    RankSelectConfig::L1_TYPE* d_data = getL1EntryPointer(i, 0);
+    size_t prev_storage_bytes = temp_storage_bytes;
+    gpuErrchk(cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, d_data,
+                                            num_l1_blocks));
+    temp_storage_bytes = std::max(temp_storage_bytes, prev_storage_bytes);
+  }
+  void* d_temp_storage = nullptr;
+  gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+
+  for (uint32_t i = 0; i < bit_array_.numArrays(); i++) {
+    auto const num_l1_blocks = getNumL1BlocksHost(i);
+    auto const num_l2_blocks = getNumL2BlocksHost(i);
+    if (num_l2_blocks == 1) {
+      continue;
+    }
+    // TODO launch in separate streams
+
+    if (num_l1_blocks == 1) {
+      size_t block_size =
+          std::min(maxThreadsPerBlockL2Kernel, getMaxBlockSize());
+      block_size = std::min(block_size, num_l2_blocks * 32);
+
+      calculateL2EntriesKernel<<<1, block_size>>>(*this, i, num_l2_blocks);
+      kernelCheck();
+    } else {
+      uint8_t const num_last_l2_blocks =
+          (bit_array_.sizeHost(i) % RankSelectConfig::L1_BIT_SIZE +
+           RankSelectConfig::L2_BIT_SIZE - 1) /
+          RankSelectConfig::L2_BIT_SIZE;
+      auto [_, block_size] = getLaunchConfig(num_l2_blocks - num_last_l2_blocks,
+                                             32, maxThreadsPerBlockL2Kernel);
+
+      // calculate L2 entries for all L1 blocks
+      calculateL2EntriesKernel<<<num_l1_blocks, block_size>>>(
+          *this, i, num_last_l2_blocks);
+      kernelCheck();
+
+      RankSelectConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
+
+      // Run inclusive prefix sum
+      gpuErrchk(cub::DeviceScan::InclusiveSum(
+          d_temp_storage, temp_storage_bytes, d_data, num_l1_blocks));
+    }
+  }
+  gpuErrchk(cudaFree(d_temp_storage));
 }
 
 __host__ RankSelect::RankSelect(RankSelect const& other) noexcept
@@ -120,8 +176,8 @@ __host__ RankSelect& RankSelect::operator=(RankSelect&& other) noexcept {
   d_num_l1_blocks_ = other.d_num_l1_blocks_;
   other.d_num_l1_blocks_ = nullptr;
   total_num_l2_blocks_ = other.total_num_l2_blocks_;
+  is_copy_ = other.is_copy_;
   other.is_copy_ = true;
-  is_copy_ = false;
   return *this;
 }
 
@@ -149,6 +205,9 @@ __device__ [[nodiscard]] size_t RankSelect::rank1(uint32_t const array_index,
                                                   uint32_t const num_threads) {
   assert(array_index < bit_array_.numArrays());
   assert(index < bit_array_.size(array_index));
+  if (index == 0) {
+    return 0;
+  }
   size_t const l1_pos = index / RankSelectConfig::L1_BIT_SIZE;
   size_t const l2_pos =
       (index % RankSelectConfig::L1_BIT_SIZE) / RankSelectConfig::L2_BIT_SIZE;
@@ -467,7 +526,7 @@ __device__ void RankSelect::shareVar(bool condition, T& var,
 template <uint32_t Value>
 __device__ [[nodiscard]] uint8_t RankSelect::getNBitPos(uint8_t const n,
                                                         uint32_t word) {
-  static_assert(Value == 0 || Value == 1, "Template parameter must be 0 or 1");
+  static_assert(Value == 0 or Value == 1, "Template parameter must be 0 or 1");
   assert(n > 0);
   assert(n <= 32);
   if constexpr (Value == 0) {
@@ -484,71 +543,6 @@ __device__ [[nodiscard]] uint8_t RankSelect::getNBitPos(uint8_t const n,
     }
     return __ffs(word) - 1;
   }
-}
-
-__host__ RankSelect createRankSelectStructures(BitArray&& bit_array) {
-  // OPT: Optimize constructor. Takes around 3% of function time.
-  //  build structure
-  RankSelect rank_select(std::move(bit_array));
-
-  struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
-  int maxThreadsPerBlockL2Kernel = funcAttrib.maxThreadsPerBlock;
-
-  // TODO loop unnecessary for wavelet tree
-  // Get maximum storage needed for device sums
-  size_t temp_storage_bytes = 0;
-  for (uint32_t i = 0; i < rank_select.bit_array_.numArrays(); i++) {
-    auto const num_l1_blocks = rank_select.getNumL1BlocksHost(i);
-    RankSelectConfig::L1_TYPE* d_data = rank_select.getL1EntryPointer(i, 0);
-    size_t prev_storage_bytes = temp_storage_bytes;
-    gpuErrchk(cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, d_data,
-                                            num_l1_blocks));
-    temp_storage_bytes = std::max(temp_storage_bytes, prev_storage_bytes);
-  }
-  void* d_temp_storage = nullptr;
-  gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
-
-  for (uint32_t i = 0; i < rank_select.bit_array_.numArrays(); i++) {
-    auto const num_l1_blocks = rank_select.getNumL1BlocksHost(i);
-    auto const num_l2_blocks = rank_select.getNumL2BlocksHost(i);
-    if (num_l2_blocks == 1) {
-      continue;
-    }
-    // TODO launch in separate streams
-
-    if (num_l1_blocks == 1) {
-      size_t block_size =
-          std::min(maxThreadsPerBlockL2Kernel, getMaxBlockSize());
-      block_size = std::min(block_size, num_l2_blocks * 32);
-
-      calculateL2EntriesKernel<<<1, block_size>>>(rank_select, i,
-                                                  num_l2_blocks);
-      kernelCheck();
-    } else {
-      uint8_t const num_last_l2_blocks =
-          (rank_select.bit_array_.sizeHost(i) % RankSelectConfig::L1_BIT_SIZE +
-           RankSelectConfig::L2_BIT_SIZE - 1) /
-          RankSelectConfig::L2_BIT_SIZE;
-      auto [_, block_size] = getLaunchConfig(num_l2_blocks - num_last_l2_blocks,
-                                             128, maxThreadsPerBlockL2Kernel);
-
-      // calculate L2 entries for all L1 blocks
-      calculateL2EntriesKernel<<<num_l1_blocks, block_size>>>(
-          rank_select, i, num_last_l2_blocks);
-      kernelCheck();
-
-      RankSelectConfig::L1_TYPE* const d_data =
-          rank_select.getL1EntryPointer(i, 0);
-
-      // Run inclusive prefix sum
-      gpuErrchk(cub::DeviceScan::InclusiveSum(
-          d_temp_storage, temp_storage_bytes, d_data, num_l1_blocks));
-    }
-  }
-  gpuErrchk(cudaFree(d_temp_storage));
-
-  return rank_select;
 }
 
 __global__ __launch_bounds__(1024, 2) void calculateL2EntriesKernel(

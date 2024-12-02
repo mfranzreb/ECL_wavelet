@@ -40,7 +40,7 @@ __host__ BitArray createRandomBitArray(size_t size) {
   gpuErrchk(cudaMalloc(&d_words_arr, num_words * sizeof(uint32_t)));
   gpuErrchk(cudaMemcpy(d_words_arr, uint32_vec.data(),
                        num_words * sizeof(uint32_t), cudaMemcpyHostToDevice));
-  auto [blocks, threads] = getLaunchConfig(num_words / 32, 512, 1024);
+  auto [blocks, threads] = getLaunchConfig(num_words / 32, 32, 1024);
   writeWordsParallelKernel<<<blocks, threads>>>(ba, 0, d_words_arr, num_words);
   kernelCheck();
   gpuErrchk(cudaFree(d_words_arr));
@@ -55,7 +55,7 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
   state.counters["param.size"] = size;
 
   for (auto _ : state) {
-    auto rank_select = createRankSelectStructures(std::move(bit_array));
+    RankSelect rs(std::move(bit_array));
   }
 }
 

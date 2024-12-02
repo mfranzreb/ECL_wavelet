@@ -275,7 +275,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
     BitArray bit_array(std::vector<size_t>{RankSelectConfig::L1_BIT_SIZE + 1},
                        false);
 
-    RankSelect rank_select = createRankSelectStructures(std::move(bit_array));
+    RankSelect rank_select(std::move(bit_array));
 
     // check that all indices are 0
     size_t num_l1_blocks = rank_select.getNumL1BlocksHost(0);
@@ -299,7 +299,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
                                          2 * RankSelectConfig::L1_BIT_SIZE + 1},
                      true);
 
-  RankSelect rank_select(createRankSelectStructures(std::move(bit_array)));
+  RankSelect rank_select(std::move(bit_array));
 
   // check that all indices are correct
   for (uint32_t i = 0; i < rank_select.bit_array_.numArrays(); ++i) {
@@ -352,7 +352,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
                        cudaMemcpyHostToDevice));
   for (uint32_t i = 0; i < num_arrays; ++i) {
     size_t num_words = (sizes[i] + 31) / 32;
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 512, 1024);
+    auto [blocks, threads] = getLaunchConfig(num_words / 32, 32, 1024);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
@@ -364,7 +364,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
     helper.buildRankIndex();
   }
   gpuErrchk(cudaFree(d_words_arr));
-  RankSelect rank_select(createRankSelectStructures(std::move(bit_array)));
+  RankSelect rank_select(std::move(bit_array));
   for (uint32_t i = 0; i < num_arrays; ++i) {
     // Check that indices are correct
     size_t num_l1_blocks = rank_select.getNumL1BlocksHost(i);
@@ -401,7 +401,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
         val);
     auto num_arrays = bit_array.numArrays();
 
-    RankSelect rank_select(createRankSelectStructures(std::move(bit_array)));
+    RankSelect rank_select(std::move(bit_array));
 
     std::vector<size_t> random_positions(100);
     std::default_random_engine generator;
@@ -498,7 +498,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
     gpuErrchk(cudaMalloc(&d_words_arr, num_words * sizeof(uint32_t)));
     gpuErrchk(cudaMemcpy(d_words_arr, words.data(),
                          num_words * sizeof(uint32_t), cudaMemcpyHostToDevice));
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 512, 1024);
+    auto [blocks, threads] = getLaunchConfig(num_words / 32, 32, 1024);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
@@ -508,7 +508,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
     gpuErrchk(cudaFree(d_words_arr));
   }
 
-  RankSelect rank_select(createRankSelectStructures(std::move(bit_array)));
+  RankSelect rank_select(std::move(bit_array));
   for (auto &helper : helpers) {
     helper.buildRankIndex();
   }
@@ -591,7 +591,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
                        cudaMemcpyHostToDevice));
   for (uint32_t i = 0; i < num_arrays; ++i) {
     size_t num_words = (sizes[i] + 31) / 32;
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 512, 1024);
+    auto [blocks, threads] = getLaunchConfig(num_words / 32, 32, 1024);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
@@ -606,7 +606,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
 
   // perform rank and select queries on 100 random places in each array
   uint32_t num_queries = 500;
-  RankSelect rank_select(createRankSelectStructures(std::move(bit_array)));
+  RankSelect rank_select(std::move(bit_array));
   for (uint32_t i = 0; i < num_arrays; ++i) {
     for (uint32_t j = 0; j < num_queries; ++j) {
       uint32_t index = random_nums[j] % sizes[i];

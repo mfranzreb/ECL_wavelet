@@ -30,6 +30,7 @@ __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
  * per block.
  */
 
+//? If no such thing as wasted warps, then better to overshoot than under?
 __host__ std::pair<int, int> inline getLaunchConfig(size_t num_warps,
                                                     int min_block_size,
                                                     int max_block_size) {
@@ -85,27 +86,6 @@ __host__ inline int getMaxBlockSize() {
 }
 
 /*!
- * \brief Find the previous power of two that is smaller or equal to n.
- * \tparam T Type of the number to find the previous power of two for. Must be
- * an unsigned integer.
- * \param n Number to find the previous power of two for.
- * \return Previous power of two that is smaller or equal to n.
- */
-template <typename T>
-__host__ __device__ inline T getPrevPowTwo(T n) {
-  static_assert(std::is_integral<T>::value or std::is_signed<T>::value,
-                "T must be an unsigned integral type.");
-  if (n == 0) {
-    return 0;
-  }
-  if constexpr (sizeof(T) == 8) {
-    return (1ULL << (sizeof(T) - __clzll(n) - 1));
-  } else {
-    return (1UL << (sizeof(T) - __clz(n) - 1));
-  }
-}
-
-/*!
  * \brief Check if a number is a power of two.
  * \tparam T Type of the number to check. Must be an
  * unsigned integer.
@@ -114,9 +94,39 @@ __host__ __device__ inline T getPrevPowTwo(T n) {
  */
 template <typename T>
 __host__ __device__ inline bool isPowTwo(T const n) {
-  static_assert(std::is_integral<T>::value or std::is_signed<T>::value,
+  static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type.");
   return (n & (n - 1)) == 0;
+}
+
+// TODO test
+/*!
+ * \brief Find the previous power of two that is smaller or equal to n.
+ * \tparam T Type of the number to find the previous power of two for. Must be
+ * an unsigned integer.
+ * \param n Number to find the previous power of two for.
+ * \return Previous power of two that is smaller than n.
+ */
+template <typename T>
+__device__ inline T getPrevPowTwo(T n) {
+  static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
+                "T must be an unsigned integral type.");
+  if (n == 0) {
+    return 0;
+  }
+  if (isPowTwo(n)) {
+    return n >> 1;
+  }
+  if constexpr (sizeof(T) == 8) {
+    return (1ULL << (sizeof(T) * 8 - __clzll(n) - 1));
+  } else if constexpr (sizeof(T) == 4) {
+    return (1UL << (sizeof(T) * 8 - __clz(n) - 1));
+  } else if constexpr (sizeof(T) == 2) {
+    return (1U << (sizeof(T) * 8 - (__clz(n) - 16) - 1));
+  } else if constexpr (sizeof(T) == 1) {
+    return (1U << (sizeof(T) * 8 - (__clz(n) - 24) - 1));
+  }
+  return 0;
 }
 
 /*!
@@ -128,9 +138,9 @@ __host__ __device__ inline bool isPowTwo(T const n) {
  */
 template <typename T>
 __host__ __device__ inline T powTwo(T n) {
-  static_assert(std::is_integral<T>::value or std::is_signed<T>::value,
+  static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type.");
-  return 2 << n;
+  return 1 << n;
 }
 
 // TODO: Add at entrypoints of library
@@ -150,4 +160,16 @@ __host__ inline void checkWarpSize() {
 __host__ inline void kernelCheckFunc(const char *file, int line) {
   gpuErrchkInternal(cudaDeviceSynchronize(), file, line);
   gpuErrchkInternal(cudaPeekAtLastError(), file, line);
+}
+
+/*!
+ * \brief Get i-th least significant bit of a character. Starting from 0.
+ * \param i Index of the bit. LSB is 0.
+ * \param c Character to get the bit from.
+ * \return Value of the bit.
+ */
+template <typename T>
+__host__ __device__ inline bool getBit(uint8_t const i, T const c) {
+  assert(i < sizeof(T) * 8);
+  return (c >> i) & 1;
 }

@@ -49,7 +49,6 @@ endif()
 
 if(BUILD_TESTS)
     add_subdirectory(third_party/googletest)
-    add_subdirectory(bitarray/tests)
-    add_subdirectory(tree/tests)
+    add_subdirectory(tests)
     enable_testing()
 endif()

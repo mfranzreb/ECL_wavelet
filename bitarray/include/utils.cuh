@@ -1,4 +1,5 @@
 #pragma once
+#include <bit>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -172,4 +173,42 @@ template <typename T>
 __host__ __device__ inline bool getBit(uint8_t const i, T const c) {
   assert(i < sizeof(T) * 8);
   return (c >> i) & 1;
+}
+
+template <typename T>
+__device__ inline T ceilLog2(T n) {
+  static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
+                "T must be an unsigned integral type.");
+  if constexpr (sizeof(T) == 8) {
+    auto highest_set_bit_pos = sizeof(T) * 8 - __clzll(n) - 1;
+    return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
+  } else if constexpr (sizeof(T) == 4) {
+    auto highest_set_bit_pos = sizeof(T) * 8 - __clz(n) - 1;
+    return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
+  } else if constexpr (sizeof(T) == 2) {
+    auto highest_set_bit_pos = sizeof(T) * 8 - (__clz(n) - 16) - 1;
+    return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
+  } else if constexpr (sizeof(T) == 1) {
+    auto highest_set_bit_pos = sizeof(T) * 8 - (__clz(n) - 24) - 1;
+    return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
+  }
+}
+
+template <typename T>
+__host__ inline T ceilLog2Host(T n) {
+  static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
+                "T must be an unsigned integral type.");
+  if constexpr (sizeof(T) == 8) {
+    auto highest_set_bit_pos = sizeof(T) * 8 - std::__countl_zero(n) - 1;
+    return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
+  } else if constexpr (sizeof(T) == 4) {
+    auto highest_set_bit_pos = sizeof(T) * 8 - std::__countl_zero(n) - 1;
+    return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
+  } else if constexpr (sizeof(T) == 2) {
+    auto highest_set_bit_pos = sizeof(T) * 8 - std::__countl_zero(n) - 1;
+    return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
+  } else if constexpr (sizeof(T) == 1) {
+    auto highest_set_bit_pos = sizeof(T) * 8 - std::__countl_zero(n) - 1;
+    return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
+  }
 }

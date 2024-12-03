@@ -355,7 +355,7 @@ TYPED_TEST(WaveletTreeTest, access) {
 TYPED_TEST(WaveletTreeTest, accessRandom) {
   for (int i = 0; i < 10; i++) {
     // Random data size between 1000 and 1'000'000
-    size_t data_size = 1000 + (rand() % 1000000);
+    size_t data_size = 1000 + (rand() % 1'000'000);
     size_t alphabet_size =
         std::min(3 + (rand() % (data_size - 3)),
                  size_t(std::numeric_limits<TypeParam>::max()));
@@ -401,7 +401,7 @@ TYPED_TEST(WaveletTreeTest, rank) {
 TYPED_TEST(WaveletTreeTest, rankRandom) {
   for (int i = 0; i < 10; i++) {
     // Random data size between 1000 and 1'000'000
-    size_t data_size = 1000 + (rand() % 1000000);
+    size_t data_size = 1000 + (rand() % 1'000'000);
     size_t alphabet_size =
         std::min(3 + (rand() % (data_size - 3)),
                  size_t(std::numeric_limits<TypeParam>::max()));
@@ -434,11 +434,80 @@ TYPED_TEST(WaveletTreeTest, rankRandom) {
   }
 }
 
+TYPED_TEST(WaveletTreeTest, select) {
+  std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  std::vector<TypeParam> data(100);
+  for (size_t i = 0; i < data.size(); ++i) {
+    data[i] = i % alphabet.size();
+  }
+  WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet));
+
+  std::vector<RankSelectQuery<TypeParam>> queries;
+  for (size_t i = 0; i < data.size(); ++i) {
+    queries.push_back({i / 10 + 1, data[i]});
+  }
+  auto results = wt.rank(queries);
+  for (size_t i = 0; i < data.size(); ++i) {
+    EXPECT_EQ(i, results[i]);
+  }
+
+  // Check that if there is no n-th occurrence of a symbol, the result is the
+  // size of the data
+  queries = std::vector<RankSelectQuery<TypeParam>>{{11, 0}};
+  results = wt.rank(queries);
+  EXPECT_EQ(data.size(), results[0]);
+}
+
+TYPED_TEST(WaveletTreeTest, selectRandom) {
+  for (int i = 0; i < 10; i++) {
+    // Random data size between 1000 and 1'000'000
+    size_t data_size = 1000 + (rand() % 1'000'000);
+    size_t alphabet_size =
+        std::min(3 + (rand() % (data_size - 3)),
+                 size_t(std::numeric_limits<TypeParam>::max()));
+
+    auto [alphabet, data] =
+        generateRandomAlphabetAndData<TypeParam>(alphabet_size, data_size);
+    alphabet_size = alphabet.size();
+    auto alphabet_copy = alphabet;
+
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet));
+
+    // Create 100 random select queries
+    auto const hist = calculateHistogram(data, alphabet_copy);
+    std::vector<RankSelectQuery<TypeParam>> queries(100);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<TypeParam> dis_alphabet(0, alphabet_size - 1);
+    std::generate(queries.begin(), queries.end(), [&]() {
+      auto symbol_index = dis_alphabet(gen);
+      auto symbol = alphabet_copy[symbol_index];
+      auto count = hist[symbol_index];
+      std::uniform_int_distribution<size_t> dis_index(1, count);
+
+      return RankSelectQuery<TypeParam>{dis_index(gen), symbol};
+    });
+
+    auto queries_copy = queries;
+    auto results = wt.rank(queries_copy);
+    for (size_t j = 0; j < queries.size(); ++j) {
+      size_t counts = 0;
+      EXPECT_EQ(std::find_if(data.begin(), data.end(),
+                             [&](TypeParam c) {
+                               return c == queries[j].symbol_ and
+                                      ++counts == queries[j].index_;
+                             }) -
+                    data.begin(),
+                results[j]);
+    }
+  }
+}
+
 /*
 TYPED_TEST(WaveletTreeTest, fillLevelRandom) {
   for (int i = 0; i < 100; i++) {
     // Random data size between 100 and 1'000'000
-    size_t data_size = 100 + (rand() % 1000000);
+    size_t data_size = 100 + (rand() % 1'000'000);
 
     // Fill a vector with random data
     std::vector<TypeParam> data(data_size);

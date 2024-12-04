@@ -18,6 +18,9 @@ struct RankSelectQuery {
   T symbol_;
 };
 
+/*!
+ * \brief Helper class for reducing the data with thrust::remove_if.
+ */
 template <typename T>
 class isLongEnough {
  public:
@@ -71,6 +74,7 @@ class WaveletTree {
   /*! Deleted move assignment operator*/
   WaveletTree& operator=(WaveletTree&&) = delete;
 
+  /*! Destructor*/
   ~WaveletTree();
 
   /*!
@@ -81,19 +85,20 @@ class WaveletTree {
   __host__ std::vector<T> access(std::vector<size_t> const& indices);
 
   /*!
-   * \brief Rank queries on the wavelet tree.
+   * \brief Rank queries on the wavelet tree. Number of occurrences of a symbol
+   * up to a given index (exclusive).
    * \param queries Vector of rank queries.
    * \return Vector of ranks.
    */
   __host__ std::vector<size_t> rank(std::vector<RankSelectQuery<T>>& queries);
 
   /*!
-   * \brief Select queries on the wavelet tree.
+   * \brief Select queries on the wavelet tree. Find the index of the k-th
+   * occurrence of a symbol. Starts counting from 1.
    * \param queries Vector of select queries.
    * \return Vector of selected indices.
    */
-  __host__ std::vector<size_t> select(
-      std::vector<RankSelectQuery<T>> const& queries);
+  __host__ std::vector<size_t> select(std::vector<RankSelectQuery<T>>& queries);
 
   /*!
    * \brief Encodes a symbol from the alphabet.
@@ -110,10 +115,24 @@ class WaveletTree {
   __host__ static std::vector<Code> createMinimalCodes(
       std::vector<T> const& alphabet);
 
+  /*!
+   * \brief Get the size of the alphabet.
+   * \return Size of the alphabet.
+   */
   __device__ size_t getAlphabetSize() const;
 
+  /*!
+   * \brief Get the number of levels in the wavelet tree.
+   * \return Number of levels.
+   */
   __device__ size_t getNumLevels() const;
 
+  /*!
+   * \brief Get the number of occurrences of all symbols that are
+   * lexicographically smaller than the i-th symbol in the alphabet. Starting
+   * from 0. \param i Index of the symbol in the alphabet. \return Number of
+   * occurrences of all symbols that are lexicographically smaller.
+   */
   __device__ size_t getCounts(size_t i) const;
 
  private:
@@ -140,30 +159,64 @@ class WaveletTree {
   bool is_copy_;      /*!< Flag to signal whether current object is a copy*/
 };
 
+/*!
+ * \brief Kernel to compute the global histogram of the input data.
+ * \details Also replaces the data with the codes instead of original symbols.
+ * \param tree Wavelet tree.
+ * \param data Input data.
+ * \param data_size Number of elements in the input data.
+ * \param counts Array to store the counts.
+ * \param alphabet Alphabet of the input data.
+ * \param alphabet_size Size of the alphabet.
+ */
 template <typename T>
 __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
                                              size_t const data_size,
                                              size_t* counts, T* const alphabet,
                                              size_t const alphabet_size);
 
+/*!
+ * \brief Kernel to fill a level of the wavelet tree.
+ * \param bit_array Bit array the level will be stored in.
+ * \param data Data to be filled in the level.
+ * \param alphabet_start_bit Bit where the alphabet starts. 0 is the LSB.
+ * \param level Level to be filled.
+ */
 template <typename T>
 __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 uint8_t const alphabet_start_bit,
                                 uint32_t const level);
 
 /*!
- * \brief Get the alphabet of the wavelet tree.
- * \return Vector of alphabet symbols.
+ * \brief Kernel for computing access queries on the wavelet tree.
+ * \param tree Wavelet tree.
+ * \param indices Indices of the symbols to be accessed.
+ * \param num_indices Number of indices.
+ * \param results Array to store the accessed symbols.
  */
 template <typename T>
 __global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
                              size_t const num_indices, T* results);
 
+/*!
+ * \brief Kernel for computing rank queries on the wavelet tree.
+ * \param tree Wavelet tree.
+ * \param queries Array of rank queries.
+ * \param num_queries Number of queries.
+ * \param ranks Array to store the ranks.
+ */
 template <typename T>
 __global__ void rankKernel(WaveletTree<T> tree,
                            RankSelectQuery<T>* const queries,
                            size_t const num_queries, size_t* const ranks);
 
+/*!
+ * \brief Kernel for computing select queries on the wavelet tree.
+ * \param tree Wavelet tree.
+ * \param queries Array of select queries.
+ * \param num_queries Number of queries.
+ * \param ranks Array to store the selected indices.
+ */
 template <typename T>
 __global__ void selectKernel(WaveletTree<T> tree,
                              RankSelectQuery<T>* const queries,

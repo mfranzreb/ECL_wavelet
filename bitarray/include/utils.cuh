@@ -7,6 +7,25 @@
 
 #define WS 32
 
+// Define launch bounds based on compute capability
+// __CUDA_ARCH__ is not defined in host code
+#if __CUDA_ARCH__ == 900
+#define MAX_TPB 1024
+#define MIN_BPM 2
+#elif __CUDA_ARCH__ > 800 && __CUDA_ARCH__ < 900
+#define MAX_TPB 512
+#define MIN_BPM 3
+#elif __CUDA_ARCH__ == 750
+#define MAX_TPB 1024
+#define MIN_BPM 1
+#elif __CUDA_ARCH__ >= 700 && __CUDA_ARCH__ < 750
+#define MAX_TPB 1024
+#define MIN_BPM 1
+#else
+#define MAX_TPB 1024
+#define MIN_BPM 2
+#endif
+
 #define gpuErrchk(ans) \
   { gpuAssert((ans), __FILE__, __LINE__); }
 __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
@@ -19,34 +38,33 @@ __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
 
 /*!
  * \brief Get a launch configuration for a kernel given a number of warps, so
- * that threds per block are maximised.
+ * that threads per block are maximised.
  * \details If no combination is found that
  * perfectly matches the number of warps, the function will return the
- * combination that minimises the difference while not wasting any warps.
+ * combination that minimises the difference.
  * \param num_warps Number of warps to launch.
- * \param min_block_size Minimum number of threads per block.
+ * \param min_block_size Minimum number of threads per block. If num_warps is
+ * smaller, the function will return a block size smaller than this.
  * \param max_block_size Maximum number of threads per block.
- * \return A pair of integers, the first
- * one being the number of blocks and the second one being the number of threads
- * per block.
+ * \return A pair of integers, the first one being the number of blocks and the
+ * second one being the number of threads per block.
  */
-
-//? If no such thing as wasted warps, then better to overshoot than under?
-__host__ std::pair<int, int> inline getLaunchConfig(size_t num_warps,
-                                                    int min_block_size,
+// TODO maybe measure effect of wasted warps
+__host__ std::pair<int, int> inline getLaunchConfig(size_t const num_warps,
+                                                    int const min_block_size,
                                                     int max_block_size) {
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, 0);
-  int min_block_size_warps = min_block_size / WS;
-  int warps_per_sm = prop.maxThreadsPerMultiProcessor / WS;
-  int warps_per_block = prop.maxThreadsPerBlock / WS;
+  int const min_block_size_warps = min_block_size / 32;
+  int const warps_per_sm = prop.maxThreadsPerMultiProcessor / 32;
+  int const warps_per_block = prop.maxThreadsPerBlock / 32;
   // find max block size that can still fully load an SM
   max_block_size = std::min(warps_per_block, max_block_size / 32);
   while (warps_per_sm % max_block_size != 0) {
     max_block_size -= 1;
   }
   if (num_warps <= max_block_size) {
-    return {1, num_warps * WS};
+    return {1, num_warps * 32};
   }
   std::pair<int, int> best_match = {-1, -1};
   int best_difference =
@@ -62,24 +80,31 @@ __host__ std::pair<int, int> inline getLaunchConfig(size_t num_warps,
     if (block_size < min_block_size_warps) {
       break;
     }
-    int num_blocks = num_warps / block_size;
+    int num_blocks_high = (num_warps + block_size - 1) / block_size;
+    int num_blocks_low = num_warps / block_size;
 
     // Check if this is a perfect match
     if (num_warps % block_size == 0) {
-      return {num_blocks, block_size * WS};
+      return {num_blocks_low, block_size * 32};
     }
 
     // Otherwise, calculate the difference and update best match if needed
-    int difference = num_warps - block_size * num_blocks;
-    if (difference > 0 and difference < best_difference) {
+    int difference = block_size * num_blocks_high - num_warps;
+    if (difference < best_difference) {
       best_difference = difference;
-      best_match = {num_blocks, block_size * WS};
+      best_match = {num_blocks_high, block_size * 32};
+    }
+    difference = num_warps - block_size * num_blocks_low;
+    if (difference < best_difference) {
+      best_difference = difference;
+      best_match = {num_blocks_low, block_size * 32};
     }
   }
 
   return best_match;  // Return the best match found
 }
 
+// TODO: should not need this
 __host__ inline int getMaxBlockSize() {
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, 0);
@@ -100,7 +125,6 @@ __host__ __device__ inline bool isPowTwo(T const n) {
   return (n & (n - 1)) == 0;
 }
 
-// TODO test
 /*!
  * \brief Find the previous power of two that is smaller or equal to n.
  * \tparam T Type of the number to find the previous power of two for. Must be

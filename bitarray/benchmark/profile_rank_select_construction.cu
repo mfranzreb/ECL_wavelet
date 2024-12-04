@@ -39,7 +39,7 @@ __host__ BitArray createRandomBitArray(size_t size) {
   gpuErrchk(cudaMalloc(&d_words_arr, num_words * sizeof(uint32_t)));
   gpuErrchk(cudaMemcpy(d_words_arr, uint32_vec.data(),
                        num_words * sizeof(uint32_t), cudaMemcpyHostToDevice));
-  auto [blocks, threads] = getLaunchConfig(num_words / 32, 32, 1024);
+  auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, MAX_TPB);
   writeWordsParallelKernel<<<blocks, threads>>>(ba, 0, d_words_arr, num_words);
   kernelCheck();
   gpuErrchk(cudaFree(d_words_arr));

@@ -356,7 +356,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
                        cudaMemcpyHostToDevice));
   for (uint32_t i = 0; i < num_arrays; ++i) {
     size_t num_words = (sizes[i] + 31) / 32;
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 32, 1024);
+    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, MAX_TPB);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
@@ -502,7 +502,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
     gpuErrchk(cudaMalloc(&d_words_arr, num_words * sizeof(uint32_t)));
     gpuErrchk(cudaMemcpy(d_words_arr, words.data(),
                          num_words * sizeof(uint32_t), cudaMemcpyHostToDevice));
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 32, 1024);
+    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, MAX_TPB);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
@@ -595,7 +595,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
                        cudaMemcpyHostToDevice));
   for (uint32_t i = 0; i < num_arrays; ++i) {
     size_t num_words = (sizes[i] + 31) / 32;
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 32, 1024);
+    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, MAX_TPB);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {

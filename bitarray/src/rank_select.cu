@@ -133,7 +133,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
            RankSelectConfig::L2_BIT_SIZE - 1) /
           RankSelectConfig::L2_BIT_SIZE;
       auto [_, block_size] = getLaunchConfig(num_l2_blocks - num_last_l2_blocks,
-                                             32, maxThreadsPerBlockL2Kernel);
+                                             256, maxThreadsPerBlockL2Kernel);
 
       // calculate L2 entries for all L1 blocks
       calculateL2EntriesKernel<<<num_l1_blocks, block_size>>>(
@@ -246,8 +246,12 @@ __device__ [[nodiscard]] size_t RankSelect::select(uint32_t const array_index,
                                                    uint32_t const local_t_id,
                                                    uint32_t const num_threads) {
   assert(array_index < bit_array_.numArrays());
-  assert(i <= bit_array_.size(array_index));
   assert(i > 0);
+  // TODO COuld constrain i to be smaller than the number of zeros/ones
+  if (i > bit_array_.size(array_index)) {
+    return bit_array_.size(array_index);
+  }
+
   size_t const l1_offset = d_l1_offsets_[array_index];
   size_t const l2_offset = d_l2_offsets_[array_index];
   uint8_t const num_last_l2_blocks = d_num_last_l2_blocks_[array_index];
@@ -545,8 +549,7 @@ __device__ [[nodiscard]] uint8_t RankSelect::getNBitPos(uint8_t const n,
   }
 }
 
-//? CC7.5 has max threads/SM = 1024, so launch bounds ignored.
-__global__ __launch_bounds__(1024, 2) void calculateL2EntriesKernel(
+__global__ __launch_bounds__(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
     RankSelect rank_select, uint32_t const array_index,
     uint8_t const num_last_l2_blocks) {
   assert(blockDim.x % WS == 0);
@@ -621,8 +624,10 @@ __global__ __launch_bounds__(1024, 2) void calculateL2EntriesKernel(
     }
   }
 
-  else {  //?benign data race?-> use libcu++ atomic store
-    rank_select.writeNumLastL2Blocks(array_index, num_last_l2_blocks);
+  else {
+    if (local_t_id == 0 and blockIdx.x == 0) {
+      rank_select.writeNumLastL2Blocks(array_index, num_last_l2_blocks);
+    }
     if (num_last_l2_blocks == 1) {
       return;
     }

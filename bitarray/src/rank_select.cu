@@ -133,7 +133,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
            RankSelectConfig::L2_BIT_SIZE - 1) /
           RankSelectConfig::L2_BIT_SIZE;
       auto [_, block_size] = getLaunchConfig(num_l2_blocks - num_last_l2_blocks,
-                                             256, maxThreadsPerBlockL2Kernel);
+                                             32, maxThreadsPerBlockL2Kernel);
 
       // calculate L2 entries for all L1 blocks
       calculateL2EntriesKernel<<<num_l1_blocks, block_size>>>(
@@ -549,9 +549,12 @@ __device__ [[nodiscard]] uint8_t RankSelect::getNBitPos(uint8_t const n,
   }
 }
 
-__global__ __launch_bounds__(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
-    RankSelect rank_select, uint32_t const array_index,
-    uint8_t const num_last_l2_blocks) {
+__global__ __launch_bounds__(
+    64,
+    MIN_BPM* MAX_TPB /
+        64) void calculateL2EntriesKernel(RankSelect rank_select,
+                                          uint32_t const array_index,
+                                          uint8_t const num_last_l2_blocks) {
   assert(blockDim.x % WS == 0);
   __shared__ RankSelectConfig::L2_TYPE
       l2_entries[RankSelectConfig::NUM_L2_PER_L1];

@@ -25,11 +25,12 @@ void generateRandomNums(std::vector<T>& nums_vec, T const min, T const max) {
 
 /*!
  * \brief Create a random bit array with a given size and percentage of ones.
- * \param size Size of the bit array.
+ * \param size Size of the bit array at each level.
+ * \param num_levels Number of levels of the bit array.
  * \return Random bit array.
  */
-__host__ BitArray createRandomBitArray(size_t size) {
-  BitArray ba(std::vector<size_t>{size}, false);
+__host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels) {
+  BitArray ba(std::vector<size_t>(num_levels, size), false);
 
   auto num_words = (size + 31) / 32;
   std::vector<uint32_t> uint32_vec(num_words);
@@ -40,7 +41,10 @@ __host__ BitArray createRandomBitArray(size_t size) {
   gpuErrchk(cudaMemcpy(d_words_arr, uint32_vec.data(),
                        num_words * sizeof(uint32_t), cudaMemcpyHostToDevice));
   auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, MAX_TPB);
-  writeWordsParallelKernel<<<blocks, threads>>>(ba, 0, d_words_arr, num_words);
+  for (uint8_t i = 0; i < num_levels; ++i) {
+    writeWordsParallelKernel<<<blocks, threads>>>(ba, i, d_words_arr,
+                                                  num_words);
+  }
   kernelCheck();
   gpuErrchk(cudaFree(d_words_arr));
 
@@ -51,7 +55,8 @@ __host__ BitArray createRandomBitArray(size_t size) {
 int main(int argc, char** argv) {
   // size is first command line argument
   auto const size = std::atoi(argv[1]);
-  auto bit_array = ecl::createRandomBitArray(size);
+  auto const num_levels = std::atoi(argv[2]);
+  auto bit_array = ecl::createRandomBitArray(size, num_levels);
 
   ecl::RankSelect rs(std::move(bit_array));
   return 0;

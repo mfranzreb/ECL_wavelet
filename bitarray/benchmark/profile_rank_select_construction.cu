@@ -54,8 +54,8 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels) {
 }  // namespace ecl
 int main(int argc, char** argv) {
   // size is first command line argument
-  auto const size = std::atoi(argv[1]);
-  auto const num_levels = std::atoi(argv[2]);
+  auto const size = std::stoul(argv[1]);
+  auto const num_levels = std::stoul(argv[2]);
   auto bit_array = ecl::createRandomBitArray(size, num_levels);
 
   ecl::RankSelect rs(std::move(bit_array));

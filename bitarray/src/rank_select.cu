@@ -2,11 +2,14 @@
 
 #include <bit_array.cuh>
 #include <cassert>
+#include <condition_variable>
 #include <cstdint>
 #include <cub/device/device_scan.cuh>
 #include <cub/warp/warp_reduce.cuh>
 #include <cub/warp/warp_scan.cuh>
+#include <mutex>
 #include <numeric>
+#include <queue>
 #include <rank_select.cuh>
 #include <vector>
 
@@ -117,14 +120,26 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
   gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
 
   auto const max_block_size = getMaxBlockSize();
+  std::mutex mtx;
+  std::condition_variable cv;
+  std::queue<int> finished_threads;
+  uint32_t threads_done = 0;
+  uint32_t first_thread_done = ~0;
 
 #pragma omp parallel for num_threads(num_arrays)
   for (uint32_t i = 0; i < num_arrays; i++) {
     auto const num_l1_blocks = getNumL1BlocksHost(i);
     auto const num_l2_blocks = getNumL2BlocksHost(i);
     if (num_l2_blocks == 1) {
+      {
+        std::lock_guard<std::mutex> lock(mtx);
+        threads_done++;
+      }
+      cv.notify_one();
       continue;
     }
+
+    auto const tid = omp_get_thread_num();
 
     if (num_l1_blocks == 1) {
       size_t block_size = std::min(maxThreadsPerBlockL2Kernel, max_block_size);
@@ -145,15 +160,51 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
           *this, i, num_last_l2_blocks);
       kernelStreamCheck(0);
     }
-  }
-  for (uint32_t i = 0; i < num_arrays; i++) {
-    auto const num_l1_blocks = getNumL1BlocksHost(i);
-    RankSelectConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
+    // whichever thread finishes first, coordinates all others
+    {
+      std::unique_lock<std::mutex> lock(mtx);
+      if (first_thread_done == ~0) {
+        first_thread_done = tid;
+      }
+    }
+    if (first_thread_done == tid) {
+      RankSelectConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
 
-    // Run inclusive prefix sum
-    gpuErrchk(cub::DeviceScan::InclusiveSum(d_temp_storage, temp_storage_bytes,
-                                            d_data, num_l1_blocks));
+      // Run inclusive prefix sum
+      gpuErrchk(cub::DeviceScan::InclusiveSum(
+          d_temp_storage, temp_storage_bytes, d_data, num_l1_blocks));
+      // Thread 0 waits for notifications from other threads
+      std::unique_lock<std::mutex> lock(mtx);
+      while (threads_done != (num_arrays - 1)) {
+        cv.wait(lock, [&]() {
+          return !finished_threads.empty() || threads_done == (num_arrays - 1);
+        });
+
+        // Process any threads that have finished
+        while (!finished_threads.empty()) {
+          int const finished_id = finished_threads.front();
+          finished_threads.pop();
+
+          auto const num_l1_blocks = getNumL1BlocksHost(finished_id);
+          RankSelectConfig::L1_TYPE* const d_data =
+              getL1EntryPointer(finished_id, 0);
+
+          // Run inclusive prefix sum
+          gpuErrchk(cub::DeviceScan::InclusiveSum(
+              d_temp_storage, temp_storage_bytes, d_data, num_l1_blocks));
+        }
+      }
+    } else {
+      // Other threads notify thread 0 when they're done
+      {
+        std::lock_guard<std::mutex> lock(mtx);
+        finished_threads.push(tid);
+        threads_done++;
+      }
+      cv.notify_one();
+    }
   }
+
   gpuErrchk(cudaFree(d_temp_storage));
 }
 

@@ -30,10 +30,6 @@ __host__ BitArray::BitArray(std::vector<size_t> const& sizes)
     array_sizes[i] = size_in_words;
     array_offsets[i] = (size_in_words + 31) & ~31;
   }
-  gpuErrchk(cudaMalloc(&d_sizes_, array_sizes.size() * sizeof(size_t)));
-  gpuErrchk(cudaMemcpy(d_sizes_, array_sizes.data(),
-                       array_sizes.size() * sizeof(size_t),
-                       cudaMemcpyHostToDevice));
 
   size_t total_size = 0;
   for (auto const& size : array_offsets) {
@@ -64,7 +60,6 @@ __host__ BitArray::BitArray(BitArray const& other)
       total_size_(other.total_size_),
       d_bit_sizes_(other.d_bit_sizes_),
       bit_sizes_(other.bit_sizes_),
-      d_sizes_(other.d_sizes_),
       d_data_(other.d_data_),
       d_offsets_(other.d_offsets_),
       is_copy_(true) {}
@@ -75,8 +70,6 @@ __host__ BitArray::BitArray(BitArray&& other) noexcept {
   d_bit_sizes_ = other.d_bit_sizes_;
   other.d_bit_sizes_ = nullptr;
   bit_sizes_ = other.bit_sizes_;
-  d_sizes_ = other.d_sizes_;
-  other.d_sizes_ = nullptr;
   d_data_ = other.d_data_;
   other.d_data_ = nullptr;
   d_offsets_ = other.d_offsets_;
@@ -91,8 +84,6 @@ __host__ BitArray& BitArray::operator=(BitArray&& other) noexcept {
   d_bit_sizes_ = other.d_bit_sizes_;
   other.d_bit_sizes_ = nullptr;
   bit_sizes_ = other.bit_sizes_;
-  d_sizes_ = other.d_sizes_;
-  other.d_sizes_ = nullptr;
   d_data_ = other.d_data_;
   other.d_data_ = nullptr;
   d_offsets_ = other.d_offsets_;
@@ -107,7 +98,6 @@ __host__ BitArray::~BitArray() {
     gpuErrchk(cudaFree(d_data_));
     gpuErrchk(cudaFree(d_bit_sizes_));
     gpuErrchk(cudaFree(d_offsets_));
-    gpuErrchk(cudaFree(d_sizes_));
   }
 }
 
@@ -125,7 +115,7 @@ __device__ void BitArray::writeWord(size_t const array_index,
                                     size_t const index,
                                     uint32_t const value) noexcept {
   assert(array_index < num_arrays_);
-  assert(index < d_sizes_[array_index]);
+  assert(index < sizeInWords(array_index));
   d_data_[d_offsets_[array_index] + index] = value;
 }
 
@@ -140,14 +130,14 @@ __device__ void BitArray::writeWordAtBit(size_t const array_index,
 __device__ uint32_t BitArray::word(size_t const array_index,
                                    size_t const index) const noexcept {
   assert(array_index < num_arrays_);
-  assert(index < d_sizes_[array_index]);
+  assert(index < sizeInWords(array_index));
   return d_data_[d_offsets_[array_index] + index];
 }
 
 __device__ uint64_t BitArray::twoWords(size_t const array_index,
                                        size_t const index) const noexcept {
   assert(array_index < num_arrays_);
-  assert(index + 1 < d_sizes_[array_index]);
+  assert(index + 1 < sizeInWords(array_index));
   assert(index % 2 == 0 or index == 0);
   return reinterpret_cast<const uint64_t*>(
       d_data_)[(d_offsets_[array_index] + index) / 2];
@@ -164,7 +154,7 @@ __device__ [[nodiscard]] uint32_t BitArray::partialWord(
     size_t const array_index, size_t const index,
     uint8_t const bit_index) const noexcept {
   assert(array_index < num_arrays_);
-  assert(index < d_sizes_[array_index]);
+  assert(index < sizeInWords(array_index));
   assert(bit_index <= 32);
   return word(array_index, index) & ((1UL << bit_index) - 1);
 }
@@ -184,7 +174,8 @@ __host__ [[nodiscard]] size_t BitArray::sizeHost(
 __device__ [[nodiscard]] size_t BitArray::sizeInWords(
     size_t const array_index) const noexcept {
   assert(array_index < num_arrays_);
-  return d_sizes_[array_index];
+  return (d_bit_sizes_[array_index] + sizeof(uint32_t) * 8 - 1) /
+         (sizeof(uint32_t) * 8);
 }
 
 __host__ __device__ [[nodiscard]] size_t BitArray::numArrays() const noexcept {

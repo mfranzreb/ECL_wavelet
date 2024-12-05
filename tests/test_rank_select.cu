@@ -82,6 +82,16 @@ __global__ void select1Kernel(RankSelect rank_select, uint32_t array_index,
   *output = rank_select.select<1>(array_index, index, threadIdx.x, blockDim.x);
 }
 
+__global__ void getNumL1BlocksKernel(RankSelect rank_select,
+                                     uint32_t array_index, size_t *output) {
+  *output = rank_select.getNumL1Blocks(array_index);
+}
+
+__global__ void getNumL2BlocksKernel(RankSelect rank_select,
+                                     uint32_t array_index, size_t *output) {
+  *output = rank_select.getNumL2Blocks(array_index);
+}
+
 class RankSelectHelper {
  private:
   std::vector<bool> bit_vector_;
@@ -180,20 +190,24 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexSizes) {
   RankSelect rank_select(std::move(bit_array));
 
   for (uint32_t i = 0; i < 5; ++i) {
-    size_t out = rank_select.getNumL1BlocksHost(i);
-    EXPECT_EQ(out, 1);
+    getNumL1BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    EXPECT_EQ(*result, 1);
   }
   for (uint32_t i = 5; i < 7; ++i) {
-    size_t out = rank_select.getNumL1BlocksHost(i);
-    EXPECT_EQ(out, 2);
+    getNumL1BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    EXPECT_EQ(*result, 2);
   }
   for (uint32_t i = 0; i < 2; ++i) {
-    size_t num_l2 = rank_select.getNumL2BlocksHost(i);
-    EXPECT_EQ(num_l2, 1);
+    getNumL2BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    EXPECT_EQ(*result, 1);
   }
   for (uint32_t i = 2; i < 4; ++i) {
-    size_t num_l2 = rank_select.getNumL2BlocksHost(i);
-    EXPECT_EQ(num_l2, 2);
+    getNumL2BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    EXPECT_EQ(*result, 2);
   }
   for (uint32_t i = 0; i < 2; ++i) {
     getNumLastL2BlocksKernel<<<1, 1>>>(rank_select, i, result);
@@ -217,14 +231,17 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexSizes) {
   kernelCheck();
   EXPECT_EQ(*result, RankSelectConfig::NUM_L2_PER_L1);
 
-  size_t num_l2 = rank_select.getNumL2BlocksHost(4);
-  EXPECT_EQ(num_l2, RankSelectConfig::NUM_L2_PER_L1);
+  getNumL2BlocksKernel<<<1, 1>>>(rank_select, 4, result);
+  kernelCheck();
+  EXPECT_EQ(*result, RankSelectConfig::NUM_L2_PER_L1);
 
-  num_l2 = rank_select.getNumL2BlocksHost(5);
-  EXPECT_EQ(num_l2, RankSelectConfig::NUM_L2_PER_L1 + 1);
+  getNumL2BlocksKernel<<<1, 1>>>(rank_select, 5, result);
+  kernelCheck();
+  EXPECT_EQ(*result, RankSelectConfig::NUM_L2_PER_L1 + 1);
 
-  num_l2 = rank_select.getNumL2BlocksHost(6);
-  EXPECT_EQ(num_l2, 2 * RankSelectConfig::NUM_L2_PER_L1);
+  getNumL2BlocksKernel<<<1, 1>>>(rank_select, 6, result);
+  kernelCheck();
+  EXPECT_EQ(*result, 2 * RankSelectConfig::NUM_L2_PER_L1);
 }
 
 TEST_F(RankSelectBlocksTest, RankSelectIndexWriting) {
@@ -239,13 +256,17 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexWriting) {
 
   // Check that all entries of all arrays are initialized to 0
   for (uint32_t i = 0; i < 7; ++i) {
-    size_t num_l1_blocks = rank_select.getNumL1BlocksHost(i);
+    getNumL1BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    uint32_t const num_l1_blocks = *result;
     for (uint32_t j = 0; j < num_l1_blocks; ++j) {
       getL1EntryKernel<<<1, 1>>>(rank_select, i, j, result);
       kernelCheck();
       EXPECT_EQ(*result, 0);
     }
-    size_t num_l2 = rank_select.getNumL2BlocksHost(i);
+    getNumL2BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    uint32_t const num_l2 = *result;
     for (uint32_t j = 0; j < num_l2; ++j) {
       getL2EntryKernel<<<1, 1>>>(rank_select, i, j, result);
       kernelCheck();
@@ -255,7 +276,9 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexWriting) {
 
   // set each entry to 1 and check that it is set
   for (uint32_t i = 0; i < 7; ++i) {
-    size_t num_l1_blocks = rank_select.getNumL1BlocksHost(i);
+    getNumL1BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    uint32_t const num_l1_blocks = *result;
     for (uint32_t j = 0; j < num_l1_blocks; ++j) {
       writeL1IndexKernel<<<1, 1>>>(rank_select, i, j, 1);
       kernelCheck();
@@ -263,7 +286,9 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexWriting) {
       kernelCheck();
       EXPECT_EQ(*result, 1);
     }
-    size_t num_l2 = rank_select.getNumL2BlocksHost(i);
+    getNumL2BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    uint32_t const num_l2 = *result;
     for (uint32_t j = 0; j < num_l2; ++j) {
       writeL2IndexKernel<<<1, 1>>>(rank_select, i, j, 1);
       kernelCheck();
@@ -282,13 +307,17 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
     RankSelect rank_select(std::move(bit_array));
 
     // check that all indices are 0
-    size_t num_l1_blocks = rank_select.getNumL1BlocksHost(0);
+    getNumL1BlocksKernel<<<1, 1>>>(rank_select, 0, result);
+    kernelCheck();
+    uint32_t const num_l1_blocks = *result;
     for (uint32_t j = 0; j < num_l1_blocks; ++j) {
       getL1EntryKernel<<<1, 1>>>(rank_select, 0, j, result);
       kernelCheck();
       EXPECT_EQ(*result, 0);
     }
-    size_t num_l2 = rank_select.getNumL2BlocksHost(0);
+    getNumL2BlocksKernel<<<1, 1>>>(rank_select, 0, result);
+    kernelCheck();
+    uint32_t const num_l2 = *result;
     for (uint32_t j = 0; j < num_l2; ++j) {
       getL2EntryKernel<<<1, 1>>>(rank_select, 0, j, result);
       kernelCheck();
@@ -307,7 +336,9 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
 
   // check that all indices are correct
   for (uint32_t i = 0; i < rank_select.bit_array_.numArrays(); ++i) {
-    size_t num_l1_blocks = rank_select.getNumL1BlocksHost(i);
+    getNumL1BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    uint32_t const num_l1_blocks = *result;
     size_t num_ones = 0;
     for (uint32_t j = 0; j < num_l1_blocks; ++j) {
       getL1EntryKernel<<<1, 1>>>(rank_select, i, j, result);
@@ -315,7 +346,9 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
       EXPECT_EQ(*result, num_ones);
       num_ones += RankSelectConfig::L1_BIT_SIZE;
     }
-    size_t num_l2 = rank_select.getNumL2BlocksHost(i);
+    getNumL2BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    uint32_t const num_l2 = *result;
     num_ones = 0;
     for (uint32_t j = 0; j < num_l2; ++j) {
       if (j % RankSelectConfig::NUM_L2_PER_L1 == 0) {
@@ -371,13 +404,17 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
   RankSelect rank_select(std::move(bit_array));
   for (uint32_t i = 0; i < num_arrays; ++i) {
     // Check that indices are correct
-    size_t num_l1_blocks = rank_select.getNumL1BlocksHost(i);
+    getNumL1BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    uint32_t const num_l1_blocks = *result;
     for (uint32_t j = 0; j < num_l1_blocks; ++j) {
       getL1EntryKernel<<<1, 1>>>(rank_select, i, j, result);
       kernelCheck();
       EXPECT_EQ(*result, helpers[i].rank1(j * RankSelectConfig::L1_BIT_SIZE));
     }
-    size_t num_l2 = rank_select.getNumL2BlocksHost(i);
+    getNumL2BlocksKernel<<<1, 1>>>(rank_select, i, result);
+    kernelCheck();
+    uint32_t const num_l2 = *result;
     size_t local_l1_block = 0;
     for (uint32_t j = 0; j < num_l2; ++j) {
       if (j % RankSelectConfig::NUM_L2_PER_L1 == 0 and j != 0) {

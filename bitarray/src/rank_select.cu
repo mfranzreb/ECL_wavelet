@@ -15,7 +15,6 @@
 
 namespace ecl {
 
-// OPT: Optimize non-kernel constructor. Takes around 3% of function time.
 __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
     : bit_array_(std::move(bit_array)), is_copy_(false) {
   cudaFuncSetCacheConfig(calculateL2EntriesKernel, cudaFuncCachePreferL1);
@@ -70,15 +69,15 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
                        num_last_l2_blocks.size() * sizeof(uint8_t),
                        cudaMemcpyHostToDevice));
 
-  std::vector<size_t> num_l2_blocks(num_arrays);
+  std::vector<size_t> num_l2_blocks_per_arr(num_arrays);
   for (size_t i = 0; i < num_arrays; ++i) {
-    num_l2_blocks[i] =
+    num_l2_blocks_per_arr[i] =
         (num_l1_blocks_[i] - 1) * RankSelectConfig::NUM_L2_PER_L1 +
         num_last_l2_blocks[i];
   }
 
   total_num_l2_blocks_ = 0;
-  for (auto const& num_blocks : num_l2_blocks) {
+  for (auto const& num_blocks : num_l2_blocks_per_arr) {
     total_num_l2_blocks_ += num_blocks;
   }
 
@@ -91,15 +90,15 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
       cudaMemset(d_l2_indices_, 0,
                  total_num_l2_blocks_ * sizeof(RankSelectConfig::L2_TYPE)));
 
-  std::exclusive_scan(num_l2_blocks.begin(), num_l2_blocks.end(),
-                      num_l2_blocks.begin(), 0);
+  std::exclusive_scan(num_l2_blocks_per_arr.begin(),
+                      num_l2_blocks_per_arr.end(),
+                      num_l2_blocks_per_arr.begin(), 0);
 
-  gpuErrchk(cudaMalloc(&d_l2_offsets_, num_l2_blocks.size() * sizeof(size_t)));
-  gpuErrchk(cudaMemcpy(d_l2_offsets_, num_l2_blocks.data(),
-                       num_l2_blocks.size() * sizeof(size_t),
+  gpuErrchk(cudaMalloc(&d_l2_offsets_,
+                       num_l2_blocks_per_arr.size() * sizeof(size_t)));
+  gpuErrchk(cudaMemcpy(d_l2_offsets_, num_l2_blocks_per_arr.data(),
+                       num_l2_blocks_per_arr.size() * sizeof(size_t),
                        cudaMemcpyHostToDevice));
-
-  l2_offsets_ = std::move(num_l2_blocks);
 
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
@@ -109,7 +108,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
   // Get maximum storage needed for device sums
   size_t temp_storage_bytes = 0;
   for (uint32_t i = 0; i < num_arrays; i++) {
-    auto const num_l1_blocks = getNumL1BlocksHost(i);
+    auto const num_l1_blocks = num_l1_blocks_[i];
     RankSelectConfig::L1_TYPE* d_data = getL1EntryPointer(i, 0);
     size_t prev_storage_bytes = temp_storage_bytes;
     gpuErrchk(cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, d_data,
@@ -128,8 +127,11 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
 
 #pragma omp parallel for num_threads(num_arrays)
   for (uint32_t i = 0; i < num_arrays; i++) {
-    auto const num_l1_blocks = getNumL1BlocksHost(i);
-    auto const num_l2_blocks = getNumL2BlocksHost(i);
+    auto const num_l1_blocks = num_l1_blocks_[i];
+    auto const num_l2_blocks =
+        i == (num_arrays - 1)
+            ? total_num_l2_blocks_ - num_l2_blocks_per_arr[i]
+            : num_l2_blocks_per_arr[i + 1] - num_l2_blocks_per_arr[i];
     if (num_l2_blocks == 1) {
       {
         std::lock_guard<std::mutex> lock(mtx);
@@ -185,7 +187,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
           int const finished_id = finished_threads.front();
           finished_threads.pop();
 
-          auto const num_l1_blocks = getNumL1BlocksHost(finished_id);
+          auto const num_l1_blocks = num_l1_blocks_[finished_id];
           RankSelectConfig::L1_TYPE* const d_data =
               getL1EntryPointer(finished_id, 0);
 
@@ -216,6 +218,7 @@ __host__ RankSelect::RankSelect(RankSelect const& other) noexcept
       d_l2_offsets_(other.d_l2_offsets_),
       d_num_last_l2_blocks_(other.d_num_last_l2_blocks_),
       d_num_l1_blocks_(other.d_num_l1_blocks_),
+      num_l1_blocks_(other.num_l1_blocks_),
       total_num_l2_blocks_(other.total_num_l2_blocks_),
       is_copy_(true) {}
 
@@ -233,6 +236,7 @@ __host__ RankSelect& RankSelect::operator=(RankSelect&& other) noexcept {
   other.d_num_last_l2_blocks_ = nullptr;
   d_num_l1_blocks_ = other.d_num_l1_blocks_;
   other.d_num_l1_blocks_ = nullptr;
+  num_l1_blocks_ = std::move(other.num_l1_blocks_);
   total_num_l2_blocks_ = other.total_num_l2_blocks_;
   is_copy_ = other.is_copy_;
   other.is_copy_ = true;
@@ -489,12 +493,6 @@ __device__ [[nodiscard]] size_t RankSelect::getNumL1Blocks(
   return d_num_l1_blocks_[array_index];
 }
 
-__host__ [[nodiscard]] size_t RankSelect::getNumL1BlocksHost(
-    uint32_t const array_index) const {
-  assert(array_index < bit_array_.numArrays());
-  return num_l1_blocks_[array_index];
-}
-
 __device__ [[nodiscard]] size_t RankSelect::getNumL2Blocks(
     uint32_t const array_index) const {
   assert(array_index < bit_array_.numArrays());
@@ -502,15 +500,6 @@ __device__ [[nodiscard]] size_t RankSelect::getNumL2Blocks(
     return total_num_l2_blocks_ - d_l2_offsets_[array_index];
   }
   return d_l2_offsets_[array_index + 1] - d_l2_offsets_[array_index];
-}
-
-__host__ [[nodiscard]] size_t RankSelect::getNumL2BlocksHost(
-    uint32_t const array_index) const {
-  assert(array_index < bit_array_.numArrays());
-  if (array_index == bit_array_.numArrays() - 1) {
-    return total_num_l2_blocks_ - l2_offsets_[array_index];
-  }
-  return l2_offsets_[array_index + 1] - l2_offsets_[array_index];
 }
 
 __device__ [[nodiscard]] size_t RankSelect::getNumLastL2Blocks(
@@ -565,11 +554,6 @@ __device__ void RankSelect::writeNumLastL2Blocks(uint32_t const array_index,
                                                  uint8_t const value) noexcept {
   assert(array_index < bit_array_.numArrays());
   d_num_last_l2_blocks_[array_index] = value;
-}
-
-__host__ __device__ [[nodiscard]] size_t RankSelect::getTotalNumL2Blocks()
-    const {
-  return total_num_l2_blocks_;
 }
 
 template <typename T>

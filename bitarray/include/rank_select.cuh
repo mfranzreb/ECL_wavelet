@@ -109,22 +109,12 @@ class RankSelect {
   __device__ [[nodiscard]] size_t getNumL1Blocks(
       uint32_t const array_index) const;
 
-  /*! @copydoc RankSelect::getNumL1Blocks
-   */
-  __host__ [[nodiscard]] size_t getNumL1BlocksHost(
-      uint32_t const array_index) const;
-
   /*!
    * \brief Get the number of L2 blocks for a bit array.
    * \param array_index Index of the bit array to be used.
    * \return Number of L2 blocks.
    */
   __device__ [[nodiscard]] size_t getNumL2Blocks(
-      uint32_t const array_index) const;
-
-  /*! @copydoc RankSelect::getNumL2Blocks
-   */
-  __host__ [[nodiscard]] size_t getNumL2BlocksHost(
       uint32_t const array_index) const;
 
   /*!
@@ -188,12 +178,6 @@ class RankSelect {
   __device__ void writeNumLastL2Blocks(uint32_t const array_index,
                                        uint8_t const value) noexcept;
 
-  /*!
-   * \brief Get the total number of L2 blocks.
-   * \return Total number of L2 blocks.
-   */
-  __host__ __device__ [[nodiscard]] size_t getTotalNumL2Blocks() const;
-
  private:
   /*!
    * \brief Helper function to share a variable between all threads in a warp.
@@ -222,12 +206,12 @@ class RankSelect {
       d_l1_indices_; /*!< Device pointer to L1 indices for all arrays.*/
   RankSelectConfig::L2_TYPE*
       d_l2_indices_; /*!< Device pointer to L2 indices for all arrays.*/
+
+  // TODO: try removing offsets and calculate it on the fly
   size_t*
       d_l1_offsets_; /*!< Offsets where each L1 index for a bit array starts.*/
   size_t*
       d_l2_offsets_; /*!< Offsets where each L2 index for a bit array starts.*/
-  std::vector<size_t> l2_offsets_; /*!< Offsets where each L2 index for a bit
-                                    array starts. Not accessible from device.*/
 
   uint8_t* d_num_last_l2_blocks_; /*!< Number of L2 blocks in the last L1 block
                                    for each bit array.*/

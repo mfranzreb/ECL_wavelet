@@ -166,11 +166,7 @@ class BitArray {
   size_t* d_bit_sizes_; /*!< Size of each array in bits.*/
   std::vector<size_t>
       bit_sizes_; /*!< Size of each array in bits. Only acessible from host.*/
-  size_t* d_sizes_;
-  /*!< Size of the underlying data used to store the bits.*/  // OPT: could
-                                                              // be infered
-                                                              // from
-                                                              // bit_sizes_
+
   uint32_t* d_data_;  /*!< Array of 32-bit words used to store the content of
                          the bit array.*/
   size_t* d_offsets_; /*!< Array of offsets (in words) to the start of each bit

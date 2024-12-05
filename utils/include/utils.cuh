@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <memory>
+
+// TODO: add a way to choose which gpu to use
 
 #define WS 32
 
@@ -26,6 +29,7 @@
 #define MIN_BPM 2
 #endif
 
+namespace ecl {
 #define gpuErrchk(ans) \
   { gpuAssert((ans), __FILE__, __LINE__); }
 __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
@@ -50,66 +54,12 @@ __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
  * second one being the number of threads per block.
  */
 // TODO maybe measure effect of wasted warps
-__host__ std::pair<int, int> inline getLaunchConfig(size_t const num_warps,
-                                                    int const min_block_size,
-                                                    int max_block_size) {
-  cudaDeviceProp prop;
-  cudaGetDeviceProperties(&prop, 0);
-  int const min_block_size_warps = min_block_size / 32;
-  int const warps_per_sm = prop.maxThreadsPerMultiProcessor / 32;
-  int const warps_per_block = prop.maxThreadsPerBlock / 32;
-  // find max block size that can still fully load an SM
-  max_block_size = std::min(warps_per_block, max_block_size / 32);
-  while (warps_per_sm % max_block_size != 0) {
-    max_block_size -= 1;
-  }
-  if (num_warps <= max_block_size) {
-    return {1, num_warps * 32};
-  }
-  std::pair<int, int> best_match = {-1, -1};
-  int best_difference =
-      std::numeric_limits<int>::max();  // Initialize with maximum value
-
-  for (int k = 1; k <= max_block_size; ++k) {
-    // Check if max_block_size is divisible by k
-    if (max_block_size % k != 0) continue;
-
-    // Calculate block_size and num_blocks
-    int block_size = max_block_size / k;
-
-    if (block_size < min_block_size_warps) {
-      break;
-    }
-    int num_blocks_high = (num_warps + block_size - 1) / block_size;
-    int num_blocks_low = num_warps / block_size;
-
-    // Check if this is a perfect match
-    if (num_warps % block_size == 0) {
-      return {num_blocks_low, block_size * 32};
-    }
-
-    // Otherwise, calculate the difference and update best match if needed
-    int difference = block_size * num_blocks_high - num_warps;
-    if (difference < best_difference) {
-      best_difference = difference;
-      best_match = {num_blocks_high, block_size * 32};
-    }
-    difference = num_warps - block_size * num_blocks_low;
-    if (difference < best_difference) {
-      best_difference = difference;
-      best_match = {num_blocks_low, block_size * 32};
-    }
-  }
-
-  return best_match;  // Return the best match found
-}
+__host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
+                                             int const min_block_size,
+                                             int max_block_size);
 
 // TODO: should not need this
-__host__ inline int getMaxBlockSize() {
-  cudaDeviceProp prop;
-  cudaGetDeviceProperties(&prop, 0);
-  return prop.maxThreadsPerBlock;
-}
+__host__ int getMaxBlockSize();
 
 /*!
  * \brief Check if a number is a power of two.
@@ -119,7 +69,7 @@ __host__ inline int getMaxBlockSize() {
  * \return True if n is a power of two, false otherwise.
  */
 template <typename T>
-__host__ __device__ inline bool isPowTwo(T const n) {
+__host__ __device__ bool isPowTwo(T const n) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type.");
   return (n & (n - 1)) == 0;
@@ -133,7 +83,7 @@ __host__ __device__ inline bool isPowTwo(T const n) {
  * \return Previous power of two that is smaller than n.
  */
 template <typename T>
-__device__ inline T getPrevPowTwo(T n) {
+__device__ T getPrevPowTwo(T n) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type.");
   if (n == 0) {
@@ -162,21 +112,14 @@ __device__ inline T getPrevPowTwo(T n) {
  * \return 2^n.
  */
 template <typename T>
-__host__ __device__ inline T powTwo(T n) {
+__host__ __device__ T powTwo(T n) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type.");
   return 1 << n;
 }
 
 // TODO: Add at entrypoints of library
-__host__ inline void checkWarpSize() {
-  cudaDeviceProp prop;
-  cudaGetDeviceProperties(&prop, 0);
-  if (prop.warpSize != WS) {
-    fprintf(stderr, "Warp size must be 32, but is %d\n", prop.warpSize);
-    exit(EXIT_FAILURE);
-  }
-}
+__host__ void checkWarpSize();
 
 #define gpuErrchkInternal(ans, file, line) \
   { gpuAssert((ans), file, line); }
@@ -194,13 +137,13 @@ __host__ inline void kernelCheckFunc(const char *file, int line) {
  * \return Value of the bit.
  */
 template <typename T>
-__host__ __device__ inline bool getBit(uint8_t const i, T const c) {
+__host__ __device__ bool getBit(uint8_t const i, T const c) {
   assert(i < sizeof(T) * 8);
   return (c >> i) & 1;
 }
 
 template <typename T>
-__device__ inline T ceilLog2(T n) {
+__device__ T ceilLog2(T n) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type.");
   if constexpr (sizeof(T) == 8) {
@@ -219,7 +162,7 @@ __device__ inline T ceilLog2(T n) {
 }
 
 template <typename T>
-__host__ inline T ceilLog2Host(T n) {
+__host__ T ceilLog2Host(T n) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type.");
   if constexpr (sizeof(T) == 8) {
@@ -236,3 +179,4 @@ __host__ inline T ceilLog2Host(T n) {
     return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
   }
 }
+}  // namespace ecl

@@ -5,11 +5,12 @@ set(TARGET ecl_RS_benchmarks)
 add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_rank_select_construction.cu")
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/../include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/bitarray/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include" "${CMAKE_SOURCE_DIR}/utils/include")
 
 
 # target_link_libraries(runTests YourMainProjectLibrary)
 target_link_libraries(${TARGET}
+    PRIVATE ecl_utils
     PRIVATE ecl_bitarray
     OpenMP::OpenMP_CXX
     CUDA::cudart
@@ -29,12 +30,13 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/profile_rank_select_constr
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/bitarray/include" "${CMAKE_SOURCE_DIR}/utils/include")
 
 
 # target_link_libraries(runTests YourMainProjectLibrary)
 target_link_libraries(${TARGET}
     PRIVATE ecl_bitarray
+    PRIVATE ecl_utils
     OpenMP::OpenMP_CXX
     CUDA::cudart
 )

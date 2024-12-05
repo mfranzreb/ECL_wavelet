@@ -30,7 +30,8 @@ if(PROFILE AND CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo --ptxas-options=-v")
 endif()
 
-# Add locations of other CMakelists.txt (one per call)
+add_subdirectory(utils)
+
 add_subdirectory(bitarray)
 
 add_subdirectory(tree)

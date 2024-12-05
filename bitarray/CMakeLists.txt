@@ -5,7 +5,7 @@ file(GLOB BA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SO
 
 add_library(${TARGET} STATIC ${BA_SOURCES})
 
-include_directories(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/include")
+include_directories(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_SOURCE_DIR}/utils/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -14,6 +14,7 @@ target_include_directories(${TARGET}
 
 
 target_link_libraries(${TARGET}
+    PRIVATE ecl_utils
     OpenMP::OpenMP_CXX
     CUDA::cudart
 )

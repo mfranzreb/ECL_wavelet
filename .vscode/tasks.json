@@ -18,6 +18,14 @@
       "problemMatcher": []
     },
     {
+      "label": "build RS profile",
+      "type": "shell",
+      "command": "cmake",
+      "dependsOn": ["CMake Configure", "Build target RS profile"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
       "label": "build tree tests",
       "type": "shell",
       "command": "cmake",
@@ -58,6 +66,16 @@
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "./build", "--target", "ecl_RS_benchmarks"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Build target RS profile",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "./build", "--target", "ecl_RS_profile"],
       "group": {
         "kind": "build",
         "isDefault": true

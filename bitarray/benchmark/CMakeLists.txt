@@ -32,6 +32,10 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/profile_rank_select_constr
 # Add the ./include folder to the list of include directories
 include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/bitarray/include" "${CMAKE_SOURCE_DIR}/utils/include")
 
+target_include_directories(${TARGET}
+    PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
+    PRIVATE CUDAToolkit_INCLUDE_DIRS
+)
 
 # target_link_libraries(runTests YourMainProjectLibrary)
 target_link_libraries(${TARGET}

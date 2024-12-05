@@ -130,6 +130,14 @@ __host__ inline void kernelCheckFunc(const char *file, int line) {
   gpuErrchkInternal(cudaPeekAtLastError(), file, line);
 }
 
+#define kernelStreamCheck(stream) \
+  kernelStreamCheckFunc(stream, __FILE__, __LINE__)
+__host__ inline void kernelStreamCheckFunc(cudaStream_t stream,
+                                           const char *file, int line) {
+  gpuErrchkInternal(cudaStreamSynchronize(stream), file, line);
+  gpuErrchkInternal(cudaPeekAtLastError(), file, line);
+}
+
 /*!
  * \brief Get i-th least significant bit of a character. Starting from 0.
  * \param i Index of the bit. LSB is 0.

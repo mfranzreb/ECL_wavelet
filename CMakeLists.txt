@@ -11,9 +11,11 @@ option(PROFILE "Enable profiling" OFF)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CUDA_STANDARD 20)
 
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --default-stream per-thread -Xcompiler=-fopenmp")
+
 #if in Debug mode, enable CUDA debugging
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-    set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-g -G")  # enable cuda-gdb
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G")  # enable cuda-gdb
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -27,7 +29,7 @@ find_package(OpenMP REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
 if(PROFILE AND CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-lineinfo --ptxas-options=-v")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo --ptxas-options=-v")
 endif()
 
 add_subdirectory(utils)

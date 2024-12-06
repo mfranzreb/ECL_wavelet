@@ -287,7 +287,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogramRandom) {
                          cudaMemcpyDeviceToHost));
 
     for (size_t i = 0; i < alphabet_size; ++i) {
-      EXPECT_EQ(hist_should[i], h_histogram[i]);
+      EXPECT_EQ(hist_should[alphabet[i]], h_histogram[i]);
     }
     gpuErrchk(cudaFree(d_alphabet));
     gpuErrchk(cudaFree(d_histogram));

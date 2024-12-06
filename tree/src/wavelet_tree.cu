@@ -27,13 +27,17 @@ template class WaveletTree<uint64_t>;
 
 template <typename T>
 __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
-                                     std::vector<T>&& alphabet)
+                                     std::vector<T>&& alphabet,
+                                     uint8_t const GPU_index)
     : alphabet_(alphabet), is_copy_(false) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type");
   assert(data_size > 0);
   assert(alphabet.size() > 0);
   assert(std::is_sorted(alphabet.begin(), alphabet.end()));
+
+  // Set device
+  gpuErrchk(cudaSetDevice(GPU_index));
   checkWarpSize();
   // make minimal alphabet
   alphabet_size_ = alphabet.size();
@@ -42,11 +46,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   num_levels_ = ceil(log2(alphabet_size_));
   alphabet_start_bit_ = num_levels_ - 1;
-
-  // copy minimal alphabet to device
-  gpuErrchk(cudaMalloc(&d_min_alphabet_, alphabet_size_ * sizeof(T)));
-  gpuErrchk(cudaMemcpy(d_min_alphabet_, min_alphabet.data(),
-                       alphabet_size_ * sizeof(T), cudaMemcpyHostToDevice));
 
   // TODO separato codes from code lens
   //  create codes and copy to device
@@ -179,7 +178,6 @@ __host__ WaveletTree<T>::WaveletTree(WaveletTree const& other)
       alphabet_size_(other.alphabet_size_),
       alphabet_start_bit_(other.alphabet_start_bit_),
       num_levels_(other.num_levels_),
-      d_min_alphabet_(other.d_min_alphabet_),
       d_codes_(other.d_codes_),
       d_code_lens_(other.d_code_lens_),
       d_counts_(other.d_counts_),
@@ -188,7 +186,6 @@ __host__ WaveletTree<T>::WaveletTree(WaveletTree const& other)
 template <typename T>
 WaveletTree<T>::~WaveletTree() {
   if (not is_copy_) {
-    gpuErrchk(cudaFree(d_min_alphabet_));
     gpuErrchk(cudaFree(d_codes_));
     gpuErrchk(cudaFree(d_code_lens_));
     gpuErrchk(cudaFree(d_counts_));

@@ -58,9 +58,10 @@ class WaveletTree {
    * \param data Input data to build the wavelet tree.
    * \param data_size Number of elements in the input data.
    * \param alphabet Alphabet of the input data. Must be sorted.
+   * \param GPU_index Index of the GPU to use.
    */
   __host__ WaveletTree(T* const data, size_t data_size,
-                       std::vector<T>&& alphabet);
+                       std::vector<T>&& alphabet, uint8_t const GPU_index);
 
   /*! Copy constructor*/
   __host__ WaveletTree(WaveletTree const& other);
@@ -136,17 +137,6 @@ class WaveletTree {
   __device__ size_t getCounts(size_t i) const;
 
  private:
-  /*!
-   * \brief Struct for extended version of pointerless wavelet tree.
-   */
-  //? Should not be necessary, since level can be inferred from code length
-  struct Count {
-    size_t count_; /*!< Number of symbols that are lexicographically smaller*/
-    size_t level_; /*!< Level at which the symbol has it's leaf*/
-  };
-
-  T* d_min_alphabet_;          //?Necessary?         /*!< Alphabet from
-                               //[0..alphabet_size_)*/
   std::vector<T> alphabet_;    /*!< Alphabet of the wavelet tree*/
   size_t alphabet_size_;       /*!< Size of the alphabet*/
   uint8_t alphabet_start_bit_; /*!< Bit where the alphabet starts, 0 is the

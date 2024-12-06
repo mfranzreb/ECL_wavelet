@@ -11,7 +11,6 @@ namespace internal {
 static cudaDeviceProp prop;
 }  // namespace internal
 
-// TODO maybe measure effect of wasted warps
 __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
                                              int const min_block_size,
                                              int max_block_size) {
@@ -67,7 +66,6 @@ __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
   return best_match;  // Return the best match found
 }
 
-// TODO: should not need this
 __host__ int getMaxBlockSize() {
   if (internal::prop.totalGlobalMem == 0) {
     cudaGetDeviceProperties(&internal::prop, 0);
@@ -75,7 +73,6 @@ __host__ int getMaxBlockSize() {
   return internal::prop.maxThreadsPerBlock;
 }
 
-// TODO: Add at entrypoints of library
 __host__ void checkWarpSize() {
   if (internal::prop.totalGlobalMem == 0) {
     cudaGetDeviceProperties(&internal::prop, 0);

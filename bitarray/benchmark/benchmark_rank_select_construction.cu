@@ -55,7 +55,10 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
   state.counters["param.size"] = size;
 
   for (auto _ : state) {
-    RankSelect rs(std::move(bit_array));
+    state.PauseTiming();
+    auto ba_copy = bit_array;
+    state.ResumeTiming();
+    RankSelect rs(std::move(ba_copy));
   }
 }
 

@@ -289,8 +289,6 @@ __host__ std::vector<size_t> WaveletTree<T>::rank(
 template <typename T>
 __host__ std::vector<size_t> WaveletTree<T>::select(
     std::vector<RankSelectQuery<T>>& queries) {
-  //? Makes sense that positions 1-indexed? -> Implement zero based, but ask for
-  // 1 based
   assert(std::all_of(queries.begin(), queries.end(),
                      [](const RankSelectQuery<T>& s) { return s.index_ > 0; }));
   struct cudaFuncAttributes funcAttrib;

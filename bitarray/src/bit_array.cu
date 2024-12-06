@@ -6,6 +6,9 @@
 #include "bit_array.cuh"
 #include "utils.cuh"
 
+// TODO: For funcs that use offsets, give the opt to pass the offset, and avoid
+// a mem access
+
 namespace ecl {
 __host__ BitArray::BitArray(std::vector<size_t> const& sizes)
     : num_arrays_(sizes.size()), is_copy_(false) {

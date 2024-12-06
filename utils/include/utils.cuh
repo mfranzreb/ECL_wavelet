@@ -58,7 +58,6 @@ __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
                                              int const min_block_size,
                                              int max_block_size);
 
-// TODO: should not need this
 __host__ int getMaxBlockSize();
 
 /*!
@@ -118,7 +117,6 @@ __host__ __device__ T powTwo(T n) {
   return 1 << n;
 }
 
-// TODO: Add at entrypoints of library
 __host__ void checkWarpSize();
 
 #define gpuErrchkInternal(ans, file, line) \

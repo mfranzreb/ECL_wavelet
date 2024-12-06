@@ -64,7 +64,7 @@
       "name": "Debug bitarray benchmarks CUDA",
       "type": "cuda-gdb",
       "request": "launch",
-      "program": "${workspaceFolder}/build/benchmark/ecl_RS_benchmarks",
+      "program": "${workspaceFolder}/build/bitarray/benchmark/ecl_RS_benchmarks",
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "build bitarray benchmarks"
@@ -73,7 +73,7 @@
       "name": "Debug bitarray benchmarks",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/benchmark/ecl_RS_benchmarks",
+      "program": "${workspaceFolder}/build/bitarray/benchmark/ecl_RS_benchmarks",
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "MIMode": "gdb",

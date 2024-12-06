@@ -54,4 +54,10 @@ BENCHMARK(BM_WaveletTreeConstruction<uint8_t>)
                    {4, 26, 45, 64, 155, 256}})
     ->Iterations(5)
     ->Unit(benchmark::kMillisecond);
+
+BENCHMARK(BM_WaveletTreeConstruction<uint16_t>)
+    ->ArgsProduct({{1'000'000'000, 2'000'000'000, 4'000'000'000},
+                   {1'000, 8'000, 24'000}})
+    ->Iterations(5)
+    ->Unit(benchmark::kMillisecond);
 }  // namespace ecl

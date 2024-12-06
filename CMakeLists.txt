@@ -45,8 +45,7 @@ message(STATUS "CUDAToolkit_FLAGS: ${CMAKE_CUDA_FLAGS}")
 if(BUILD_BENCHMARKS)
     set(BENCHMARK_ENABLE_TESTING OFF)
     add_subdirectory(third_party/benchmark)
-    add_subdirectory(bitarray/benchmark)
-    #add_subdirectory(tree/benchmark)
+    add_subdirectory(benchmark)
 endif()
 
 

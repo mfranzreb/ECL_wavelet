@@ -136,7 +136,7 @@
       "name": "Debug RS profile",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/bitarray/benchmark/ecl_RS_profile",
+      "program": "${workspaceFolder}/build/benchmark/ecl_RS_profile",
       "args": ["100000", "10"],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",

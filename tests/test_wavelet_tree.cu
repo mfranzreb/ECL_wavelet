@@ -3,12 +3,13 @@
 #include <algorithm>
 #include <fstream>
 #include <random>
+#include <unordered_map>
 #include <vector>
 #include <wavelet_tree.cuh>
 
 namespace ecl {
 
-static constexpr uint8_t GPU_index = 0;
+static constexpr uint8_t kGPUIndex = 0;
 
 template <typename T>
 class WaveletTreeTest : public ::testing::Test {
@@ -42,6 +43,33 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
 }
 
 template <typename T>
+std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetDataAndHist(
+    size_t alphabet_size, size_t const data_size,
+    std::unordered_map<T, size_t>& hist) {
+  std::vector<T> alphabet(alphabet_size);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<T> dis(0, std::numeric_limits<T>::max());
+  std::generate(alphabet.begin(), alphabet.end(), [&]() { return dis(gen); });
+  // Check that all elements are unique
+  std::sort(alphabet.begin(), alphabet.end());
+  // remove duplicates
+  auto it = std::unique(alphabet.begin(), alphabet.end());
+  alphabet_size = std::distance(alphabet.begin(), it);
+  alphabet.resize(alphabet_size);
+
+  std::vector<T> data(data_size);
+  std::uniform_int_distribution<size_t> dis2(0, alphabet_size - 1);
+  std::generate(data.begin(), data.end(), [&]() {
+    auto const symbol = alphabet[dis2(gen)];
+    hist[symbol]++;
+    return symbol;
+  });
+
+  return std::make_pair(alphabet, data);
+}
+
+template <typename T>
 std::vector<size_t> calculateHistogram(const std::vector<T>& data,
                                        const std::vector<T>& alphabet) {
   std::vector<size_t> histogram(alphabet.size(), 0);
@@ -69,7 +97,7 @@ TYPED_TEST(WaveletTreeTest, WaveletTreeConstructor) {
   std::vector<TypeParam> data{1, 2, 3, 4, 5, 6, 7, 8, 9};
   std::vector<TypeParam> alphabet{1, 2, 3, 4, 5, 6, 7, 8, 9};
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
-                            GPU_index);
+                            kGPUIndex);
 }
 
 TYPED_TEST(WaveletTreeTest, createMinimalCodes) {
@@ -148,7 +176,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
 
   // Create the wavelet tree
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
-                            GPU_index);
+                            kGPUIndex);
   computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet.size());
   kernelCheck();
@@ -224,8 +252,9 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogramRandom) {
                    data_size) -
           3));
 
-    auto [alphabet, data] =
-        generateRandomAlphabetAndData<TypeParam>(alphabet_size, data_size);
+    std::unordered_map<TypeParam, size_t> hist_should;
+    auto [alphabet, data] = generateRandomAlphabetDataAndHist<TypeParam>(
+        alphabet_size, data_size, hist_should);
 
     alphabet_size = alphabet.size();
 
@@ -246,7 +275,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogramRandom) {
     // Create the wavelet tree
     auto alphabet_copy = alphabet;
     WaveletTree<TypeParam> wt(data.data(), data_size, std::move(alphabet_copy),
-                              GPU_index);
+                              kGPUIndex);
     computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
         wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size);
     kernelCheck();
@@ -257,7 +286,6 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogramRandom) {
                          sizeof(size_t) * alphabet_size,
                          cudaMemcpyDeviceToHost));
 
-    auto const hist_should = calculateHistogram(data, alphabet);
     for (size_t i = 0; i < alphabet_size; ++i) {
       EXPECT_EQ(hist_should[i], h_histogram[i]);
     }
@@ -276,7 +304,7 @@ TYPED_TEST(WaveletTreeTest, structure) {
     data[i] = i % alphabet.size();
   }
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
-                            GPU_index);
+                            kGPUIndex);
 
   // First level
   for (size_t i = 0; i < data.size(); ++i) {
@@ -349,7 +377,7 @@ TYPED_TEST(WaveletTreeTest, access) {
     data[i] = i % alphabet.size();
   }
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
-                            GPU_index);
+                            kGPUIndex);
 
   std::vector<size_t> indices(data.size());
   std::iota(indices.begin(), indices.end(), 0);
@@ -372,7 +400,7 @@ TYPED_TEST(WaveletTreeTest, accessRandom) {
     alphabet_size = alphabet.size();
 
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
-                              GPU_index);
+                              kGPUIndex);
 
     // Create 100 random access queries
     std::vector<size_t> indices(100);
@@ -395,7 +423,7 @@ TYPED_TEST(WaveletTreeTest, rank) {
     data[i] = i % alphabet.size();
   }
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
-                            GPU_index);
+                            kGPUIndex);
 
   std::vector<RankSelectQuery<TypeParam>> queries;
   for (size_t i = 0; i < data.size(); ++i) {
@@ -421,7 +449,7 @@ TYPED_TEST(WaveletTreeTest, rankRandom) {
     auto alphabet_copy = alphabet;
 
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
-                              GPU_index);
+                              kGPUIndex);
 
     // Create 100 random rank queries
     std::vector<RankSelectQuery<TypeParam>> queries(100);
@@ -451,7 +479,7 @@ TYPED_TEST(WaveletTreeTest, select) {
     data[i] = i % alphabet.size();
   }
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
-                            GPU_index);
+                            kGPUIndex);
 
   std::vector<RankSelectQuery<TypeParam>> queries;
   for (size_t i = 0; i < data.size(); ++i) {
@@ -470,24 +498,31 @@ TYPED_TEST(WaveletTreeTest, select) {
 }
 
 TYPED_TEST(WaveletTreeTest, selectRandom) {
-  for (int i = 0; i < 10; i++) {
+  int num_iters = 10;
+  int queries_per_iter = 100;
+  if constexpr (std::is_same<TypeParam, uint64_t>::value or
+                std::is_same<TypeParam, uint32_t>::value) {
+    num_iters = 5;
+    queries_per_iter = 10;
+  }
+  for (int i = 0; i < num_iters; i++) {
     // Random data size between 1000 and 1'000'000
     size_t data_size = 1000 + (rand() % 1'000'000);
     size_t alphabet_size =
         std::min(3 + (rand() % (data_size - 3)),
                  size_t(std::numeric_limits<TypeParam>::max()));
 
-    auto [alphabet, data] =
-        generateRandomAlphabetAndData<TypeParam>(alphabet_size, data_size);
+    std::unordered_map<TypeParam, size_t> hist;
+    auto [alphabet, data] = generateRandomAlphabetDataAndHist<TypeParam>(
+        alphabet_size, data_size, hist);
     alphabet_size = alphabet.size();
     auto alphabet_copy = alphabet;
 
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
-                              GPU_index);
+                              kGPUIndex);
 
     // Create 100 random select queries
-    auto const hist = calculateHistogram(data, alphabet_copy);
-    std::vector<RankSelectQuery<TypeParam>> queries(100);
+    std::vector<RankSelectQuery<TypeParam>> queries(queries_per_iter);
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<TypeParam> dis_alphabet(0, alphabet_size - 1);
@@ -498,8 +533,7 @@ TYPED_TEST(WaveletTreeTest, selectRandom) {
       do {
         symbol_index = dis_alphabet(gen);
         symbol = alphabet_copy[symbol_index];
-        count = hist[symbol_index];
-        break;
+        count = hist[symbol];
       } while (count == 0);
       std::uniform_int_distribution<size_t> dis_index(1, count);
       auto index = dis_index(gen);

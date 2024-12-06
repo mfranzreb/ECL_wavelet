@@ -25,18 +25,16 @@ trap 'error_handler ${LINENO}' ERR
 
 # Build project with tests
 print_status "Building project"
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -S . -B ${BUILD_DIR}
+cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DPROFILE=ON -S . -B ${BUILD_DIR}
 cmake --build ${BUILD_DIR} --target ${TEST_BINARY}
 
 # Run tests
 print_status "Running tests"
 ./${BUILD_DIR}/tests/${TEST_BINARY}
 
-cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTS=ON -S . -B ${BUILD_DIR}
-cmake --build ${BUILD_DIR} --target ${TEST_BINARY}
 # Run Compute Sanitizer checks
 print_status "Running Compute Sanitizer - Memory Check"
-${COMPUTE_SANITIZER} --tool memcheck ./${BUILD_DIR}/tests/${TEST_BINARY} --gtest_brief=1
+${COMPUTE_SANITIZER} --tool memcheck ./${BUILD_DIR}/tests/${TEST_BINARY}
 
 print_status "Running Compute Sanitizer - Race Check"
 ${COMPUTE_SANITIZER} --tool racecheck ./${BUILD_DIR}/tests/${TEST_BINARY} --gtest_brief=1

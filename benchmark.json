@@ -1,10 +1,10 @@
 {
   "context": {
-    "date": "2024-11-27T13:37:15-06:00",
+    "date": "2024-12-06T04:06:55-06:00",
     "host_name": "denver",
     "executable": "./build/bitarray/benchmark/ecl_RS_benchmarks",
     "num_cpus": 12,
-    "mhz_per_cpu": 3458,
+    "mhz_per_cpu": 1596,
     "cpu_scaling_enabled": false,
     "caches": [
       {
@@ -32,7 +32,7 @@
         "num_sharing": 6
       }
     ],
-    "load_avg": [0.472168,0.286621,0.132324],
+    "load_avg": [0.865723,0.45752,0.19043],
     "library_version": "v1.9.0-21-g62a321d6",
     "library_build_type": "release",
     "json_schema_version": 1
@@ -47,9 +47,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 1259,
-      "real_time": 5.5771032729237158e-01,
-      "cpu_time": 5.4421034074662433e-01,
+      "iterations": 5094,
+      "real_time": 1.3699358370358766e-01,
+      "cpu_time": 1.3669741185708642e-01,
       "time_unit": "ms",
       "param.size": 3.3554432000000000e+07
     },
@@ -62,9 +62,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 90,
-      "real_time": 7.9737700664231346e+00,
-      "cpu_time": 7.7400002888888899e+00,
+      "iterations": 960,
+      "real_time": 7.3391886738439405e-01,
+      "cpu_time": 7.3084319583334634e-01,
       "time_unit": "ms",
       "param.size": 1.0737418240000000e+09
     },
@@ -77,9 +77,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 23,
-      "real_time": 3.0295831262660414e+01,
-      "cpu_time": 3.0242664652173971e+01,
+      "iterations": 251,
+      "real_time": 2.8445101695587911e+00,
+      "cpu_time": 2.7998650239044029e+00,
       "time_unit": "ms",
       "param.size": 4.2949672960000000e+09
     },
@@ -92,9 +92,9 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 12,
-      "real_time": 6.0056487496088572e+01,
-      "cpu_time": 5.9944068333333433e+01,
+      "iterations": 131,
+      "real_time": 5.3983787305738407e+00,
+      "cpu_time": 5.2783015190837670e+00,
       "time_unit": "ms",
       "param.size": 8.5899345920000000e+09
     }

@@ -9,6 +9,7 @@ NC='\033[0m' # No Color
 BUILD_DIR="build"
 TEST_BINARY="ecl_all_tests"
 COMPUTE_SANITIZER="compute-sanitizer"
+IWYU_TOOL_PATH = "~/iwyu_tool.py"
 
 # Function to print colored status messages
 print_status() {
@@ -23,6 +24,15 @@ error_handler() {
 
 trap 'error_handler ${LINENO}' ERR
 
+# Build for IWYU, only if the tool is available
+if [ ! -f ${IWYU_TOOL_PATH} ]; then
+    print_status "IWYU tool not found, skipping IWYU checks"
+else
+    print_status "Building for IWYU"
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON -DPROFILE=ON  -S . -B ${BUILD_DIR}
+python ${IWYU_TOOL_PATH} -p ${BUILD_DIR} > ./IWYU_output.txt
+
+rm -rf ${BUILD_DIR}
 # Build project with tests
 print_status "Building project"
 cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DPROFILE=ON -S . -B ${BUILD_DIR}

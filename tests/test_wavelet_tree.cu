@@ -199,6 +199,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet.size()));
   computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet.size());
+  kernelCheck();
 
   gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
                        sizeof(size_t) * alphabet.size(),
@@ -223,6 +224,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet.size()));
   computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet.size());
+  kernelCheck();
 
   gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
                        sizeof(size_t) * alphabet.size(),

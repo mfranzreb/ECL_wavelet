@@ -86,6 +86,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
       getLaunchConfig(num_warps, 256, MAX_TPB);
   computeGlobalHistogramKernel<T><<<num_blocks, threads_per_block>>>(
       *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
+  kernelCheck();
 
   // Copy counts to host
   std::vector<size_t> counts(alphabet_size_);
@@ -126,6 +127,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
                                size_t(0), cudaMemcpyHostToDevice));
   fillLevelKernel<T><<<num_blocks, threads_per_block>>>(bit_array, d_data,
                                                         alphabet_start_bit_, 0);
+  kernelCheck();
 
   // Allocate space for sorted data
   T* d_sorted_data;

@@ -357,7 +357,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     gpuErrchk(cudaMemcpyToSymbol(d_data_len, &data_size, sizeof(size_t),
                                  size_t(0), cudaMemcpyHostToDevice));
     // Perform radix sort
-    // TODO: look at different versions
     cub::DeviceRadixSort::SortKeys(
         d_temp_storage, temp_storage_bytes, d_data, d_sorted_data, data_size,
         alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
@@ -659,10 +658,7 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
   // Each warp processes a block of data
   for (uint32_t i = start; i < d_data_len; i += WS * num_warps) {
     T code = 0;
-    // TODO: remove if
-    if (i + local_t_id >= d_data_len) {
-      code = 0;
-    } else {
+    if (i + local_t_id < d_data_len) {
       code = data[i + local_t_id];
     }
 

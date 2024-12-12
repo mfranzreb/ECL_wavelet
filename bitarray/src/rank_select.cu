@@ -595,11 +595,9 @@ __global__ __launch_bounds__(
     // TODO: right now unnecessary, since NUM_L2_PER_L1 is 32
     uint32_t needed_threads = (RankSelectConfig::NUM_L2_PER_L1 + 31) & ~31;
     if (threadIdx.x < needed_threads) {
-      RankSelectConfig::L2_TYPE l2_entry;
+      RankSelectConfig::L2_TYPE l2_entry = 0;
       if (threadIdx.x < RankSelectConfig::NUM_L2_PER_L1) {
         l2_entry = l2_entries[threadIdx.x];
-      } else {
-        l2_entry = 0;
       }
       // last thread writes it's entry to the following L1 block
       if (threadIdx.x == RankSelectConfig::NUM_L2_PER_L1 - 1) {
@@ -660,11 +658,9 @@ __global__ __launch_bounds__(
     // perform warp exclusive sum of l2 entries
     uint32_t needed_threads = (num_last_l2_blocks + 31) & ~31;
     if (threadIdx.x < needed_threads) {
-      RankSelectConfig::L2_TYPE l2_entry;
+      RankSelectConfig::L2_TYPE l2_entry = 0;
       if (threadIdx.x < num_last_l2_blocks) {
         l2_entry = l2_entries[threadIdx.x];
-      } else {
-        l2_entry = 0;
       }
 
       cub::WarpScan<RankSelectConfig::L2_TYPE>(cub_storage.scan)

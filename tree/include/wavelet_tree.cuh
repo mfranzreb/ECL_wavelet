@@ -315,17 +315,26 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     }
   }
 
-  // Perform exclusive sum of counts
+  // Allocate space for sorted data
+  T* d_sorted_data;
+  gpuErrchk(cudaMalloc(&d_sorted_data, data_size * sizeof(T)));
+
+  // Find necessary storage for CUB exclusive sum and radix sort
   void* d_temp_storage = nullptr;
   size_t temp_storage_bytes = 0;
-  cub::DeviceScan::ExclusiveSum(nullptr, temp_storage_bytes, d_counts_,
-                                d_counts_, alphabet_size_);
-
-  // TODO use same memory from RadixSort
-  gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
   cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_counts_,
                                 d_counts_, alphabet_size_);
-  gpuErrchk(cudaFree(d_temp_storage));
+
+  size_t temp_storage_bytes_radix = 0;
+  cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes_radix,
+                                 d_data, d_sorted_data, data_size);
+
+  temp_storage_bytes = std::max(temp_storage_bytes, temp_storage_bytes_radix);
+  gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+
+  // Perform exclusive sum of counts
+  cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_counts_,
+                                d_counts_, alphabet_size_);
 
   BitArray bit_array(bit_array_sizes, false);
 
@@ -341,16 +350,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   fillLevelKernel<T><<<num_blocks, threads_per_block>>>(bit_array, d_data,
                                                         alphabet_start_bit_, 0);
   kernelCheck();
-
-  // Allocate space for sorted data
-  T* d_sorted_data;
-  gpuErrchk(cudaMalloc(&d_sorted_data, data_size * sizeof(T)));
-
-  d_temp_storage = nullptr;
-  temp_storage_bytes = 0;
-  cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, d_data,
-                                 d_sorted_data, data_size);
-  gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
 
   data_size = bit_array_sizes[1];
   for (uint32_t l = 1; l < num_levels_; l++) {

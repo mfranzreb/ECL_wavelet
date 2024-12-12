@@ -9,7 +9,7 @@ NC='\033[0m' # No Color
 BUILD_DIR="build"
 TEST_BINARY="ecl_all_tests"
 COMPUTE_SANITIZER="compute-sanitizer"
-IWYU_TOOL_PATH = "~/iwyu_tool.py"
+IWYU_TOOL_PATH="$HOME/iwyu_tool.py"
 
 # Function to print colored status messages
 print_status() {
@@ -25,14 +25,15 @@ error_handler() {
 trap 'error_handler ${LINENO}' ERR
 
 # Build for IWYU, only if the tool is available
-if [ ! -f ${IWYU_TOOL_PATH} ]; then
-    print_status "IWYU tool not found, skipping IWYU checks"
+if [ ! -e "$IWYU_TOOL_PATH" ]; then
+    print_status "Building for IWYU"    
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON -DPROFILE=ON  -S . -B ${BUILD_DIR}
+    python ${IWYU_TOOL_PATH} -p ${BUILD_DIR} > ./IWYU_output.txt
+    rm -rf ${BUILD_DIR}
 else
-    print_status "Building for IWYU"
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTS=ON -DBUILD_BENCHMARKS=ON -DPROFILE=ON  -S . -B ${BUILD_DIR}
-python ${IWYU_TOOL_PATH} -p ${BUILD_DIR} > ./IWYU_output.txt
+    print_status "IWYU tool not found, skipping IWYU checks"
+fi
 
-rm -rf ${BUILD_DIR}
 # Build project with tests
 print_status "Building project"
 cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DPROFILE=ON -S . -B ${BUILD_DIR}
@@ -44,7 +45,7 @@ print_status "Running tests"
 
 # Run Compute Sanitizer checks
 print_status "Running Compute Sanitizer - Memory Check"
-${COMPUTE_SANITIZER} --tool memcheck ./${BUILD_DIR}/tests/${TEST_BINARY}
+${COMPUTE_SANITIZER} --tool memcheck ./${BUILD_DIR}/tests/${TEST_BINARY} --gtest_brief=1
 
 print_status "Running Compute Sanitizer - Race Check"
 ${COMPUTE_SANITIZER} --tool racecheck ./${BUILD_DIR}/tests/${TEST_BINARY} --gtest_brief=1

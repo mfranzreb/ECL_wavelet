@@ -13,8 +13,6 @@
 #include "utils.cuh"
 #include "wavelet_tree.cuh"
 
-// TODO: set max block size of kernels to max allowed by kernel properties
-
 namespace ecl {
 __device__ size_t d_data_len;
 typedef unsigned long long int cu_size_t;
@@ -81,9 +79,15 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   // Compute global_histogram and change text to min_alphabet
   // TODO: find appropriate number of warps, as many as possible
-  auto num_warps = std::min((data_size + WS - 1) / WS, 1'000'000UL);
-  auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_warps, 256, MAX_TPB);
+  auto num_warps = (data_size + WS - 1) / WS;
+
+  struct cudaFuncAttributes funcAttrib;
+  gpuErrchk(
+      cudaFuncGetAttributes(&funcAttrib, computeGlobalHistogramKernel<T>));
+  int maxThreadsPerBlockHist = funcAttrib.maxThreadsPerBlock;
+
+  auto [num_blocks, threads_per_block] = getLaunchConfig(
+      num_warps, 256, std::min(MAX_TPB, maxThreadsPerBlockHist));
   computeGlobalHistogramKernel<T><<<num_blocks, threads_per_block>>>(
       *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
   kernelCheck();
@@ -125,6 +129,13 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   gpuErrchk(cudaMemcpyToSymbol(d_data_len, &data_size, sizeof(size_t),
                                size_t(0), cudaMemcpyHostToDevice));
+
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T>));
+  int maxThreadsPerBlockFillLevel = funcAttrib.maxThreadsPerBlock;
+
+  std::tie(num_blocks, threads_per_block) = getLaunchConfig(
+      num_warps, 32, std::min(MAX_TPB, maxThreadsPerBlockFillLevel));
+
   fillLevelKernel<T><<<num_blocks, threads_per_block>>>(bit_array, d_data,
                                                         alphabet_start_bit_, 0);
   kernelCheck();
@@ -151,6 +162,10 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
         alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
     // TODO, could launch in different streams
     //  Fill l-th bit array
+    num_warps = (data_size + WS - 1) / WS;
+    std::tie(num_blocks, threads_per_block) = getLaunchConfig(
+        num_warps, 32, std::min(MAX_TPB, maxThreadsPerBlockFillLevel));
+
     fillLevelKernel<T><<<num_blocks, threads_per_block>>>(
         bit_array, d_sorted_data, alphabet_start_bit_, l);
     kernelCheck();

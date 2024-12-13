@@ -11,6 +11,7 @@ include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/bitarray/include" "${CMAKE_SO
 # target_link_libraries(runTests YourMainProjectLibrary)
 target_link_libraries(${TARGET}
     PRIVATE ecl_utils
+    PRIVATE ecl_test_bm_utils
     PRIVATE ecl_bitarray
     OpenMP::OpenMP_CXX
     CUDA::cudart
@@ -42,6 +43,7 @@ target_include_directories(${TARGET}
 target_link_libraries(${TARGET}
     PRIVATE ecl_bitarray
     PRIVATE ecl_utils
+    PRIVATE ecl_test_bm_utils
     OpenMP::OpenMP_CXX
     CUDA::cudart
 )
@@ -70,6 +72,7 @@ target_include_directories(${TARGET}
 target_link_libraries(${TARGET}
     PRIVATE ecl_wavelet_tree
     PRIVATE ecl_utils
+    PRIVATE ecl_test_bm_utils
     OpenMP::OpenMP_CXX
     CUDA::cudart
     benchmark
@@ -100,6 +103,7 @@ target_include_directories(${TARGET}
 target_link_libraries(${TARGET}
     PRIVATE ecl_wavelet_tree
     PRIVATE ecl_utils
+    PRIVATE ecl_test_bm_utils
     OpenMP::OpenMP_CXX
     CUDA::cudart
 )

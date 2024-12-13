@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "rank_select.cuh"
+#include "test_benchmark_utils.cuh"
 
 namespace ecl {
 
@@ -47,15 +48,6 @@ __global__ void getNumLastL2BlocksKernel(RankSelect rank_select,
 __global__ void writeWordKernel(BitArray bit_array, size_t array_index,
                                 size_t index, uint32_t value) {
   bit_array.writeWord(array_index, index, value);
-}
-
-__global__ void writeWordsParallelKernel(BitArray bit_array, size_t array_index,
-                                         uint32_t *words, size_t num_words) {
-  size_t num_threads = blockDim.x * gridDim.x;
-  size_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  for (uint32_t i = thread_id; i < num_words; i += num_threads) {
-    bit_array.writeWord(array_index, i, words[i]);
-  }
 }
 
 __global__ void rank0Kernel(RankSelect rank_select, uint32_t array_index,
@@ -155,15 +147,6 @@ class RankSelectHelper {
   }
   bool operator[](size_t index) const { return bit_vector_[index]; }
 };
-
-template <typename T>
-void generateRandomNums(std::vector<T> &nums_vec, T const min, T const max) {
-  std::random_device rd;
-  std::mt19937 gen(rd());  // Random number generator
-  std::uniform_int_distribution<T> dis(min, max);
-
-  std::generate(nums_vec.begin(), nums_vec.end(), [&]() { return dis(gen); });
-}
 
 using RankSelectBoolTest = RankSelectTest<bool>;
 TEST_F(RankSelectBoolTest, RankSelectConstructor) {

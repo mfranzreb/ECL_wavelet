@@ -143,6 +143,11 @@ class WaveletTree {
    */
   __device__ size_t getCounts(size_t i) const;
 
+  /*!
+   * \brief Return whether the alphabet is minimal.
+   */
+  __device__ bool isMinAlphabet() const;
+
  private:
   std::vector<T> alphabet_;    /*!< Alphabet of the wavelet tree*/
   size_t alphabet_size_;       /*!< Size of the alphabet*/
@@ -151,9 +156,11 @@ class WaveletTree {
   Code* d_codes_; /*!< Array of codes for each symbol in the alphabet*/
   uint8_t*
       d_code_lens_; /*!< Array of code lengths for each symbol in the alphabet*/
-  size_t* d_counts_;  /*!< Array of counts for each symbol*/
-  size_t num_levels_; /*!< Number of levels in the wavelet tree*/
-  bool is_copy_;      /*!< Flag to signal whether current object is a copy*/
+  size_t* d_counts_;     /*!< Array of counts for each symbol*/
+  size_t num_levels_;    /*!< Number of levels in the wavelet tree*/
+  bool is_min_alphabet_; /*!< Flag to signal whether the alphabet is already
+                            minimal*/
+  bool is_copy_;         /*!< Flag to signal whether current object is a copy*/
 };
 
 /*!
@@ -234,23 +241,34 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type");
   assert(data_size > 0);
-  assert(alphabet.size() > 0);
-  assert(std::is_sorted(alphabet.begin(), alphabet.end()));
+  assert(alphabet_.size() > 0);
+  assert(std::is_sorted(alphabet_.begin(), alphabet_.end()));
 
   // Set device
   gpuErrchk(cudaSetDevice(GPU_index));
   checkWarpSize();
+
+  // Check if alphabet is already minimal
+  is_min_alphabet_ =
+      std::all_of(alphabet_.begin(), alphabet_.end(),
+                  [i = 0](unsigned value) mutable { return value == i++; });
+  alphabet_size_ = alphabet_.size();
+
+  std::vector<Code> codes(alphabet_size_);
   // make minimal alphabet
-  alphabet_size_ = alphabet.size();
-  std::vector<T> min_alphabet(alphabet_size_);
-  std::iota(min_alphabet.begin(), min_alphabet.end(), 0);
+  if (not is_min_alphabet_) {
+    auto min_alphabet = std::vector<T>(alphabet_size_);
+    std::iota(min_alphabet.begin(), min_alphabet.end(), 0);
+    codes = createMinimalCodes(min_alphabet);
+  } else {
+    codes = createMinimalCodes(alphabet_);
+  }
 
   num_levels_ = ceil(log2(alphabet_size_));
   alphabet_start_bit_ = num_levels_ - 1;
 
   // TODO separato codes from code lens
   //  create codes and copy to device
-  std::vector<Code> codes = createMinimalCodes(min_alphabet);
   gpuErrchk(cudaMalloc(&d_codes_, alphabet_size_ * sizeof(Code)));
   gpuErrchk(cudaMemcpy(d_codes_, codes.data(), alphabet_size_ * sizeof(Code),
                        cudaMemcpyHostToDevice));
@@ -277,7 +295,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   // Copy alphabet to device
   T* d_alphabet;
   gpuErrchk(cudaMalloc(&d_alphabet, alphabet_size_ * sizeof(T)));
-  gpuErrchk(cudaMemcpy(d_alphabet, alphabet.data(), alphabet_size_ * sizeof(T),
+  gpuErrchk(cudaMemcpy(d_alphabet, alphabet_.data(), alphabet_size_ * sizeof(T),
                        cudaMemcpyHostToDevice));
 
   // Compute global_histogram and change text to min_alphabet
@@ -398,6 +416,7 @@ __host__ WaveletTree<T>::WaveletTree(WaveletTree const& other)
       d_codes_(other.d_codes_),
       d_code_lens_(other.d_code_lens_),
       d_counts_(other.d_counts_),
+      is_min_alphabet_(other.is_min_alphabet_),
       is_copy_(true) {}
 
 template <typename T>
@@ -441,9 +460,11 @@ __host__ std::vector<T> WaveletTree<T>::access(
   gpuErrchk(cudaFree(d_indices));
   gpuErrchk(cudaFree(d_results));
 
+  if (not is_min_alphabet_) {
 #pragma omp parallel for
-  for (size_t i = 0; i < num_indices; ++i) {
-    results[i] = alphabet_[results[i]];
+    for (size_t i = 0; i < num_indices; ++i) {
+      results[i] = alphabet_[results[i]];
+    }
   }
   return results;
 }
@@ -467,16 +488,17 @@ __host__ std::vector<size_t> WaveletTree<T>::rank(
   size_t* d_results;
   gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(size_t)));
 
-  // TODO: have flag to check if alphabet is already minimal in constructor
   //  Convert query symbols to minimal alphabet
+  if (not is_min_alphabet_) {
 #pragma omp parallel for
-  for (size_t i = 0; i < num_queries; ++i) {
-    auto const symbol_index =
-        std::lower_bound(alphabet_.begin(), alphabet_.end(),
-                         queries[i].symbol_) -
-        alphabet_.begin();
-    assert(symbol_index < alphabet_size_);
-    queries[i].symbol_ = static_cast<T>(symbol_index);
+    for (size_t i = 0; i < num_queries; ++i) {
+      auto const symbol_index =
+          std::lower_bound(alphabet_.begin(), alphabet_.end(),
+                           queries[i].symbol_) -
+          alphabet_.begin();
+      assert(symbol_index < alphabet_size_);
+      queries[i].symbol_ = static_cast<T>(symbol_index);
+    }
   }
 
   // Copy queries to device
@@ -518,14 +540,16 @@ __host__ std::vector<size_t> WaveletTree<T>::select(
   gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(size_t)));
 
   // Convert query symbols to minimal alphabet
+  if (not is_min_alphabet_) {
 #pragma omp parallel for
-  for (size_t i = 0; i < num_queries; ++i) {
-    auto const symbol_index =
-        std::lower_bound(alphabet_.begin(), alphabet_.end(),
-                         queries[i].symbol_) -
-        alphabet_.begin();
-    assert(symbol_index < alphabet_size_);
-    queries[i].symbol_ = static_cast<T>(symbol_index);
+    for (size_t i = 0; i < num_queries; ++i) {
+      auto const symbol_index =
+          std::lower_bound(alphabet_.begin(), alphabet_.end(),
+                           queries[i].symbol_) -
+          alphabet_.begin();
+      assert(symbol_index < alphabet_size_);
+      queries[i].symbol_ = static_cast<T>(symbol_index);
+    }
   }
 
   // Copy queries to device
@@ -623,6 +647,11 @@ __device__ size_t WaveletTree<T>::getCounts(size_t i) const {
   return d_counts_[i];
 }
 
+template <typename T>
+__device__ bool WaveletTree<T>::isMinAlphabet() const {
+  return is_min_alphabet_;
+}
+
 // local block hist with shmem
 template <typename T>
 __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
@@ -634,11 +663,12 @@ __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
   uint32_t global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
   for (uint32_t i = global_t_id; i < data_size; i += total_threads) {
     T const char_data = data[i];
-    // TODO: avoid if alphabet already minimal
-    size_t const char_index =
-        thrust::lower_bound(thrust::seq, alphabet, alphabet + alphabet_size,
-                            char_data) -
-        alphabet;
+    T const char_index =
+        tree.isMinAlphabet()
+            ? char_data
+            : thrust::lower_bound(thrust::seq, alphabet,
+                                  alphabet + alphabet_size, char_data) -
+                  alphabet;
     typename WaveletTree<T>::Code const code = tree.encode(char_index);
     atomicAdd((cu_size_t*)&counts[char_index], size_t(1));
     data[i] = code.code_;
@@ -815,7 +845,7 @@ __global__ void selectKernel(WaveletTree<T> tree,
       query.index_ -= tree.getCounts(char_start);
     }
     if (local_t_id == 0) {
-      results[i] = query.index_ - 1;  // 0-indexed}
+      results[i] = query.index_ - 1;  // 0-indexed
     }
   }
 }

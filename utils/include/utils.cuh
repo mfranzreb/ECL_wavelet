@@ -6,8 +6,6 @@
 #include <limits>
 #include <memory>
 
-// TODO: add a way to choose which gpu to use
-
 #define WS 32
 
 // Define launch bounds based on compute capability

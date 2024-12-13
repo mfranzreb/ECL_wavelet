@@ -133,41 +133,42 @@ TYPED_TEST(WaveletTreeTest, createMinimalCodes) {
 
 TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
   std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  auto const alphabet_size = alphabet.size();
 
   std::vector<TypeParam> data(1000);
   for (size_t i = 0; i < data.size(); ++i) {
-    data[i] = i % alphabet.size();
+    data[i] = i % alphabet_size;
   }
 
   // allocate memory for arguments of kernel
   TypeParam* d_alphabet;
   TypeParam* d_data;
   size_t* d_histogram;
-  gpuErrchk(cudaMalloc(&d_alphabet, sizeof(TypeParam) * alphabet.size()));
+  gpuErrchk(cudaMalloc(&d_alphabet, sizeof(TypeParam) * alphabet_size));
   gpuErrchk(cudaMemcpy(d_alphabet, alphabet.data(),
-                       sizeof(TypeParam) * alphabet.size(),
+                       sizeof(TypeParam) * alphabet_size,
                        cudaMemcpyHostToDevice));
   gpuErrchk(cudaMalloc(&d_data, sizeof(TypeParam) * data.size()));
   gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data.size(),
                        cudaMemcpyHostToDevice));
-  gpuErrchk(cudaMalloc(&d_histogram, sizeof(size_t) * alphabet.size()));
-  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet.size()));
+  gpuErrchk(cudaMalloc(&d_histogram, sizeof(size_t) * alphabet_size));
+  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
 
+  auto alphabet_copy = alphabet;
   // Create the wavelet tree
-  WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+  WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet_copy),
                             kGPUIndex);
   computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
-      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet.size());
+      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
   // Pass the histogram to the host
-  std::vector<size_t> h_histogram(alphabet.size());
+  std::vector<size_t> h_histogram(alphabet_size);
   gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
-                       sizeof(size_t) * alphabet.size(),
-                       cudaMemcpyDeviceToHost));
+                       sizeof(size_t) * alphabet_size, cudaMemcpyDeviceToHost));
 
   auto hist_should = calculateHistogram(data, alphabet);
-  for (size_t i = 0; i < alphabet.size(); ++i) {
+  for (size_t i = 0; i < alphabet_size; ++i) {
     EXPECT_EQ(hist_should[i], h_histogram[i]);
   }
 
@@ -175,42 +176,40 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
   gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data.size(),
                        cudaMemcpyHostToDevice));
 
-  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet.size()));
+  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
   computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
-      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet.size());
+      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
   gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
-                       sizeof(size_t) * alphabet.size(),
-                       cudaMemcpyDeviceToHost));
+                       sizeof(size_t) * alphabet_size, cudaMemcpyDeviceToHost));
 
   hist_should = calculateHistogram(data, alphabet);
-  for (size_t i = 0; i < alphabet.size(); ++i) {
+  for (size_t i = 0; i < alphabet_size; ++i) {
     EXPECT_EQ(hist_should[i], h_histogram[i]);
   }
 
   for (size_t i = 0; i < data.size(); ++i) {
-    if (i < alphabet.size()) {
+    if (i < alphabet_size) {
       data[i] = i;
     } else {
-      data[i] = alphabet.size() - 1;
+      data[i] = alphabet_size - 1;
     }
   }
 
   gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data.size(),
                        cudaMemcpyHostToDevice));
 
-  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet.size()));
+  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
   computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
-      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet.size());
+      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
   gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
-                       sizeof(size_t) * alphabet.size(),
-                       cudaMemcpyDeviceToHost));
+                       sizeof(size_t) * alphabet_size, cudaMemcpyDeviceToHost));
 
   hist_should = calculateHistogram(data, alphabet);
-  for (size_t i = 0; i < alphabet.size(); ++i) {
+  for (size_t i = 0; i < alphabet_size; ++i) {
     EXPECT_EQ(hist_should[i], h_histogram[i]);
   }
 

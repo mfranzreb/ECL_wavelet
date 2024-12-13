@@ -27,21 +27,31 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels);
 
 template <typename T>
 std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
-    size_t alphabet_size, size_t const data_size) {
+    size_t const alphabet_size, size_t const data_size,
+    bool enforce_alphabet_size = false) {
   std::vector<T> alphabet(alphabet_size);
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<T> dis(0, std::numeric_limits<T>::max());
-  std::generate(alphabet.begin(), alphabet.end(), [&]() { return dis(gen); });
-  // Check that all elements are unique
-  std::sort(alphabet.begin(), alphabet.end());
-  // remove duplicates
-  auto it = std::unique(alphabet.begin(), alphabet.end());
-  alphabet_size = std::distance(alphabet.begin(), it);
-  alphabet.resize(alphabet_size);
+  size_t filled = 0;
+  do {
+    std::generate(alphabet.begin() + filled, alphabet.end(),
+                  [&]() { return dis(gen); });
+    // Check that all elements are unique
+    std::sort(alphabet.begin(), alphabet.end());
+    // remove duplicates
+    auto it = std::unique(alphabet.begin(), alphabet.end());
+    filled = std::distance(alphabet.begin(), it);
+    if (not enforce_alphabet_size) {
+      if (filled < alphabet_size) {
+        alphabet.resize(filled);
+      }
+      break;
+    }
+  } while (filled != alphabet_size);
 
   std::vector<T> data(data_size);
-  std::uniform_int_distribution<size_t> dis2(0, alphabet_size - 1);
+  std::uniform_int_distribution<size_t> dis2(0, filled - 1);
   std::generate(data.begin(), data.end(),
                 [&]() { return alphabet[dis2(gen)]; });
 

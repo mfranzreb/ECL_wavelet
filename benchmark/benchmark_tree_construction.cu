@@ -14,7 +14,7 @@ static void BM_WaveletTreeConstruction(benchmark::State& state) {
   auto const alphabet_size = state.range(1);
 
   auto [alphabet, data] =
-      generateRandomAlphabetAndData<T>(alphabet_size, data_size);
+      generateRandomAlphabetAndData<T>(alphabet_size, data_size, true);
 
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;

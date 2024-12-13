@@ -146,7 +146,7 @@ class WaveletTree {
   /*!
    * \brief Return whether the alphabet is minimal.
    */
-  __device__ bool isMinAlphabet() const;
+  __host__ __device__ bool isMinAlphabet() const;
 
  private:
   std::vector<T> alphabet_;    /*!< Alphabet of the wavelet tree*/
@@ -264,7 +264,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     codes = createMinimalCodes(alphabet_);
   }
 
-  num_levels_ = ceil(log2(alphabet_size_));
+  num_levels_ = ceilLog2Host<T>(alphabet_size_);
   alphabet_start_bit_ = num_levels_ - 1;
 
   // TODO separato codes from code lens
@@ -584,7 +584,7 @@ __host__ std::vector<typename WaveletTree<T>::Code>
 WaveletTree<T>::createMinimalCodes(std::vector<T> const& alphabet) {
   auto const alphabet_size = alphabet.size();
   std::vector<Code> codes(alphabet_size);
-  uint8_t const total_num_bits = ceil(log2(alphabet_size));
+  uint8_t const total_num_bits = ceilLog2Host<T>(alphabet_size);
   uint8_t const alphabet_start_bit = total_num_bits - 1;
 #pragma omp parallel for
   for (size_t i = 0; i < alphabet_size; ++i) {
@@ -614,7 +614,7 @@ WaveletTree<T>::createMinimalCodes(std::vector<T> const& alphabet) {
       codes[alphabet_size - 1].code_ = ((1UL << start_bit) - 1)
                                        << (alphabet_start_bit + 1 - start_bit);
     } else {
-      code_len = ceil(log2(num_codes));
+      code_len = ceilLog2Host<T>(num_codes);
 #pragma omp parallel for
       for (int i = alphabet_size - num_codes; i < alphabet_size; i++) {
         // Code of local subtree
@@ -648,29 +648,36 @@ __device__ size_t WaveletTree<T>::getCounts(size_t i) const {
 }
 
 template <typename T>
-__device__ bool WaveletTree<T>::isMinAlphabet() const {
+__host__ __device__ bool WaveletTree<T>::isMinAlphabet() const {
   return is_min_alphabet_;
 }
 
 // local block hist with shmem
 template <typename T>
-__global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
-                                             size_t const data_size,
-                                             size_t* counts, T* const alphabet,
-                                             size_t const alphabet_size) {
+__global__ __launch_bounds__(
+    MAX_TPB,
+    MIN_BPM) void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
+                                               size_t const data_size,
+                                               size_t* counts,
+                                               T* const alphabet,
+                                               size_t const alphabet_size) {
   assert(blockDim.x % WS == 0);
-  uint32_t total_threads = blockDim.x * gridDim.x;
-  uint32_t global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
+  uint32_t const total_threads = blockDim.x * gridDim.x;
+  uint32_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
+  bool const is_not_min_alphabet = not tree.isMinAlphabet();
+  T char_data;
+  typename WaveletTree<T>::Code code;
   for (uint32_t i = global_t_id; i < data_size; i += total_threads) {
-    T const char_data = data[i];
-    T const char_index =
-        tree.isMinAlphabet()
-            ? char_data
-            : thrust::lower_bound(thrust::seq, alphabet,
-                                  alphabet + alphabet_size, char_data) -
+    char_data = data[i];
+    if (is_not_min_alphabet) {
+      char_data = thrust::lower_bound(thrust::seq, alphabet,
+                                      alphabet + alphabet_size, char_data) -
                   alphabet;
-    typename WaveletTree<T>::Code const code = tree.encode(char_index);
-    atomicAdd((cu_size_t*)&counts[char_index], size_t(1));
+    }
+
+    // TODO: could calculate code on the fly
+    code = tree.encode(char_data);
+    atomicAdd((cu_size_t*)&counts[char_data], size_t(1));
     data[i] = code.code_;
   }
 }

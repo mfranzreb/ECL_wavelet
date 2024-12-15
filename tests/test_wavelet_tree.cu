@@ -74,20 +74,27 @@ TYPED_TEST_SUITE(WaveletTreeTest, MyTypes);
 
 TYPED_TEST(WaveletTreeTest, WaveletTreeConstructor) {
   std::vector<TypeParam> data{1, 2, 3, 4, 5, 6, 7, 8, 9};
-  std::vector<TypeParam> alphabet{1, 2, 3, 4, 5, 6, 7, 8, 9};
-  WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
-                            kGPUIndex);
+  {
+    std::vector<TypeParam> alphabet{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                              kGPUIndex);
+  }
+  {
+    data = std::vector<TypeParam>{0, 1, 2, 3};
+    std::vector<TypeParam> alphabet{0, 1, 2, 3};
+
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                              kGPUIndex);
+  }
 }
 
 TYPED_TEST(WaveletTreeTest, createMinimalCodes) {
-  // Check that for powers of two, the minimal code is the same as the value
+  // Check that for powers of two, the vector is empty
   for (size_t i = 4; i < 8 * sizeof(TypeParam); i *= 2) {
     std::vector<TypeParam> alphabet(i);
     std::iota(alphabet.begin(), alphabet.end(), 0);
     auto codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
-    for (size_t j = 0; j < alphabet.size(); ++j) {
-      EXPECT_EQ(alphabet[j], codes[j].code_);
-    }
+    EXPECT_TRUE(codes.empty());
   }
 
   size_t alphabet_size = 72;
@@ -96,8 +103,8 @@ TYPED_TEST(WaveletTreeTest, createMinimalCodes) {
   auto codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
   auto code_value = 64UL;
   for (int i = 64; i <= 71; ++i) {
-    EXPECT_EQ(codes[i].code_, code_value);
-    EXPECT_EQ(codes[i].len_, 4);
+    EXPECT_EQ(codes[i - 64].code_, code_value);
+    EXPECT_EQ(codes[i - 64].len_, 4);
     code_value += 8;
   }
 
@@ -105,13 +112,8 @@ TYPED_TEST(WaveletTreeTest, createMinimalCodes) {
   alphabet.resize(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0);
   codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
-  // All the codes except the last are the same
-  for (int i = 0; i < 62; ++i) {
-    EXPECT_EQ(codes[i].code_, i);
-    EXPECT_EQ(codes[i].len_, 6);
-  }
-  EXPECT_EQ(codes[62].code_, 62);
-  EXPECT_EQ(codes[62].len_, 5);
+  EXPECT_EQ(codes[0].code_, 62);
+  EXPECT_EQ(codes[0].len_, 5);
 
   alphabet_size = 75;
   alphabet.resize(alphabet_size);
@@ -119,16 +121,16 @@ TYPED_TEST(WaveletTreeTest, createMinimalCodes) {
   codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
   code_value = 64UL;
   for (int i = 64; i < 72; ++i) {
-    EXPECT_EQ(codes[i].code_, code_value);
-    EXPECT_EQ(codes[i].len_, 5);
+    EXPECT_EQ(codes[i - 64].code_, code_value);
+    EXPECT_EQ(codes[i - 64].len_, 5);
     code_value += 4;
   }
-  EXPECT_EQ(codes[72].code_, 96);
-  EXPECT_EQ(codes[72].len_, 4);
-  EXPECT_EQ(codes[73].code_, 104);
-  EXPECT_EQ(codes[73].len_, 4);
-  EXPECT_EQ(codes[74].code_, 112);
-  EXPECT_EQ(codes[74].len_, 3);
+  EXPECT_EQ(codes[72 - 64].code_, 96);
+  EXPECT_EQ(codes[72 - 64].len_, 4);
+  EXPECT_EQ(codes[73 - 64].code_, 104);
+  EXPECT_EQ(codes[73 - 64].len_, 4);
+  EXPECT_EQ(codes[74 - 64].code_, 112);
+  EXPECT_EQ(codes[74 - 64].len_, 3);
 }
 
 TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
@@ -195,6 +197,34 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
     } else {
       data[i] = alphabet_size - 1;
     }
+  }
+
+  gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data.size(),
+                       cudaMemcpyHostToDevice));
+
+  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
+  computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
+      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
+  kernelCheck();
+
+  gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
+                       sizeof(size_t) * alphabet_size, cudaMemcpyDeviceToHost));
+
+  hist_should = calculateHistogram(data, alphabet);
+  for (size_t i = 0; i < alphabet_size; ++i) {
+    EXPECT_EQ(hist_should[i], h_histogram[i]);
+  }
+
+  // Case where last two symbols have different counts
+  data = std::vector<TypeParam>(1000, 0);
+  for (size_t i = 0; i < 5; ++i) {
+    data[i] = 9;
+  }
+  for (size_t i = 5; i < 15; ++i) {
+    data[i] = 8;
+  }
+  for (size_t i = 15; i < data.size(); ++i) {
+    data[i] = i % 8;
   }
 
   gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data.size(),

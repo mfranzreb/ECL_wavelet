@@ -1,4 +1,6 @@
 #pragma once
+#include <bits/stdc++.h>
+
 #include <bit>
 #include <cassert>
 #include <cstdio>
@@ -97,6 +99,29 @@ __device__ T getPrevPowTwo(T n) {
     return (1U << (sizeof(T) * 8 - (__clz(n) - 16) - 1));
   } else if constexpr (sizeof(T) == 1) {
     return (1U << (sizeof(T) * 8 - (__clz(n) - 24) - 1));
+  }
+  return 0;
+}
+
+/*! @copydoc getPrevPowTwo */
+template <typename T>
+__host__ T getPrevPowTwoHost(T n) {
+  static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
+                "T must be an unsigned integral type.");
+  if (n == 0) {
+    return 0;
+  }
+  if (isPowTwo(n)) {
+    return n >> 1;
+  }
+  if constexpr (sizeof(T) == 8) {
+    return (1ULL << (sizeof(T) * 8 - __builtin_clzll(n) - 1));
+  } else if constexpr (sizeof(T) == 4) {
+    return (1UL << (sizeof(T) * 8 - __builtin_clz(n) - 1));
+  } else if constexpr (sizeof(T) == 2) {
+    return (1U << (sizeof(T) * 8 - (__builtin_clz(n) - 16) - 1));
+  } else if constexpr (sizeof(T) == 1) {
+    return (1U << (sizeof(T) * 8 - (__builtin_clz(n) - 24) - 1));
   }
   return 0;
 }

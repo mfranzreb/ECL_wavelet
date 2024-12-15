@@ -29,18 +29,22 @@ struct RankSelectQuery {
  * \brief Helper class for reducing the data with thrust::remove_if.
  */
 template <typename T>
-class isLongEnough {
+class isNotLongEnough {
  public:
-  isLongEnough(uint8_t* d_code_lens, uint32_t l)
-      : d_code_lens_(d_code_lens), l_(l) {}
+  isNotLongEnough(uint8_t* d_code_lens, uint32_t l, T codes_start)
+      : d_code_lens_(d_code_lens), l_(l), codes_start_(codes_start) {}
 
   __device__ bool operator()(T const code) const {
-    return d_code_lens_[code] <= l_ + 1;
+    if (code < codes_start_) {
+      return false;
+    }
+    return d_code_lens_[code - codes_start_] <= l_ + 1;
   }
 
  private:
   uint8_t* d_code_lens_;
   uint32_t l_;
+  T codes_start_;
 };
 
 /*!
@@ -109,14 +113,17 @@ class WaveletTree {
   __host__ std::vector<size_t> select(std::vector<RankSelectQuery<T>>& queries);
 
   /*!
-   * \brief Encodes a symbol from the alphabet.
+   * \brief Encodes a symbol from the alphabet. Only symbols that have a code
+   * should be passed as argument.
    * \param c Symbol of the minimal alphabet to be encoded.
    * \return Encoded symbol.
    */
   __device__ Code encode(T const c);
 
   /*!
-   * \brief Creates minimal codes for the alphabet.
+   * \brief Creates minimal codes for the alphabet. Codes are only created for
+   * the symbols that are bigger than the previous power of two of the alphabet
+   * size.
    * \param alphabet Alphabet to create codes for.
    * \return Vector of codes.
    */
@@ -148,18 +155,26 @@ class WaveletTree {
    */
   __host__ __device__ bool isMinAlphabet() const;
 
+  /*!
+   * \brief Get the start of the codes in the alphabet.
+   * \return Start of the codes.
+   */
+  __device__ T getCodesStart() const;
+
  private:
   std::vector<T> alphabet_;    /*!< Alphabet of the wavelet tree*/
   size_t alphabet_size_;       /*!< Size of the alphabet*/
   uint8_t alphabet_start_bit_; /*!< Bit where the alphabet starts, 0 is the
                                   least significant bit*/
-  Code* d_codes_; /*!< Array of codes for each symbol in the alphabet*/
-  uint8_t*
-      d_code_lens_; /*!< Array of code lengths for each symbol in the alphabet*/
-  size_t* d_counts_;     /*!< Array of counts for each symbol*/
-  size_t num_levels_;    /*!< Number of levels in the wavelet tree*/
+  Code* d_codes_ =
+      nullptr; /*!< Array of codes for each symbol in the alphabet*/
+  uint8_t* d_code_lens_ =
+      nullptr; /*!< Array of code lengths for each symbol in the alphabet*/
+  size_t* d_counts_ = nullptr; /*!< Array of counts for each symbol*/
+  size_t num_levels_;          /*!< Number of levels in the wavelet tree*/
   bool is_min_alphabet_; /*!< Flag to signal whether the alphabet is already
                             minimal*/
+  T codes_start_;        /*!< Minimal alphabet symbol where the codes start*/
   bool is_copy_;         /*!< Flag to signal whether current object is a copy*/
 };
 
@@ -244,6 +259,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   assert(alphabet_.size() > 0);
   assert(std::is_sorted(alphabet_.begin(), alphabet_.end()));
 
+  //? Correct way?
   // Set device
   gpuErrchk(cudaSetDevice(GPU_index));
   checkWarpSize();
@@ -254,7 +270,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
                   [i = 0](unsigned value) mutable { return value == i++; });
   alphabet_size_ = alphabet_.size();
 
-  std::vector<Code> codes(alphabet_size_);
+  std::vector<Code> codes;
   // make minimal alphabet
   if (not is_min_alphabet_) {
     auto min_alphabet = std::vector<T>(alphabet_size_);
@@ -266,21 +282,25 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   num_levels_ = ceilLog2Host<T>(alphabet_size_);
   alphabet_start_bit_ = num_levels_ - 1;
+  codes_start_ = alphabet_size_ - codes.size();
 
   // TODO separato codes from code lens
   //  create codes and copy to device
-  gpuErrchk(cudaMalloc(&d_codes_, alphabet_size_ * sizeof(Code)));
-  gpuErrchk(cudaMemcpy(d_codes_, codes.data(), alphabet_size_ * sizeof(Code),
-                       cudaMemcpyHostToDevice));
+  if (codes.size() > 0) {
+    gpuErrchk(cudaMalloc(&d_codes_, codes.size() * sizeof(Code)));
+    gpuErrchk(cudaMemcpy(d_codes_, codes.data(), codes.size() * sizeof(Code),
+                         cudaMemcpyHostToDevice));
 
-  std::vector<uint8_t> code_lens(codes.back().code_ + 1);
-  for (size_t i = 0; i < alphabet_size_; ++i) {
-    code_lens[codes[i].code_] = codes[i].len_;
+    // TODO: Allocate as many code_lens_as codes, not more
+    std::vector<uint8_t> code_lens(codes.back().code_ + 1 - codes_start_);
+    for (size_t i = 0; i < alphabet_size_ - codes_start_; ++i) {
+      code_lens[codes[i].code_ - codes_start_] = codes[i].len_;
+    }
+    gpuErrchk(cudaMalloc(&d_code_lens_, code_lens.size() * sizeof(uint8_t)));
+    gpuErrchk(cudaMemcpy(d_code_lens_, code_lens.data(),
+                         code_lens.size() * sizeof(uint8_t),
+                         cudaMemcpyHostToDevice));
   }
-  gpuErrchk(cudaMalloc(&d_code_lens_, code_lens.size() * sizeof(uint8_t)));
-  gpuErrchk(cudaMemcpy(d_code_lens_, code_lens.data(),
-                       code_lens.size() * sizeof(uint8_t),
-                       cudaMemcpyHostToDevice));
 
   // Allocate space for counts array
   gpuErrchk(cudaMalloc(&d_counts_, alphabet_size_ * sizeof(size_t)));
@@ -320,15 +340,16 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   // Calculate size of bit array at each level
   std::vector<size_t> bit_array_sizes(num_levels_, data_size);
-  // Get min code length
-  uint8_t const min_code_len = codes.back().len_;
+  if (codes.size() > 0) {  // Get min code length
+    uint8_t const min_code_len = codes.back().len_;
 #pragma omp parallel for
-  for (size_t i = num_levels_ - 1; i >= min_code_len; --i) {
-    for (int64_t j = alphabet_size_ - 1; j >= 0; --j) {
-      if (i >= codes[j].len_) {
-        bit_array_sizes[i] -= counts[j];
-      } else {
-        break;
+    for (size_t i = num_levels_ - 1; i >= min_code_len; --i) {
+      for (int64_t j = alphabet_size_ - codes_start_ - 1; j >= 0; --j) {
+        if (i >= codes[j].len_) {
+          bit_array_sizes[i] -= counts[codes_start_ + j];
+        } else {
+          break;
+        }
       }
     }
   }
@@ -391,8 +412,9 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     if (l != (num_levels_ - 1) and
         bit_array_sizes[l] != bit_array_sizes[l + 1]) {
       //  Reduce text
-      T* new_end = thrust::remove_if(thrust::device, d_data, d_data + data_size,
-                                     isLongEnough<T>(d_code_lens_, l));
+      T* new_end =
+          thrust::remove_if(thrust::device, d_data, d_data + data_size,
+                            isNotLongEnough<T>(d_code_lens_, l, codes_start_));
       data_size = static_cast<size_t>(std::distance(d_data, new_end));
     }
   }
@@ -417,6 +439,7 @@ __host__ WaveletTree<T>::WaveletTree(WaveletTree const& other)
       d_code_lens_(other.d_code_lens_),
       d_counts_(other.d_counts_),
       is_min_alphabet_(other.is_min_alphabet_),
+      codes_start_(other.codes_start_),
       is_copy_(true) {}
 
 template <typename T>
@@ -539,7 +562,8 @@ __host__ std::vector<size_t> WaveletTree<T>::select(
   size_t* d_results;
   gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(size_t)));
 
-  // Convert query symbols to minimal alphabet
+  // TODO: Maybe convert to codes
+  //  Convert query symbols to minimal alphabet
   if (not is_min_alphabet_) {
 #pragma omp parallel for
     for (size_t i = 0; i < num_queries; ++i) {
@@ -576,13 +600,19 @@ __host__ std::vector<size_t> WaveletTree<T>::select(
 template <typename T>
 __device__ WaveletTree<T>::Code WaveletTree<T>::encode(T const c) {
   assert(c < alphabet_size_);
-  return d_codes_[c];
+  assert(c >= codes_start_);
+  return d_codes_[c - codes_start_];
 }
 
+// TODO: Could be improved
 template <typename T>
 __host__ std::vector<typename WaveletTree<T>::Code>
 WaveletTree<T>::createMinimalCodes(std::vector<T> const& alphabet) {
   auto const alphabet_size = alphabet.size();
+  if (isPowTwo<size_t>(alphabet_size)) {
+    return std::vector<Code>(0);
+  }
+  size_t total_num_codes = 0;
   std::vector<Code> codes(alphabet_size);
   uint8_t const total_num_bits = ceilLog2Host<T>(alphabet_size);
   uint8_t const alphabet_start_bit = total_num_bits - 1;
@@ -591,9 +621,7 @@ WaveletTree<T>::createMinimalCodes(std::vector<T> const& alphabet) {
     codes[i].len_ = total_num_bits;
     codes[i].code_ = i;
   }
-  if (isPowTwo<size_t>(alphabet_size)) {
-    return codes;
-  }
+
   uint8_t start_bit = 0;  // 0 is the alphabet start bit.
   size_t start_i = 0;
   uint8_t code_len = total_num_bits;
@@ -607,6 +635,10 @@ WaveletTree<T>::createMinimalCodes(std::vector<T> const& alphabet) {
       num_codes -= pow_two;
       start_i += pow_two;
       start_bit++;
+    }
+    // If its the first iteration
+    if (code_len == total_num_bits) {
+      total_num_codes = num_codes;
     }
     if (num_codes == 1) {
       code_len = 1;
@@ -629,6 +661,8 @@ WaveletTree<T>::createMinimalCodes(std::vector<T> const& alphabet) {
       }
     }
   } while (code_len > 1);
+  // Keep only last alphabet_size - codes_start codes
+  codes.erase(codes.begin(), codes.begin() + alphabet_size - total_num_codes);
   return codes;
 }
 
@@ -652,21 +686,23 @@ __host__ __device__ bool WaveletTree<T>::isMinAlphabet() const {
   return is_min_alphabet_;
 }
 
+template <typename T>
+__device__ T WaveletTree<T>::getCodesStart() const {
+  return codes_start_;
+}
+
 // local block hist with shmem
 template <typename T>
-__global__ __launch_bounds__(
-    MAX_TPB,
-    MIN_BPM) void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
-                                               size_t const data_size,
-                                               size_t* counts,
-                                               T* const alphabet,
-                                               size_t const alphabet_size) {
+__global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
+                                             size_t const data_size,
+                                             size_t* counts, T* const alphabet,
+                                             size_t const alphabet_size) {
   assert(blockDim.x % WS == 0);
   uint32_t const total_threads = blockDim.x * gridDim.x;
   uint32_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
   bool const is_not_min_alphabet = not tree.isMinAlphabet();
   T char_data;
-  typename WaveletTree<T>::Code code;
+  T codes_start = tree.getCodesStart();
   for (uint32_t i = global_t_id; i < data_size; i += total_threads) {
     char_data = data[i];
     // TODO: could be made constexpr
@@ -677,10 +713,12 @@ __global__ __launch_bounds__(
                   alphabet;
     }
 
-    // TODO: could calculate code on the fly
-    code = tree.encode(char_data);
     atomicAdd((cu_size_t*)&counts[char_data], size_t(1));
-    data[i] = code.code_;
+    // TODO: could calculate code on the fly
+    if (char_data >= codes_start) {
+      char_data = tree.encode(char_data).code_;
+    }
+    data[i] = char_data;
   }
 }
 
@@ -818,10 +856,14 @@ __global__ void selectKernel(WaveletTree<T> tree,
 
   uint32_t const alphabet_size = tree.getAlphabetSize();
   uint8_t const alphabet_num_bits = ceilLog2<uint32_t>(alphabet_size);
+  auto const codes_start = tree.getCodesStart();
 
   for (uint32_t i = global_warp_id; i < num_queries; i += num_warps) {
     RankSelectQuery<T> query = queries[i];
-    typename WaveletTree<T>::Code const code = tree.encode(query.symbol_);
+    typename WaveletTree<T>::Code code{alphabet_num_bits, query.symbol_};
+    if (query.symbol_ >= codes_start) {
+      code = tree.encode(query.symbol_);
+    }
 
     uint32_t char_start = query.symbol_;
     size_t start;

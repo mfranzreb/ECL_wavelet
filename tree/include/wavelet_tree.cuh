@@ -669,7 +669,9 @@ __global__ __launch_bounds__(
   typename WaveletTree<T>::Code code;
   for (uint32_t i = global_t_id; i < data_size; i += total_threads) {
     char_data = data[i];
+    // TODO: could be made constexpr
     if (is_not_min_alphabet) {
+      //? Worth it to use a hash map?
       char_data = thrust::lower_bound(thrust::seq, alphabet,
                                       alphabet + alphabet_size, char_data) -
                   alphabet;

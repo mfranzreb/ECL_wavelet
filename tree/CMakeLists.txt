@@ -1,9 +1,7 @@
 set(TARGET ecl_wavelet_tree)
 
-# Collect all the source files
-file(GLOB WT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/include/*.cuh")
 
-add_library(${TARGET} STATIC ${WT_SOURCES})  
+add_library(${TARGET} STATIC "${CMAKE_CURRENT_SOURCE_DIR}/include/wavelet_tree.cuh")  
 
 include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/bitarray/include" "${CMAKE_SOURCE_DIR}/utils/include")
 

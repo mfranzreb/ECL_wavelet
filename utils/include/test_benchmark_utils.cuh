@@ -68,6 +68,6 @@ std::vector<T> generateRandomData(std::vector<T> const& alphabet,
   std::vector<T> data(data_size);
   std::generate(data.begin(), data.end(), [&]() { return alphabet[dis(gen)]; });
 
-  return data
+  return data;
 }
 }  // namespace ecl

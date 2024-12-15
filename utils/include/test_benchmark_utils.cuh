@@ -57,4 +57,17 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
 
   return std::make_pair(alphabet, data);
 }
+
+template <typename T>
+std::vector<T> generateRandomData(std::vector<T> const& alphabet,
+                                  size_t const data_size) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<size_t> dis(0, alphabet.size() - 1);
+
+  std::vector<T> data(data_size);
+  std::generate(data.begin(), data.end(), [&]() { return alphabet[dis(gen)]; });
+
+  return data
+}
 }  // namespace ecl

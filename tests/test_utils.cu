@@ -31,8 +31,10 @@ TYPED_TEST(UtilsTest, getPrevPowTwo) {
   TypeParam expected = 0;
   for (TypeParam i = 0; i < limit; ++i) {
     getPrevPowTwoKernel<TypeParam><<<1, 1>>>(i, this->result);
+    auto host_result = getPrevPowTwoHost<TypeParam>(i);
     kernelCheck();
     EXPECT_EQ(*this->result, expected);
+    EXPECT_EQ(host_result, expected);
     if (isPowTwo(i)) {
       expected = i;
     }

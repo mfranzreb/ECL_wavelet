@@ -75,6 +75,22 @@
     "typeindex": "cpp",
     "*.ipp": "cpp",
     "codecvt": "cpp",
-    "regex": "cpp"
+    "regex": "cpp",
+    "charconv": "cpp",
+    "expected": "cpp",
+    "future": "cpp",
+    "csetjmp": "cpp",
+    "barrier": "cpp",
+    "coroutine": "cpp",
+    "cuchar": "cpp",
+    "source_location": "cpp",
+    "latch": "cpp",
+    "ranges": "cpp",
+    "scoped_allocator": "cpp",
+    "shared_mutex": "cpp",
+    "spanstream": "cpp",
+    "stacktrace": "cpp",
+    "syncstream": "cpp",
+    "valarray": "cpp"
   }
 }

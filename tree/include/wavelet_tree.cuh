@@ -38,6 +38,7 @@ class isNotLongEnough {
     if (code < codes_start_) {
       return false;
     }
+    assert(d_code_lens_[code - codes_start_] > 0);
     return d_code_lens_[code - codes_start_] <= l_ + 1;
   }
 
@@ -188,7 +189,7 @@ class WaveletTree {
  * \param alphabet Alphabet of the input data.
  * \param alphabet_size Size of the alphabet.
  */
-template <typename T>
+template <typename T, bool isMinAlphabet, bool isPowTwo>
 __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
                                              size_t const data_size,
                                              size_t* counts, T* const alphabet,
@@ -263,12 +264,14 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   // Set device
   gpuErrchk(cudaSetDevice(GPU_index));
   checkWarpSize();
+  alphabet_size_ = alphabet_.size();
+
+  bool const is_pow_two = isPowTwo(alphabet_size_);
 
   // Check if alphabet is already minimal
   is_min_alphabet_ =
       std::all_of(alphabet_.begin(), alphabet_.end(),
                   [i = 0](unsigned value) mutable { return value == i++; });
-  alphabet_size_ = alphabet_.size();
 
   std::vector<Code> codes;
   // make minimal alphabet
@@ -322,14 +325,49 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   auto num_warps = (data_size + WS - 1) / WS;
 
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(
-      cudaFuncGetAttributes(&funcAttrib, computeGlobalHistogramKernel<T>));
+  if (is_pow_two) {
+    if (is_min_alphabet_) {
+      gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                      computeGlobalHistogramKernel<T, 1, 1>));
+    } else {
+      gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                      computeGlobalHistogramKernel<T, 0, 1>));
+    }
+  } else {
+    if (is_min_alphabet_) {
+      gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                      computeGlobalHistogramKernel<T, 1, 0>));
+    } else {
+      gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                      computeGlobalHistogramKernel<T, 0, 0>));
+    }
+  }
+
   int maxThreadsPerBlockHist = funcAttrib.maxThreadsPerBlock;
 
   auto [num_blocks, threads_per_block] = getLaunchConfig(
       num_warps, 256, std::min(MAX_TPB, maxThreadsPerBlockHist));
-  computeGlobalHistogramKernel<T><<<num_blocks, threads_per_block>>>(
-      *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
+  if (is_pow_two) {
+    if (is_min_alphabet_) {
+      computeGlobalHistogramKernel<T, true, true>
+          <<<num_blocks, threads_per_block>>>(
+              *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
+    } else {
+      computeGlobalHistogramKernel<T, false, true>
+          <<<num_blocks, threads_per_block>>>(
+              *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
+    }
+  } else {
+    if (is_min_alphabet_) {
+      computeGlobalHistogramKernel<T, true, false>
+          <<<num_blocks, threads_per_block>>>(
+              *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
+    } else {
+      computeGlobalHistogramKernel<T, false, false>
+          <<<num_blocks, threads_per_block>>>(
+              *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
+    }
+  }
   kernelCheck();
 
   // Copy counts to host
@@ -691,22 +729,21 @@ __device__ T WaveletTree<T>::getCodesStart() const {
   return codes_start_;
 }
 
-// local block hist with shmem
-template <typename T>
-__global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
-                                             size_t const data_size,
-                                             size_t* counts, T* const alphabet,
-                                             size_t const alphabet_size) {
+template <typename T, bool isMinAlphabet, bool isPowTwo>
+__global__ __launch_bounds__(
+    MAX_TPB,
+    MIN_BPM) void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
+                                               size_t const data_size,
+                                               size_t* counts,
+                                               T* const alphabet,
+                                               size_t const alphabet_size) {
   assert(blockDim.x % WS == 0);
   uint32_t const total_threads = blockDim.x * gridDim.x;
   uint32_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
-  bool const is_not_min_alphabet = not tree.isMinAlphabet();
   T char_data;
-  T codes_start = tree.getCodesStart();
   for (uint32_t i = global_t_id; i < data_size; i += total_threads) {
     char_data = data[i];
-    // TODO: could be made constexpr
-    if (is_not_min_alphabet) {
+    if constexpr (not isMinAlphabet) {
       //? Worth it to use a hash map?
       char_data = thrust::lower_bound(thrust::seq, alphabet,
                                       alphabet + alphabet_size, char_data) -
@@ -715,8 +752,11 @@ __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
 
     atomicAdd((cu_size_t*)&counts[char_data], size_t(1));
     // TODO: could calculate code on the fly
-    if (char_data >= codes_start) {
-      char_data = tree.encode(char_data).code_;
+    //? Could this if reduce coalescing?
+    if constexpr (not isPowTwo) {
+      if (char_data >= tree.getCodesStart()) {
+        char_data = tree.encode(char_data).code_;
+      }
     }
     data[i] = char_data;
   }

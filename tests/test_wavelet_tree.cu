@@ -160,7 +160,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
   // Create the wavelet tree
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet_copy),
                             kGPUIndex);
-  computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
+  computeGlobalHistogramKernel<TypeParam, true, false><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
@@ -179,7 +179,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
                        cudaMemcpyHostToDevice));
 
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
-  computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
+  computeGlobalHistogramKernel<TypeParam, true, false><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
@@ -203,7 +203,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
                        cudaMemcpyHostToDevice));
 
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
-  computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
+  computeGlobalHistogramKernel<TypeParam, true, false><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
@@ -231,7 +231,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
                        cudaMemcpyHostToDevice));
 
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
-  computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
+  computeGlobalHistogramKernel<TypeParam, true, false><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
@@ -286,8 +286,26 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogramRandom) {
     auto alphabet_copy = alphabet;
     WaveletTree<TypeParam> wt(data.data(), data_size, std::move(alphabet_copy),
                               kGPUIndex);
-    computeGlobalHistogramKernel<TypeParam><<<1, 32>>>(
-        wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size);
+    bool const is_min_alphabet =
+        std::all_of(alphabet.begin(), alphabet.end(),
+                    [i = 0](unsigned value) mutable { return value == i++; });
+    if (isPowTwo(alphabet_size)) {
+      if (is_min_alphabet) {
+        computeGlobalHistogramKernel<TypeParam, true, true><<<1, 32>>>(
+            wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size);
+      } else {
+        computeGlobalHistogramKernel<TypeParam, false, true><<<1, 32>>>(
+            wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size);
+      }
+    } else {
+      if (is_min_alphabet) {
+        computeGlobalHistogramKernel<TypeParam, true, false><<<1, 32>>>(
+            wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size);
+      } else {
+        computeGlobalHistogramKernel<TypeParam, false, false><<<1, 32>>>(
+            wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size);
+      }
+    }
     kernelCheck();
 
     // Pass the histogram to the host

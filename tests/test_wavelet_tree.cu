@@ -14,7 +14,14 @@ namespace ecl {
 static constexpr uint8_t kGPUIndex = 0;
 
 template <typename T>
-class WaveletTreeTest : public ::testing::Test {
+class WaveletTreeTest : public WaveletTree<T> {
+ public:
+  using WaveletTree<T>::WaveletTree;
+  using WaveletTree<T>::computeGlobalHistogram;
+};
+
+template <typename T>
+class WaveletTreeTestFixture : public ::testing::Test {
  protected:
   T* result;
   void SetUp() override { gpuErrchk(cudaMallocManaged(&result, sizeof(T))); }
@@ -70,9 +77,9 @@ __global__ void BAaccessKernel(BitArray bit_array, size_t array_index,
 }
 
 using MyTypes = testing::Types<uint8_t, uint16_t, uint32_t, uint64_t>;
-TYPED_TEST_SUITE(WaveletTreeTest, MyTypes);
+TYPED_TEST_SUITE(WaveletTreeTestFixture, MyTypes);
 
-TYPED_TEST(WaveletTreeTest, WaveletTreeConstructor) {
+TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
   std::vector<TypeParam> data{1, 2, 3, 4, 5, 6, 7, 8, 9};
   {
     std::vector<TypeParam> alphabet{1, 2, 3, 4, 5, 6, 7, 8, 9};
@@ -88,7 +95,7 @@ TYPED_TEST(WaveletTreeTest, WaveletTreeConstructor) {
   }
 }
 
-TYPED_TEST(WaveletTreeTest, createMinimalCodes) {
+TYPED_TEST(WaveletTreeTestFixture, createMinimalCodes) {
   // Check that for powers of two, the vector is empty
   for (size_t i = 4; i < 8 * sizeof(TypeParam); i *= 2) {
     std::vector<TypeParam> alphabet(i);
@@ -133,7 +140,7 @@ TYPED_TEST(WaveletTreeTest, createMinimalCodes) {
   EXPECT_EQ(codes[74 - 64].len_, 3);
 }
 
-TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
+TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogram) {
   std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
   auto const alphabet_size = alphabet.size();
 
@@ -160,7 +167,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
   // Create the wavelet tree
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet_copy),
                             kGPUIndex);
-  computeGlobalHistogramKernel<TypeParam, true, false><<<1, 32>>>(
+  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
@@ -179,7 +186,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
                        cudaMemcpyHostToDevice));
 
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
-  computeGlobalHistogramKernel<TypeParam, true, false><<<1, 32>>>(
+  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
@@ -203,7 +210,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
                        cudaMemcpyHostToDevice));
 
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
-  computeGlobalHistogramKernel<TypeParam, true, false><<<1, 32>>>(
+  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
@@ -231,7 +238,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
                        cudaMemcpyHostToDevice));
 
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
-  computeGlobalHistogramKernel<TypeParam, true, false><<<1, 32>>>(
+  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
       wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size);
   kernelCheck();
 
@@ -249,7 +256,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogram) {
   gpuErrchk(cudaFree(d_histogram));
 }
 
-TYPED_TEST(WaveletTreeTest, TestGlobalHistogramRandom) {
+TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogramRandom) {
   size_t const data_size = 10000;
   TypeParam* d_data;
   gpuErrchk(cudaMalloc(&d_data, sizeof(TypeParam) * data_size));
@@ -284,29 +291,11 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogramRandom) {
 
     // Create the wavelet tree
     auto alphabet_copy = alphabet;
-    WaveletTree<TypeParam> wt(data.data(), data_size, std::move(alphabet_copy),
-                              kGPUIndex);
-    bool const is_min_alphabet =
-        std::all_of(alphabet.begin(), alphabet.end(),
-                    [i = 0](unsigned value) mutable { return value == i++; });
-    if (isPowTwo(alphabet_size)) {
-      if (is_min_alphabet) {
-        computeGlobalHistogramKernel<TypeParam, true, true><<<1, 32>>>(
-            wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size);
-      } else {
-        computeGlobalHistogramKernel<TypeParam, false, true><<<1, 32>>>(
-            wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size);
-      }
-    } else {
-      if (is_min_alphabet) {
-        computeGlobalHistogramKernel<TypeParam, true, false><<<1, 32>>>(
-            wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size);
-      } else {
-        computeGlobalHistogramKernel<TypeParam, false, false><<<1, 32>>>(
-            wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size);
-      }
-    }
-    kernelCheck();
+    WaveletTreeTest<TypeParam> wt(data.data(), data_size,
+                                  std::move(alphabet_copy), kGPUIndex);
+
+    wt.computeGlobalHistogram(isPowTwo<TypeParam>(alphabet_size), data_size,
+                              d_data, d_alphabet, d_histogram);
 
     // Pass the histogram to the host
     std::vector<size_t> h_histogram(alphabet_size);
@@ -325,7 +314,7 @@ TYPED_TEST(WaveletTreeTest, TestGlobalHistogramRandom) {
   gpuErrchk(cudaFree(d_data));
 }
 
-TYPED_TEST(WaveletTreeTest, structure) {
+TYPED_TEST(WaveletTreeTestFixture, structure) {
   std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
   std::vector<TypeParam> data(100);
   for (size_t i = 0; i < data.size(); ++i) {
@@ -398,7 +387,7 @@ TYPED_TEST(WaveletTreeTest, structure) {
   }
 }
 
-TYPED_TEST(WaveletTreeTest, access) {
+TYPED_TEST(WaveletTreeTestFixture, access) {
   std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
   std::vector<TypeParam> data(100);
   for (size_t i = 0; i < data.size(); ++i) {
@@ -415,7 +404,7 @@ TYPED_TEST(WaveletTreeTest, access) {
   }
 }
 
-TYPED_TEST(WaveletTreeTest, accessRandom) {
+TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
   for (int i = 0; i < 10; i++) {
     // Random data size between 1000 and 1'000'000
     size_t data_size = 1000 + (rand() % 1'000'000);
@@ -444,7 +433,7 @@ TYPED_TEST(WaveletTreeTest, accessRandom) {
   }
 }
 
-TYPED_TEST(WaveletTreeTest, rank) {
+TYPED_TEST(WaveletTreeTestFixture, rank) {
   std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
   std::vector<TypeParam> data(100);
   for (size_t i = 0; i < data.size(); ++i) {
@@ -463,7 +452,7 @@ TYPED_TEST(WaveletTreeTest, rank) {
   }
 }
 
-TYPED_TEST(WaveletTreeTest, rankRandom) {
+TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
   for (int i = 0; i < 10; i++) {
     // Random data size between 1000 and 1'000'000
     size_t data_size = 1000 + (rand() % 1'000'000);
@@ -500,7 +489,7 @@ TYPED_TEST(WaveletTreeTest, rankRandom) {
   }
 }
 
-TYPED_TEST(WaveletTreeTest, select) {
+TYPED_TEST(WaveletTreeTestFixture, select) {
   std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
   std::vector<TypeParam> data(100);
   for (size_t i = 0; i < data.size(); ++i) {
@@ -525,7 +514,7 @@ TYPED_TEST(WaveletTreeTest, select) {
   EXPECT_EQ(data.size(), results[0]);
 }
 
-TYPED_TEST(WaveletTreeTest, selectRandom) {
+TYPED_TEST(WaveletTreeTestFixture, selectRandom) {
   int num_iters = 10;
   int queries_per_iter = 100;
   if constexpr (std::is_same<TypeParam, uint64_t>::value or
@@ -585,7 +574,7 @@ TYPED_TEST(WaveletTreeTest, selectRandom) {
 }
 
 /*
-TYPED_TEST(WaveletTreeTest, fillLevelRandom) {
+TYPED_TEST(WaveletTreeTestFixture, fillLevelRandom) {
   for (int i = 0; i < 100; i++) {
     // Random data size between 100 and 1'000'000
     size_t data_size = 100 + (rand() % 1'000'000);

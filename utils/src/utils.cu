@@ -9,13 +9,14 @@
 namespace ecl {
 namespace internal {
 static cudaDeviceProp prop;
+static uint8_t GPU_index = 0;
 }  // namespace internal
 
 __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
                                              int const min_block_size,
                                              int max_block_size) {
   if (internal::prop.totalGlobalMem == 0) {
-    cudaGetDeviceProperties(&internal::prop, 0);
+    cudaGetDeviceProperties(&internal::prop, internal::GPU_index);
   }
   int const min_block_size_warps = min_block_size / 32;
   int const warps_per_sm = internal::prop.maxThreadsPerMultiProcessor / 32;
@@ -68,14 +69,30 @@ __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
 
 __host__ int getMaxBlockSize() {
   if (internal::prop.totalGlobalMem == 0) {
-    cudaGetDeviceProperties(&internal::prop, 0);
+    cudaGetDeviceProperties(&internal::prop, internal::GPU_index);
   }
   return internal::prop.maxThreadsPerBlock;
 }
 
-__host__ void checkWarpSize() {
+__host__ size_t getMaxShmemPerBlock() {
   if (internal::prop.totalGlobalMem == 0) {
-    cudaGetDeviceProperties(&internal::prop, 0);
+    cudaGetDeviceProperties(&internal::prop, internal::GPU_index);
+  }
+  return internal::prop.sharedMemPerMultiprocessor / MIN_BPM;
+}
+
+__host__ size_t getMaxActiveThreads() {
+  if (internal::prop.totalGlobalMem == 0) {
+    cudaGetDeviceProperties(&internal::prop, internal::GPU_index);
+  }
+  return internal::prop.maxThreadsPerMultiProcessor *
+         internal::prop.multiProcessorCount;
+}
+
+__host__ void checkWarpSize(uint8_t const GPU_index) {
+  internal::GPU_index = GPU_index;
+  if (internal::prop.totalGlobalMem == 0) {
+    cudaGetDeviceProperties(&internal::prop, GPU_index);
   }
   if (internal::prop.warpSize != WS) {
     fprintf(stderr, "Warp size must be 32, but is %d\n",

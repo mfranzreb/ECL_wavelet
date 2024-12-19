@@ -12,16 +12,10 @@
 
 // Define launch bounds based on compute capability
 // __CUDA_ARCH__ is not defined in host code
-#if __CUDA_ARCH__ == 900
-#define MAX_TPB 1024
-#define MIN_BPM 2
-#elif __CUDA_ARCH__ > 800 && __CUDA_ARCH__ < 900
+#if __CUDA_ARCH__ > 800 && __CUDA_ARCH__ < 900
 #define MAX_TPB 512
 #define MIN_BPM 3
 #elif __CUDA_ARCH__ == 750
-#define MAX_TPB 1024
-#define MIN_BPM 1
-#elif __CUDA_ARCH__ >= 700 && __CUDA_ARCH__ < 750
 #define MAX_TPB 1024
 #define MIN_BPM 1
 #else
@@ -59,6 +53,13 @@ __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
                                              int max_block_size);
 
 __host__ int getMaxBlockSize();
+
+/*!
+ * \brief Get the maximum shared memroy per block that still fully loads an SM.
+ */
+__host__ size_t getMaxShmemPerBlock();
+
+__host__ size_t getMaxActiveThreads();
 
 /*!
  * \brief Check if a number is a power of two.
@@ -140,7 +141,7 @@ __host__ __device__ T powTwo(T n) {
   return 1 << n;
 }
 
-__host__ void checkWarpSize();
+__host__ void checkWarpSize(uint8_t const GPU_index);
 
 #define gpuErrchkInternal(ans, file, line) \
   { gpuAssert((ans), file, line); }

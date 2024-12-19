@@ -162,6 +162,11 @@ class WaveletTree {
    */
   __device__ T getCodesStart() const;
 
+ protected:
+  __host__ void computeGlobalHistogram(bool const is_pow_two,
+                                       size_t const data_size, T* d_data,
+                                       T* d_alphabet, size_t* d_histogram);
+
  private:
   std::vector<T> alphabet_;    /*!< Alphabet of the wavelet tree*/
   size_t alphabet_size_;       /*!< Size of the alphabet*/
@@ -189,7 +194,7 @@ class WaveletTree {
  * \param alphabet Alphabet of the input data.
  * \param alphabet_size Size of the alphabet.
  */
-template <typename T, bool isMinAlphabet, bool isPowTwo>
+template <typename T, bool isMinAlphabet, bool isPowTwo, bool UseShmem>
 __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
                                              size_t const data_size,
                                              size_t* counts, T* const alphabet,
@@ -263,7 +268,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   //? Correct way?
   // Set device
   gpuErrchk(cudaSetDevice(GPU_index));
-  checkWarpSize();
+  checkWarpSize(GPU_index);
   alphabet_size_ = alphabet_.size();
 
   bool const is_pow_two = isPowTwo(alphabet_size_);
@@ -315,60 +320,37 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   gpuErrchk(
       cudaMemcpy(d_data, data, data_size * sizeof(T), cudaMemcpyHostToDevice));
 
-  // Copy alphabet to device
+  // Allocate space for sorted data
+  T* d_sorted_data;
+  gpuErrchk(cudaMalloc(&d_sorted_data, data_size * sizeof(T)));
+
+  // Find necessary storage for CUB exclusive sum and radix sort
+  void* d_temp_storage = nullptr;
+  size_t temp_storage_bytes = 0;
+  cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_counts_,
+                                d_counts_, alphabet_size_);
+
+  //? Cub needs 2*data_size bytes of storage + sorted data
+  size_t temp_storage_bytes_radix = 0;
+  cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes_radix,
+                                 d_data, d_sorted_data, data_size);
+
+  temp_storage_bytes = std::max(temp_storage_bytes, temp_storage_bytes_radix);
+  gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+
   T* d_alphabet;
-  gpuErrchk(cudaMalloc(&d_alphabet, alphabet_size_ * sizeof(T)));
-  gpuErrchk(cudaMemcpy(d_alphabet, alphabet_.data(), alphabet_size_ * sizeof(T),
-                       cudaMemcpyHostToDevice));
-
-  // Compute global_histogram and change text to min_alphabet
-  auto num_warps = (data_size + WS - 1) / WS;
-
-  struct cudaFuncAttributes funcAttrib;
-  if (is_pow_two) {
-    if (is_min_alphabet_) {
-      gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
-                                      computeGlobalHistogramKernel<T, 1, 1>));
-    } else {
-      gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
-                                      computeGlobalHistogramKernel<T, 0, 1>));
-    }
+  if (alphabet_size_ * sizeof(T) <= temp_storage_bytes) {
+    // Copy alphabet to device using temp_storage
+    d_alphabet = reinterpret_cast<T*>(d_temp_storage);
+    gpuErrchk(cudaMemcpy(d_temp_storage, alphabet_.data(),
+                         alphabet_size_ * sizeof(T), cudaMemcpyHostToDevice));
   } else {
-    if (is_min_alphabet_) {
-      gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
-                                      computeGlobalHistogramKernel<T, 1, 0>));
-    } else {
-      gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
-                                      computeGlobalHistogramKernel<T, 0, 0>));
-    }
+    gpuErrchk(cudaMalloc(&d_alphabet, alphabet_size_ * sizeof(T)));
+    gpuErrchk(cudaMemcpy(d_alphabet, alphabet_.data(),
+                         alphabet_size_ * sizeof(T), cudaMemcpyHostToDevice));
   }
 
-  int maxThreadsPerBlockHist = funcAttrib.maxThreadsPerBlock;
-
-  auto [num_blocks, threads_per_block] = getLaunchConfig(
-      num_warps, 256, std::min(MAX_TPB, maxThreadsPerBlockHist));
-  if (is_pow_two) {
-    if (is_min_alphabet_) {
-      computeGlobalHistogramKernel<T, true, true>
-          <<<num_blocks, threads_per_block>>>(
-              *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
-    } else {
-      computeGlobalHistogramKernel<T, false, true>
-          <<<num_blocks, threads_per_block>>>(
-              *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
-    }
-  } else {
-    if (is_min_alphabet_) {
-      computeGlobalHistogramKernel<T, true, false>
-          <<<num_blocks, threads_per_block>>>(
-              *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
-    } else {
-      computeGlobalHistogramKernel<T, false, false>
-          <<<num_blocks, threads_per_block>>>(
-              *this, d_data, data_size, d_counts_, d_alphabet, alphabet_size_);
-    }
-  }
-  kernelCheck();
+  computeGlobalHistogram(is_pow_two, data_size, d_data, d_alphabet, d_counts_);
 
   // Copy counts to host
   std::vector<size_t> counts(alphabet_size_);
@@ -392,23 +374,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     }
   }
 
-  // Allocate space for sorted data
-  T* d_sorted_data;
-  gpuErrchk(cudaMalloc(&d_sorted_data, data_size * sizeof(T)));
-
-  // Find necessary storage for CUB exclusive sum and radix sort
-  void* d_temp_storage = nullptr;
-  size_t temp_storage_bytes = 0;
-  cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_counts_,
-                                d_counts_, alphabet_size_);
-
-  size_t temp_storage_bytes_radix = 0;
-  cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes_radix,
-                                 d_data, d_sorted_data, data_size);
-
-  temp_storage_bytes = std::max(temp_storage_bytes, temp_storage_bytes_radix);
-  gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
-
   // Perform exclusive sum of counts
   cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_counts_,
                                 d_counts_, alphabet_size_);
@@ -418,10 +383,12 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   gpuErrchk(cudaMemcpyToSymbol(d_data_len, &data_size, sizeof(size_t),
                                size_t(0), cudaMemcpyHostToDevice));
 
+  struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T>));
   int maxThreadsPerBlockFillLevel = funcAttrib.maxThreadsPerBlock;
 
-  std::tie(num_blocks, threads_per_block) = getLaunchConfig(
+  auto num_warps = (data_size + WS - 1) / WS;
+  auto [num_blocks, threads_per_block] = getLaunchConfig(
       num_warps, 32, std::min(MAX_TPB, maxThreadsPerBlockFillLevel));
 
   fillLevelKernel<T><<<num_blocks, threads_per_block>>>(bit_array, d_data,
@@ -459,7 +426,9 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   gpuErrchk(cudaFree(d_data));
   gpuErrchk(cudaFree(d_sorted_data));
-  gpuErrchk(cudaFree(d_alphabet));
+  if (alphabet_size_ * sizeof(T) > temp_storage_bytes) {
+    gpuErrchk(cudaFree(d_alphabet));
+  }
   gpuErrchk(cudaFree(d_temp_storage));
 
   // build rank and select structures from bit-vectors
@@ -729,7 +698,118 @@ __device__ T WaveletTree<T>::getCodesStart() const {
   return codes_start_;
 }
 
-template <typename T, bool isMinAlphabet, bool isPowTwo>
+template <typename T>
+__host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
+                                                     size_t const data_size,
+                                                     T* d_data, T* d_alphabet,
+                                                     size_t* d_histogram) {
+  struct cudaFuncAttributes funcAttrib;
+  if (is_pow_two) {
+    if (is_min_alphabet_) {
+      gpuErrchk(cudaFuncGetAttributes(
+          &funcAttrib, computeGlobalHistogramKernel<T, true, true, true>));
+    } else {
+      gpuErrchk(cudaFuncGetAttributes(
+          &funcAttrib, computeGlobalHistogramKernel<T, false, true, true>));
+    }
+  } else {
+    if (is_min_alphabet_) {
+      gpuErrchk(cudaFuncGetAttributes(
+          &funcAttrib, computeGlobalHistogramKernel<T, true, false, true>));
+    } else {
+      gpuErrchk(cudaFuncGetAttributes(
+          &funcAttrib, computeGlobalHistogramKernel<T, false, false, true>));
+    }
+  }
+
+  int maxThreadsPerBlockHist = funcAttrib.maxThreadsPerBlock;
+
+  auto const max_shmem_per_block = getMaxShmemPerBlock();
+
+  size_t const needed_shmem = sizeof(size_t) * alphabet_size_;
+  int min_threads_shmem = std::min({maxThreadsPerBlockHist, MAX_TPB});
+  size_t const used_shmem =
+      std::min(needed_shmem, max_shmem_per_block * min_threads_shmem / MAX_TPB);
+
+  // Find minimal block size that still has enough shared memory
+  while (needed_shmem <
+         max_shmem_per_block * (min_threads_shmem - WS) / MAX_TPB) {
+    min_threads_shmem -= WS;
+  }
+
+  // Compute global_histogram and change text to min_alphabet
+  size_t num_warps;
+  if (needed_shmem == used_shmem) {
+    auto const max_threads = getMaxActiveThreads();
+    num_warps = ((4 * max_threads / 5) + WS - 1) / WS;
+  } else {
+    num_warps = (data_size + WS - 1) / WS;
+  }
+
+  auto [num_blocks, threads_per_block] =
+      getLaunchConfig(num_warps, std::max(WS, min_threads_shmem),
+                      std::min(MAX_TPB, maxThreadsPerBlockHist));
+
+  if (is_pow_two) {
+    if (is_min_alphabet_) {
+      if (needed_shmem == used_shmem) {
+        computeGlobalHistogramKernel<T, true, true, true>
+            <<<num_blocks, threads_per_block, used_shmem>>>(
+                *this, d_data, data_size, d_histogram, d_alphabet,
+                alphabet_size_);
+      } else {
+        computeGlobalHistogramKernel<T, true, true, false>
+            <<<num_blocks, threads_per_block>>>(*this, d_data, data_size,
+                                                d_histogram, d_alphabet,
+                                                alphabet_size_);
+      }
+    } else {
+      if (needed_shmem == used_shmem) {
+        computeGlobalHistogramKernel<T, false, true, true>
+            <<<num_blocks, threads_per_block, used_shmem>>>(
+                *this, d_data, data_size, d_histogram, d_alphabet,
+                alphabet_size_);
+      } else {
+        computeGlobalHistogramKernel<T, false, true, false>
+            <<<num_blocks, threads_per_block>>>(*this, d_data, data_size,
+                                                d_histogram, d_alphabet,
+                                                alphabet_size_);
+      }
+    }
+  } else {
+    if (is_min_alphabet_) {
+      if (needed_shmem == used_shmem) {
+        computeGlobalHistogramKernel<T, true, false, true>
+            <<<num_blocks, threads_per_block, used_shmem>>>(
+                *this, d_data, data_size, d_histogram, d_alphabet,
+                alphabet_size_);
+      } else {
+        computeGlobalHistogramKernel<T, true, false, false>
+            <<<num_blocks, threads_per_block>>>(*this, d_data, data_size,
+                                                d_histogram, d_alphabet,
+                                                alphabet_size_);
+      }
+    } else {
+      if (needed_shmem == used_shmem) {
+        computeGlobalHistogramKernel<T, false, false, true>
+            <<<num_blocks, threads_per_block, used_shmem>>>(
+                *this, d_data, data_size, d_histogram, d_alphabet,
+                alphabet_size_);
+      } else {
+        computeGlobalHistogramKernel<T, false, false, false>
+            <<<num_blocks, threads_per_block>>>(*this, d_data, data_size,
+                                                d_histogram, d_alphabet,
+                                                alphabet_size_);
+      }
+    }
+  }
+  kernelCheck();
+}
+
+// TODO: separate kernel
+//? Put binary search and encoding in shmem?
+//? Launching fewer blocks reduces atomic contention
+template <typename T, bool isMinAlphabet, bool isPowTwo, bool UseShmem>
 __global__ __launch_bounds__(
     MAX_TPB,
     MIN_BPM) void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
@@ -738,10 +818,18 @@ __global__ __launch_bounds__(
                                                T* const alphabet,
                                                size_t const alphabet_size) {
   assert(blockDim.x % WS == 0);
-  uint32_t const total_threads = blockDim.x * gridDim.x;
-  uint32_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
+  extern __shared__ size_t shared_hist[];
+  if constexpr (UseShmem) {
+    for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
+      shared_hist[i] = 0;
+    }
+    __syncthreads();
+  }
+
+  size_t const total_threads = blockDim.x * gridDim.x;
+  size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
   T char_data;
-  for (uint32_t i = global_t_id; i < data_size; i += total_threads) {
+  for (size_t i = global_t_id; i < data_size; i += total_threads) {
     char_data = data[i];
     if constexpr (not isMinAlphabet) {
       //? Worth it to use a hash map?
@@ -749,8 +837,11 @@ __global__ __launch_bounds__(
                                       alphabet + alphabet_size, char_data) -
                   alphabet;
     }
-
-    atomicAdd((cu_size_t*)&counts[char_data], size_t(1));
+    if constexpr (UseShmem) {
+      atomicAdd((cu_size_t*)&shared_hist[char_data], size_t(1));
+    } else {
+      atomicAdd((cu_size_t*)&counts[char_data], size_t(1));
+    }
     // TODO: could calculate code on the fly
     //? Could this if reduce coalescing?
     if constexpr (not isPowTwo) {
@@ -760,6 +851,14 @@ __global__ __launch_bounds__(
     }
     data[i] = char_data;
   }
+
+  if constexpr (UseShmem) {
+    __syncthreads();
+    // Reduce shared histogram to global histogram
+    for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
+      atomicAdd((cu_size_t*)&counts[i], shared_hist[i]);
+    }
+  }
 }
 
 template <typename T>
@@ -767,13 +866,13 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 uint8_t const alphabet_start_bit,
                                 uint32_t const level) {
   assert(blockDim.x % WS == 0);
-  uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
-  uint32_t const num_warps = gridDim.x * blockDim.x / WS;
+  size_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
+  size_t const num_warps = gridDim.x * blockDim.x / WS;
   uint8_t const local_t_id = threadIdx.x % WS;
 
   size_t const start = WS * global_warp_id;
   // Each warp processes a block of data
-  for (uint32_t i = start; i < d_data_len; i += WS * num_warps) {
+  for (size_t i = start; i < d_data_len; i += WS * num_warps) {
     T code = 0;
     if (i + local_t_id < d_data_len) {
       code = data[i + local_t_id];
@@ -806,8 +905,8 @@ __global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
       if (char_end - char_start == 1) {
         break;
       }
-      // TODO: could be done in parallel, and combined if index is less than L2
-      // block size
+      // TODO: could be done in parallel, and combined if index is less than
+      // L2 block size
       start = tree.rank_select_.rank0(l, tree.getCounts(char_start), local_t_id,
                                       WS);
       pos = tree.rank_select_.rank0(l, tree.getCounts(char_start) + index,
@@ -847,8 +946,8 @@ __global__ void rankKernel(WaveletTree<T> tree,
       if (char_end - char_start == 1) {
         break;
       }
-      // TODO: could be done in parallel, and combined if index is less than L2
-      // block size
+      // TODO: could be done in parallel, and combined if index is less than
+      // L2 block size
       start = tree.rank_select_.rank0(l, tree.getCounts(char_start), local_t_id,
                                       WS);
       pos = tree.rank_select_.rank0(

@@ -11,6 +11,7 @@
 #include <numeric>
 #include <queue>
 #include <rank_select.cuh>
+#include <utils.cuh>
 #include <vector>
 
 namespace ecl {

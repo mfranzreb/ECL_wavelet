@@ -806,8 +806,6 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
   kernelCheck();
 }
 
-// TODO: separate kernel
-//? Put binary search and encoding in shmem?
 //? Launching fewer blocks reduces atomic contention
 template <typename T, bool isMinAlphabet, bool isPowTwo, bool UseShmem>
 __global__ __launch_bounds__(
@@ -832,18 +830,17 @@ __global__ __launch_bounds__(
   for (size_t i = global_t_id; i < data_size; i += total_threads) {
     char_data = data[i];
     if constexpr (not isMinAlphabet) {
-      //? Worth it to use a hash map?
       char_data = thrust::lower_bound(thrust::seq, alphabet,
                                       alphabet + alphabet_size, char_data) -
                   alphabet;
     }
+    // TODO
     if constexpr (UseShmem) {
-      atomicAdd((cu_size_t*)&shared_hist[char_data], size_t(1));
+      atomicAdd_block((cu_size_t*)&shared_hist[char_data], size_t(1));
     } else {
       atomicAdd((cu_size_t*)&counts[char_data], size_t(1));
     }
     // TODO: could calculate code on the fly
-    //? Could this if reduce coalescing?
     if constexpr (not isPowTwo) {
       if (char_data >= tree.getCodesStart()) {
         char_data = tree.encode(char_data).code_;

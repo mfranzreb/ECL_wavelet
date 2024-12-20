@@ -119,7 +119,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
   void* d_temp_storage = nullptr;
   gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
 
-  auto const max_block_size = getMaxBlockSize();
+  auto const max_block_size = getDeviceProperties().maxThreadsPerBlock;
 
 #pragma omp parallel for num_threads(num_arrays)
   for (uint32_t i = 0; i < num_arrays; i++) {

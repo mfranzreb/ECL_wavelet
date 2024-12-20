@@ -198,7 +198,8 @@ template <typename T, bool isMinAlphabet, bool isPowTwo, bool UseShmem>
 __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
                                              size_t const data_size,
                                              size_t* counts, T* const alphabet,
-                                             size_t const alphabet_size);
+                                             size_t const alphabet_size,
+                                             uint16_t const hists_per_block);
 
 /*!
  * \brief Kernel to fill a level of the wavelet tree.
@@ -722,84 +723,103 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
     }
   }
 
-  int maxThreadsPerBlockHist = funcAttrib.maxThreadsPerBlock;
+  int const maxThreadsPerBlockHist =
+      std::min(MAX_TPB, funcAttrib.maxThreadsPerBlock);
 
-  auto const max_shmem_per_block = getMaxShmemPerBlock();
+  struct cudaDeviceProp prop = getDeviceProperties();
 
-  size_t const needed_shmem = sizeof(size_t) * alphabet_size_;
-  int min_threads_shmem = std::min({maxThreadsPerBlockHist, MAX_TPB});
-  size_t const used_shmem =
-      std::min(needed_shmem, max_shmem_per_block * min_threads_shmem / MAX_TPB);
+  auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
+  auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
+  size_t const hist_size = sizeof(size_t) * alphabet_size_;
 
-  // Find minimal block size that still has enough shared memory
-  while (needed_shmem <
-         max_shmem_per_block * (min_threads_shmem - WS) / MAX_TPB) {
-    min_threads_shmem -= WS;
-  }
+  auto const hists_per_SM = max_shmem_per_SM / hist_size;
+
+  // auto const threads_per_hist =
+  //     (max_threads_per_SM + hists_per_SM - 1) / hists_per_SM;
+
+  // auto threads_per_warp_that_share = WS / (min_block_size /
+  // threads_per_hist);
+
+  // Find minimal block size where the same number of threads in a warp share a
+  // hist
+  // while (threads_per_warp_that_share ==
+  //       WS / ((min_block_size / 2) / threads_per_hist)) {
+  //  min_block_size /= 2;
+  //}
 
   // Compute global_histogram and change text to min_alphabet
-  size_t num_warps;
-  if (needed_shmem == used_shmem) {
-    auto const max_threads = getMaxActiveThreads();
-    num_warps = ((4 * max_threads / 5) + WS - 1) / WS;
-  } else {
-    num_warps = (data_size + WS - 1) / WS;
+  size_t num_warps = (data_size + WS - 1) / WS;
+  if (hists_per_SM >= MIN_BPM) {
+    num_warps = std::min(
+        num_warps,
+        static_cast<size_t>(
+            (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
   }
 
-  auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_warps, std::max(WS, min_threads_shmem),
-                      std::min(MAX_TPB, maxThreadsPerBlockHist));
+  auto [num_blocks, threads_per_block] = getLaunchConfig(
+      num_warps, std::max(WS, maxThreadsPerBlockHist), maxThreadsPerBlockHist);
+
+  uint16_t const blocks_per_SM =
+      (num_blocks + prop.multiProcessorCount - 1) / prop.multiProcessorCount;
+
+  size_t const used_shmem =
+      std::min(max_shmem_per_SM / blocks_per_SM, prop.sharedMemPerBlock);
+
+  uint16_t const hists_per_block =
+      std::min(static_cast<size_t>(threads_per_block), used_shmem / hist_size);
+  // threads_per_warp_that_share = WS /
+  // (threads_per_block / threads_per_hist);
 
   if (is_pow_two) {
     if (is_min_alphabet_) {
-      if (needed_shmem == used_shmem) {
+      if (hists_per_block > 0) {
         computeGlobalHistogramKernel<T, true, true, true>
             <<<num_blocks, threads_per_block, used_shmem>>>(
                 *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_);
+                alphabet_size_, hists_per_block);
       } else {
         computeGlobalHistogramKernel<T, true, true, false>
-            <<<num_blocks, threads_per_block>>>(*this, d_data, data_size,
-                                                d_histogram, d_alphabet,
-                                                alphabet_size_);
+            <<<num_blocks, threads_per_block>>>(
+                *this, d_data, data_size, d_histogram, d_alphabet,
+                alphabet_size_, hists_per_block);
       }
     } else {
-      if (needed_shmem == used_shmem) {
+      if (hists_per_block > 0) {
         computeGlobalHistogramKernel<T, false, true, true>
             <<<num_blocks, threads_per_block, used_shmem>>>(
                 *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_);
+                alphabet_size_, hists_per_block);
       } else {
         computeGlobalHistogramKernel<T, false, true, false>
-            <<<num_blocks, threads_per_block>>>(*this, d_data, data_size,
-                                                d_histogram, d_alphabet,
-                                                alphabet_size_);
+            <<<num_blocks, threads_per_block>>>(
+                *this, d_data, data_size, d_histogram, d_alphabet,
+                alphabet_size_, hists_per_block);
       }
     }
   } else {
     if (is_min_alphabet_) {
-      if (needed_shmem == used_shmem) {
+      if (hists_per_block > 0) {
         computeGlobalHistogramKernel<T, true, false, true>
             <<<num_blocks, threads_per_block, used_shmem>>>(
                 *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_);
+                alphabet_size_, hists_per_block);
       } else {
         computeGlobalHistogramKernel<T, true, false, false>
-            <<<num_blocks, threads_per_block>>>(*this, d_data, data_size,
-                                                d_histogram, d_alphabet,
-                                                alphabet_size_);
+            <<<num_blocks, threads_per_block>>>(
+                *this, d_data, data_size, d_histogram, d_alphabet,
+                alphabet_size_, hists_per_block);
       }
     } else {
-      if (needed_shmem == used_shmem) {
+      if (hists_per_block > 0) {
         computeGlobalHistogramKernel<T, false, false, true>
             <<<num_blocks, threads_per_block, used_shmem>>>(
                 *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_);
+                alphabet_size_, hists_per_block);
       } else {
         computeGlobalHistogramKernel<T, false, false, false>
-            <<<num_blocks, threads_per_block>>>(*this, d_data, data_size,
-                                                d_histogram, d_alphabet,
-                                                alphabet_size_);
+            <<<num_blocks, threads_per_block>>>(
+                *this, d_data, data_size, d_histogram, d_alphabet,
+                alphabet_size_, hists_per_block);
       }
     }
   }
@@ -814,11 +834,15 @@ __global__ __launch_bounds__(
                                                size_t const data_size,
                                                size_t* counts,
                                                T* const alphabet,
-                                               size_t const alphabet_size) {
+                                               size_t const alphabet_size,
+                                               uint16_t const hists_per_block) {
   assert(blockDim.x % WS == 0);
   extern __shared__ size_t shared_hist[];
+  size_t offset;
   if constexpr (UseShmem) {
-    for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
+    offset = (threadIdx.x % hists_per_block) * alphabet_size;
+    for (size_t i = threadIdx.x; i < alphabet_size * hists_per_block;
+         i += blockDim.x) {
       shared_hist[i] = 0;
     }
     __syncthreads();
@@ -834,9 +858,8 @@ __global__ __launch_bounds__(
                                       alphabet + alphabet_size, char_data) -
                   alphabet;
     }
-    // TODO
     if constexpr (UseShmem) {
-      atomicAdd_block((cu_size_t*)&shared_hist[char_data], size_t(1));
+      atomicAdd_block((cu_size_t*)&shared_hist[offset + char_data], size_t(1));
     } else {
       atomicAdd((cu_size_t*)&counts[char_data], size_t(1));
     }
@@ -851,9 +874,13 @@ __global__ __launch_bounds__(
 
   if constexpr (UseShmem) {
     __syncthreads();
-    // Reduce shared histogram to global histogram
+    // Reduce shared histograms to first one
     for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
-      atomicAdd((cu_size_t*)&counts[i], shared_hist[i]);
+      size_t sum = shared_hist[i];
+      for (size_t j = 1; j < hists_per_block; ++j) {
+        sum += shared_hist[j * alphabet_size + i];
+      }
+      atomicAdd((cu_size_t*)&counts[i], sum);
     }
   }
 }

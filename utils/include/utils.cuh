@@ -52,14 +52,7 @@ __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
                                              int const min_block_size,
                                              int max_block_size);
 
-__host__ int getMaxBlockSize();
-
-/*!
- * \brief Get the maximum shared memroy per block that still fully loads an SM.
- */
-__host__ size_t getMaxShmemPerBlock();
-
-__host__ size_t getMaxActiveThreads();
+__host__ cudaDeviceProp &getDeviceProperties();
 
 /*!
  * \brief Check if a number is a power of two.

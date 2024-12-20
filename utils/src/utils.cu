@@ -67,26 +67,11 @@ __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
   return best_match;  // Return the best match found
 }
 
-__host__ int getMaxBlockSize() {
+__host__ cudaDeviceProp &getDeviceProperties() {
   if (internal::prop.totalGlobalMem == 0) {
     cudaGetDeviceProperties(&internal::prop, internal::GPU_index);
   }
-  return internal::prop.maxThreadsPerBlock;
-}
-
-__host__ size_t getMaxShmemPerBlock() {
-  if (internal::prop.totalGlobalMem == 0) {
-    cudaGetDeviceProperties(&internal::prop, internal::GPU_index);
-  }
-  return internal::prop.sharedMemPerMultiprocessor / MIN_BPM;
-}
-
-__host__ size_t getMaxActiveThreads() {
-  if (internal::prop.totalGlobalMem == 0) {
-    cudaGetDeviceProperties(&internal::prop, internal::GPU_index);
-  }
-  return internal::prop.maxThreadsPerMultiProcessor *
-         internal::prop.multiProcessorCount;
+  return internal::prop;
 }
 
 __host__ void checkWarpSize(uint8_t const GPU_index) {

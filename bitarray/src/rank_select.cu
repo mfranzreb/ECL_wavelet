@@ -143,8 +143,9 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
           (bit_array_.sizeHost(i) % RankSelectConfig::L1_BIT_SIZE +
            RankSelectConfig::L2_BIT_SIZE - 1) /
           RankSelectConfig::L2_BIT_SIZE;
-      auto [_, block_size] = getLaunchConfig(num_l2_blocks - num_last_l2_blocks,
-                                             32, maxThreadsPerBlockL2Kernel);
+      auto [_, block_size] =
+          getLaunchConfig(num_l2_blocks - num_last_l2_blocks, MIN_TPB,
+                          maxThreadsPerBlockL2Kernel);
 
       // calculate L2 entries for all L1 blocks
       calculateL2EntriesKernel<<<num_l1_blocks, block_size>>>(

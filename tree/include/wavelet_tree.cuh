@@ -390,7 +390,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   auto num_warps = (data_size + WS - 1) / WS;
   auto [num_blocks, threads_per_block] = getLaunchConfig(
-      num_warps, 32, std::min(MAX_TPB, maxThreadsPerBlockFillLevel));
+      num_warps, MIN_TPB, std::min(MAX_TPB, maxThreadsPerBlockFillLevel));
 
   fillLevelKernel<T><<<num_blocks, threads_per_block>>>(bit_array, d_data,
                                                         alphabet_start_bit_, 0);
@@ -409,7 +409,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     //  Fill l-th bit array
     num_warps = (data_size + WS - 1) / WS;
     std::tie(num_blocks, threads_per_block) = getLaunchConfig(
-        num_warps, 32, std::min(MAX_TPB, maxThreadsPerBlockFillLevel));
+        num_warps, MIN_TPB, std::min(MAX_TPB, maxThreadsPerBlockFillLevel));
 
     fillLevelKernel<T><<<num_blocks, threads_per_block>>>(
         bit_array, d_sorted_data, alphabet_start_bit_, l);
@@ -468,7 +468,7 @@ __host__ std::vector<T> WaveletTree<T>::access(
   int maxThreadsPerBlockAccess = funcAttrib.maxThreadsPerBlock;
   size_t num_indices = indices.size();
   auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_indices, 256, maxThreadsPerBlockAccess);
+      getLaunchConfig(num_indices, MIN_TPB, maxThreadsPerBlockAccess);
 
   // allocate space for results
   T* d_results;
@@ -513,7 +513,7 @@ __host__ std::vector<size_t> WaveletTree<T>::rank(
   // launch kernel with 1 warp per index
   size_t const num_queries = queries.size();
   auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_queries, 256, maxThreadsPerBlock);
+      getLaunchConfig(num_queries, MIN_TPB, maxThreadsPerBlock);
 
   // allocate space for results
   size_t* d_results;
@@ -564,7 +564,7 @@ __host__ std::vector<size_t> WaveletTree<T>::select(
   // launch kernel with 1 warp per index
   size_t const num_queries = queries.size();
   auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_queries, 256, maxThreadsPerBlock);
+      getLaunchConfig(num_queries, MIN_TPB, maxThreadsPerBlock);
 
   // allocate space for results
   size_t* d_results;
@@ -723,8 +723,7 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
     }
   }
 
-  int const maxThreadsPerBlockHist =
-      std::min(MAX_TPB, funcAttrib.maxThreadsPerBlock);
+  int maxThreadsPerBlockHist = std::min(MAX_TPB, funcAttrib.maxThreadsPerBlock);
 
   struct cudaDeviceProp prop = getDeviceProperties();
 
@@ -734,19 +733,14 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
 
   auto const hists_per_SM = max_shmem_per_SM / hist_size;
 
-  // auto const threads_per_hist =
-  //     (max_threads_per_SM + hists_per_SM - 1) / hists_per_SM;
+  auto min_block_size =
+      hists_per_SM < MIN_BPM
+          ? MIN_TPB
+          : std::max(MIN_TPB,
+                     static_cast<int>(max_threads_per_SM / hists_per_SM));
 
-  // auto threads_per_warp_that_share = WS / (min_block_size /
-  // threads_per_hist);
-
-  // Find minimal block size where the same number of threads in a warp share a
-  // hist
-  // while (threads_per_warp_that_share ==
-  //       WS / ((min_block_size / 2) / threads_per_hist)) {
-  //  min_block_size /= 2;
-  //}
-
+  // Make the minimum block size a multiple of WS
+  min_block_size = ((min_block_size + WS - 1) / WS) * WS;
   // Compute global_histogram and change text to min_alphabet
   size_t num_warps = (data_size + WS - 1) / WS;
   if (hists_per_SM >= MIN_BPM) {
@@ -754,10 +748,11 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
         num_warps,
         static_cast<size_t>(
             (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
+    maxThreadsPerBlockHist = min_block_size;  // ENforce a small block size
   }
 
-  auto [num_blocks, threads_per_block] = getLaunchConfig(
-      num_warps, std::max(WS, maxThreadsPerBlockHist), maxThreadsPerBlockHist);
+  auto [num_blocks, threads_per_block] =
+      getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockHist);
 
   uint16_t const blocks_per_SM =
       (num_blocks + prop.multiProcessorCount - 1) / prop.multiProcessorCount;
@@ -826,7 +821,6 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
   kernelCheck();
 }
 
-//? Launching fewer blocks reduces atomic contention
 template <typename T, bool isMinAlphabet, bool isPowTwo, bool UseShmem>
 __global__ __launch_bounds__(
     MAX_TPB,

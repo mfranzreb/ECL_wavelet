@@ -23,6 +23,13 @@
 #define MIN_BPM 2
 #endif
 
+// Minimal block size that still fully loads an SM
+#ifdef __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870
+#define MIN_TPB 96
+#else
+#define MIN_TPB 64
+#endif
+
 namespace ecl {
 #define gpuErrchk(ans) \
   { gpuAssert((ans), __FILE__, __LINE__); }

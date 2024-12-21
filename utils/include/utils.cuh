@@ -24,7 +24,7 @@
 #endif
 
 // Minimal block size that still fully loads an SM
-#ifdef __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870
+#if __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870
 #define MIN_TPB 96
 #else
 #define MIN_TPB 64

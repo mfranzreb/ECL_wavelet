@@ -97,7 +97,7 @@
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/plot_benchmarks.py",
-      "args": ["benchmark.json", "."],
+      "args": ["results/bm_hist_computation.json", "."],
       "console": "integratedTerminal"
     },
     {
@@ -155,6 +155,29 @@
         }
       ],
       "preLaunchTask": "build RS profile"
+    },
+    {
+      "name": "Debug hist BM",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/benchmark/ecl_WT_hist_benchmarks",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build hist benchmarks"
     }
   ]
 }

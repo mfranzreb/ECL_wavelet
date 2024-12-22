@@ -18,7 +18,7 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
     state.PauseTiming();
     auto ba_copy = bit_array;
     state.ResumeTiming();
-    RankSelect rs(std::move(ba_copy));
+    RankSelect rs(std::move(ba_copy), 0);
   }
 }
 

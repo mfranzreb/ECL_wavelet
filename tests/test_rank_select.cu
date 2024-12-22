@@ -158,7 +158,7 @@ TEST_F(RankSelectBoolTest, RankSelectConstructor) {
     sizes.push_back(8 * sizeof(uint32_t) * rand_1 + rand_2);
   }
   BitArray bit_array(sizes, false);
-  RankSelect rank_select(std::move(bit_array));
+  RankSelect rank_select(std::move(bit_array), 0);
 }
 
 using RankSelectBlocksTest = RankSelectTest<size_t>;
@@ -170,7 +170,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexSizes) {
                                          RankSelectConfig::L1_BIT_SIZE + 1,
                                          2 * RankSelectConfig::L1_BIT_SIZE - 1},
                      false);
-  RankSelect rank_select(std::move(bit_array));
+  RankSelect rank_select(std::move(bit_array), 0);
 
   for (uint32_t i = 0; i < 5; ++i) {
     getNumL1BlocksKernel<<<1, 1>>>(rank_select, i, result);
@@ -235,7 +235,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexWriting) {
                                          RankSelectConfig::L1_BIT_SIZE + 1,
                                          2 * RankSelectConfig::L1_BIT_SIZE - 1},
                      false);
-  RankSelect rank_select(std::move(bit_array));
+  RankSelect rank_select(std::move(bit_array), 0);
 
   // Check that all entries of all arrays are initialized to 0
   for (uint32_t i = 0; i < 7; ++i) {
@@ -287,7 +287,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
     BitArray bit_array(std::vector<size_t>{RankSelectConfig::L1_BIT_SIZE + 1},
                        false);
 
-    RankSelect rank_select(std::move(bit_array));
+    RankSelect rank_select(std::move(bit_array), 0);
 
     // check that all indices are 0
     getNumL1BlocksKernel<<<1, 1>>>(rank_select, 0, result);
@@ -315,7 +315,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
                                          2 * RankSelectConfig::L1_BIT_SIZE + 1},
                      true);
 
-  RankSelect rank_select(std::move(bit_array));
+  RankSelect rank_select(std::move(bit_array), 0);
 
   // check that all indices are correct
   for (uint32_t i = 0; i < rank_select.bit_array_.numArrays(); ++i) {
@@ -372,7 +372,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
                        cudaMemcpyHostToDevice));
   for (uint32_t i = 0; i < num_arrays; ++i) {
     size_t num_words = (sizes[i] + 31) / 32;
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, MAX_TPB);
+    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, kMaxTPB);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
@@ -384,7 +384,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
     helper.buildRankIndex();
   }
   gpuErrchk(cudaFree(d_words_arr));
-  RankSelect rank_select(std::move(bit_array));
+  RankSelect rank_select(std::move(bit_array), 0);
   for (uint32_t i = 0; i < num_arrays; ++i) {
     // Check that indices are correct
     getNumL1BlocksKernel<<<1, 1>>>(rank_select, i, result);
@@ -425,7 +425,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
         val);
     auto num_arrays = bit_array.numArrays();
 
-    RankSelect rank_select(std::move(bit_array));
+    RankSelect rank_select(std::move(bit_array), 0);
 
     std::vector<size_t> random_positions(100);
     std::default_random_engine generator;
@@ -522,7 +522,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
     gpuErrchk(cudaMalloc(&d_words_arr, num_words * sizeof(uint32_t)));
     gpuErrchk(cudaMemcpy(d_words_arr, words.data(),
                          num_words * sizeof(uint32_t), cudaMemcpyHostToDevice));
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, MAX_TPB);
+    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, kMaxTPB);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
@@ -532,7 +532,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
     gpuErrchk(cudaFree(d_words_arr));
   }
 
-  RankSelect rank_select(std::move(bit_array));
+  RankSelect rank_select(std::move(bit_array), 0);
   for (auto &helper : helpers) {
     helper.buildRankIndex();
   }
@@ -615,7 +615,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
                        cudaMemcpyHostToDevice));
   for (uint32_t i = 0; i < num_arrays; ++i) {
     size_t num_words = (sizes[i] + 31) / 32;
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, MAX_TPB);
+    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, kMaxTPB);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
@@ -630,7 +630,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
 
   // perform rank and select queries on 100 random places in each array
   uint32_t num_queries = 500;
-  RankSelect rank_select(std::move(bit_array));
+  RankSelect rank_select(std::move(bit_array), 0);
   for (uint32_t i = 0; i < num_arrays; ++i) {
     for (uint32_t j = 0; j < num_queries; ++j) {
       uint32_t index = random_nums[j] % sizes[i];

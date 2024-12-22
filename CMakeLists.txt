@@ -7,9 +7,14 @@ option(BUILD_TESTS "Build tests" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(PROFILE "Enable profiling" OFF)
 
+find_package(OpenMP REQUIRED)
+
+find_package(CUDAToolkit REQUIRED)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CUDA_STANDARD 20)
+
+set(CMAKE_CUDA_ARCHITECTURES native)
 
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --default-stream per-thread -Xcompiler=-fopenmp")
 
@@ -24,9 +29,6 @@ if(NOT CMAKE_BUILD_TYPE)
     message(STATUS "Build type not specified, defaulted to RelWithDebInfo")
 endif(NOT CMAKE_BUILD_TYPE)
 
-find_package(OpenMP REQUIRED)
-
-find_package(CUDAToolkit REQUIRED)
 
 if(PROFILE AND CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo --ptxas-options=-v")

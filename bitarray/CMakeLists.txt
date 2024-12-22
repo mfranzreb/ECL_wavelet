@@ -21,6 +21,4 @@ target_link_libraries(${TARGET}
 
 target_compile_features(${TARGET} PUBLIC cxx_std_20)
 
-set_property(TARGET ${TARGET} PROPERTY CUDA_ARCHITECTURES native)
-
 set_property(TARGET ${TARGET} PROPERTY CUDA_SEPARABLE_COMPILATION ON)

@@ -12,6 +12,7 @@
 
 // Define launch bounds based on compute capability
 // __CUDA_ARCH__ is not defined in host code
+#if defined(__CUDA_ARCH__)
 #if __CUDA_ARCH__ > 800 && __CUDA_ARCH__ < 900
 #define MAX_TPB 512
 #define MIN_BPM 3
@@ -30,7 +31,16 @@
 #define MIN_TPB 64
 #endif
 
+#define LB(x, y) __launch_bounds__(x, y)
+#else
+#define LB(x, y)
+#endif
+
 namespace ecl {
+inline uint32_t kMaxTPB = 0;
+inline uint32_t kMinTPB = 0;
+inline uint32_t kMinBPM = 0;
+
 #define gpuErrchk(ans) \
   { gpuAssert((ans), __FILE__, __LINE__); }
 __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,

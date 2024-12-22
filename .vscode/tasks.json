@@ -34,6 +34,14 @@
       "problemMatcher": []
     },
     {
+      "label": "build hist benchmarks",
+      "type": "shell",
+      "command": "cmake",
+      "dependsOn": ["CMake Configure", "Build target hist benchmarks"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
       "label": "CMake Configure",
       "type": "shell",
       "command": "cmake",
@@ -86,6 +94,16 @@
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "./build", "--target", "ecl_WT_tests"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Build target hist benchmarks",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "./build", "--target", "ecl_WT_hist_benchmarks"],
       "group": {
         "kind": "build",
         "isDefault": true

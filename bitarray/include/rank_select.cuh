@@ -41,8 +41,9 @@ class RankSelect {
    * \brief Constructor. Creates the auxiliary information for efficient rank
    * and select queries.
    * \param bit_array \c BitArray to be used for queries.
+   * \param GPU_index Index of the GPU to be used.
    */
-  __host__ RankSelect(BitArray&& bit_array) noexcept;
+  __host__ RankSelect(BitArray&& bit_array, uint8_t const GPU_index) noexcept;
 
   /*!
    * \brief Copy constructor.

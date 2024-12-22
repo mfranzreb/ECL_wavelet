@@ -1,7 +1,6 @@
 #include <benchmark/benchmark.h>
-#include <thrust/binary_search.h>
-#include <thrust/execution_policy.h>
 
+#include <cub/device/device_histogram.cuh>
 #include <random>
 
 #include "test_benchmark_utils.cuh"
@@ -11,15 +10,10 @@ namespace ecl {
 
 typedef unsigned long long cu_size_t;
 
-template <typename T, bool isMinAlphabet, bool isPowTwo, bool UseShmem>
-__global__ __launch_bounds__(
-    MAX_TPB,
-    MIN_BPM) void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
-                                               size_t const data_size,
-                                               size_t* counts,
-                                               T* const alphabet,
-                                               size_t const alphabet_size,
-                                               uint16_t const hists_per_block) {
+template <typename T, bool UseShmem>
+__global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
+    T* data, size_t const data_size, size_t* counts, T* const alphabet,
+    size_t const alphabet_size, uint16_t const hists_per_block) {
   assert(blockDim.x % WS == 0);
   extern __shared__ size_t shared_hist[];
   size_t offset;
@@ -37,28 +31,17 @@ __global__ __launch_bounds__(
   T char_data;
   for (size_t i = global_t_id; i < data_size; i += total_threads) {
     char_data = data[i];
-    if constexpr (not isMinAlphabet) {
-      char_data = thrust::lower_bound(thrust::seq, alphabet,
-                                      alphabet + alphabet_size, char_data) -
-                  alphabet;
-    }
     if constexpr (UseShmem) {
       atomicAdd_block((cu_size_t*)&shared_hist[offset + char_data], size_t(1));
     } else {
       atomicAdd((cu_size_t*)&counts[char_data], size_t(1));
     }
-    // TODO: could calculate code on the fly
-    if constexpr (not isPowTwo) {
-      if (char_data >= tree.getCodesStart()) {
-        char_data = tree.encode(char_data).code_;
-      }
-    }
-    data[i] = char_data;
   }
 
   if constexpr (UseShmem) {
     __syncthreads();
     // Reduce shared histograms to first one
+    // TODO: Could maybe be improved
     for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
       size_t sum = shared_hist[i];
       for (size_t j = 1; j < hists_per_block; ++j) {
@@ -70,139 +53,75 @@ __global__ __launch_bounds__(
 }
 
 template <typename T>
-__host__ void computeGlobalHistogram(bool const is_pow_two,
-                                     size_t const data_size, T* d_data,
+__host__ bool computeGlobalHistogram(size_t const data_size, T* d_data,
                                      T* d_alphabet, size_t* d_histogram,
                                      size_t const alphabet_size,
-                                     bool const is_min_alphabet,
-                                     bool const use_shmem) {
+                                     bool const use_shmem,
+                                     bool const use_small_grid) {
   struct cudaFuncAttributes funcAttrib;
-  if (is_pow_two) {
-    if (is_min_alphabet_) {
-      gpuErrchk(cudaFuncGetAttributes(
-          &funcAttrib, computeGlobalHistogramKernel<T, true, true, true>));
-    } else {
-      gpuErrchk(cudaFuncGetAttributes(
-          &funcAttrib, computeGlobalHistogramKernel<T, false, true, true>));
-    }
-  } else {
-    if (is_min_alphabet_) {
-      gpuErrchk(cudaFuncGetAttributes(
-          &funcAttrib, computeGlobalHistogramKernel<T, true, false, true>));
-    } else {
-      gpuErrchk(cudaFuncGetAttributes(
-          &funcAttrib, computeGlobalHistogramKernel<T, false, false, true>));
-    }
-  }
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                  computeGlobalHistogramKernel<T, true>));
 
   int const maxThreadsPerBlockHist =
-      std::min(MAX_TPB, funcAttrib.maxThreadsPerBlock);
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
 
   struct cudaDeviceProp prop = getDeviceProperties();
 
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
   auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
-  size_t const hist_size = sizeof(size_t) * alphabet_size_;
+  size_t const hist_size = sizeof(size_t) * alphabet_size;
 
   auto const hists_per_SM = max_shmem_per_SM / hist_size;
 
-  // auto const threads_per_hist =
-  //     (max_threads_per_SM + hists_per_SM - 1) / hists_per_SM;
+  auto min_block_size =
+      hists_per_SM < kMinBPM
+          ? kMinTPB
+          : std::max(kMinTPB,
+                     static_cast<uint32_t>(max_threads_per_SM / hists_per_SM));
 
-  // auto threads_per_warp_that_share = WS / (min_block_size /
-  // threads_per_hist);
-
-  // Find minimal block size where the same number of threads in a warp share a
-  // hist
-  // while (threads_per_warp_that_share ==
-  //       WS / ((min_block_size / 2) / threads_per_hist)) {
-  //  min_block_size /= 2;
-  //}
-
+  // Make the minimum block size a multiple of WS
+  min_block_size = ((min_block_size + WS - 1) / WS) * WS;
   // Compute global_histogram and change text to min_alphabet
   size_t num_warps = (data_size + WS - 1) / WS;
-  if (hists_per_SM >= MIN_BPM) {
+  if (use_small_grid) {
     num_warps = std::min(
         num_warps,
         static_cast<size_t>(
             (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
   }
 
-  auto [num_blocks, threads_per_block] = getLaunchConfig(
-      num_warps, std::max(WS, maxThreadsPerBlockHist), maxThreadsPerBlockHist);
+  auto [num_blocks, threads_per_block] =
+      getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockHist);
 
-  uint16_t const blocks_per_SM =
-      (num_blocks + prop.multiProcessorCount - 1) / prop.multiProcessorCount;
+  uint16_t const blocks_per_SM = max_threads_per_SM / threads_per_block;
 
   size_t const used_shmem =
       std::min(max_shmem_per_SM / blocks_per_SM, prop.sharedMemPerBlock);
 
   uint16_t const hists_per_block =
       std::min(static_cast<size_t>(threads_per_block), used_shmem / hist_size);
-  // threads_per_warp_that_share = WS /
-  // (threads_per_block / threads_per_hist);
-
-  if (is_pow_two) {
-    if (is_min_alphabet_) {
-      if (hists_per_block > 0) {
-        computeGlobalHistogramKernel<T, true, true, true>
-            <<<num_blocks, threads_per_block, used_shmem>>>(
-                *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_, hists_per_block);
-      } else {
-        computeGlobalHistogramKernel<T, true, true, false>
-            <<<num_blocks, threads_per_block>>>(
-                *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_, hists_per_block);
-      }
-    } else {
-      if (hists_per_block > 0) {
-        computeGlobalHistogramKernel<T, false, true, true>
-            <<<num_blocks, threads_per_block, used_shmem>>>(
-                *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_, hists_per_block);
-      } else {
-        computeGlobalHistogramKernel<T, false, true, false>
-            <<<num_blocks, threads_per_block>>>(
-                *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_, hists_per_block);
-      }
-    }
+  if (hists_per_block > 0 and use_shmem) {
+    computeGlobalHistogramKernel<T, true>
+        <<<num_blocks, threads_per_block, used_shmem>>>(
+            d_data, data_size, d_histogram, d_alphabet, alphabet_size,
+            hists_per_block);
   } else {
-    if (is_min_alphabet_) {
-      if (hists_per_block > 0) {
-        computeGlobalHistogramKernel<T, true, false, true>
-            <<<num_blocks, threads_per_block, used_shmem>>>(
-                *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_, hists_per_block);
-      } else {
-        computeGlobalHistogramKernel<T, true, false, false>
-            <<<num_blocks, threads_per_block>>>(
-                *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_, hists_per_block);
-      }
-    } else {
-      if (hists_per_block > 0) {
-        computeGlobalHistogramKernel<T, false, false, true>
-            <<<num_blocks, threads_per_block, used_shmem>>>(
-                *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_, hists_per_block);
-      } else {
-        computeGlobalHistogramKernel<T, false, false, false>
-            <<<num_blocks, threads_per_block>>>(
-                *this, d_data, data_size, d_histogram, d_alphabet,
-                alphabet_size_, hists_per_block);
-      }
-    }
+    computeGlobalHistogramKernel<T, false><<<num_blocks, threads_per_block>>>(
+        d_data, data_size, d_histogram, d_alphabet, alphabet_size,
+        hists_per_block);
   }
   kernelCheck();
+  return hists_per_block > 0;
 }
 
 template <typename T>
 static void BM_HistComputation(benchmark::State& state) {
+  checkWarpSize(0);
+
   auto const data_size = state.range(0);
   auto const alphabet_size = state.range(1);
   bool const use_shmem = state.range(2);
+  bool const use_small_grid = state.range(3);
 
   auto alphabet = std::vector<T>(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0);
@@ -211,6 +130,43 @@ static void BM_HistComputation(benchmark::State& state) {
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;
   state.counters["param.use_shmem"] = use_shmem;
+  state.counters["param.use_small_grid"] = use_small_grid;
+
+  T* d_data;
+  T* d_alphabet;
+  size_t* d_histogram;
+  gpuErrchk(cudaMalloc(&d_data, data_size * sizeof(T)));
+  gpuErrchk(cudaMemcpy(d_data, data.data(), data_size * sizeof(T),
+                       cudaMemcpyHostToDevice));
+  gpuErrchk(cudaMalloc(&d_alphabet, alphabet_size * sizeof(T)));
+  gpuErrchk(cudaMemcpy(d_alphabet, alphabet.data(), alphabet_size * sizeof(T),
+                       cudaMemcpyHostToDevice));
+  gpuErrchk(cudaMalloc(&d_histogram, alphabet_size * sizeof(size_t)));
+  bool could_use_shmem;
+  for (auto _ : state) {
+    gpuErrchk(cudaMemset(d_histogram, 0, alphabet_size * sizeof(size_t)));
+    could_use_shmem =
+        computeGlobalHistogram(data_size, d_data, d_alphabet, d_histogram,
+                               alphabet_size, use_shmem, use_small_grid);
+  }
+  gpuErrchk(cudaFree(d_data));
+  gpuErrchk(cudaFree(d_alphabet));
+  gpuErrchk(cudaFree(d_histogram));
+
+  state.counters["could_use_shmem"] = could_use_shmem;
+}
+
+template <typename T>
+static void BM_HistComputationCUB(benchmark::State& state) {
+  auto const data_size = state.range(0);
+  auto const alphabet_size = state.range(1);
+
+  auto alphabet = std::vector<T>(alphabet_size);
+  std::iota(alphabet.begin(), alphabet.end(), 0);
+  auto data = generateRandomData<T>(alphabet, data_size);
+
+  state.counters["param.data_size"] = data_size;
+  state.counters["param.alphabet_size"] = alphabet_size;
 
   T* d_data;
   T* d_alphabet;
@@ -223,15 +179,23 @@ static void BM_HistComputation(benchmark::State& state) {
                        cudaMemcpyHostToDevice));
   gpuErrchk(cudaMalloc(&d_histogram, alphabet_size * sizeof(size_t)));
 
+  void* d_temp_storage = nullptr;
+  size_t temp_storage_bytes = 0;
+  cub::DeviceHistogram::HistogramEven(
+      d_temp_storage, temp_storage_bytes, d_data, (cu_size_t*)d_histogram,
+      alphabet_size + 1, T(0), T(alphabet_size), data_size);
+  gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+
   for (auto _ : state) {
     gpuErrchk(cudaMemset(d_histogram, 0, alphabet_size * sizeof(size_t)));
-    computeGlobalHistogram(isPowTwo<T>(alphabet_size), data_size, d_data,
-                           d_alphabet, d_histogram, alphabet_size, true,
-                           use_shmem);
+    cub::DeviceHistogram::HistogramEven(
+        d_temp_storage, temp_storage_bytes, d_data, (cu_size_t*)d_histogram,
+        alphabet_size + 1, T(0), T(alphabet_size), data_size);
   }
   gpuErrchk(cudaFree(d_data));
   gpuErrchk(cudaFree(d_alphabet));
   gpuErrchk(cudaFree(d_histogram));
+  gpuErrchk(cudaFree(d_temp_storage));
 }
 
 template <typename T>
@@ -240,19 +204,26 @@ static void customArguments(benchmark::internal::Benchmark* b) {
   auto const max = std::numeric_limits<T>::max();
   T step;
   if constexpr (std::is_same_v<T, uint8_t>) {
-    step = 4;
+    step = 6;
   } else {
-    step = 100;
+    step = 400;
   }
   for (int64_t i = 0; i <= 1; ++i)
     for (int64_t j = min; j <= max; j += step)
-      for (int64_t k = 100'000'000; k <= 4'000'000'000; k += 100'000'000)
-        b->Args({k, j, i});
+      for (int64_t k = 100'000'000; k <= 4'100'000'000; k += 500'000'000)
+        for (int64_t l = 0; l <= 1; ++l) b->Args({k, j, i, l});
 }
 
 // For initializing CUDA
-BENCHMARK(BM_HistComputation<uint8_t>)
-    ->Args({100, 4, 1})
+BENCHMARK(BM_HistComputation<uint16_t>)
+    ->Name("Init")
+    ->Args({4'100'000'000, std::numeric_limits<uint16_t>::max(), 1, 0})
+    ->Iterations(1)
+    ->Unit(benchmark::kMillisecond);
+
+BENCHMARK(BM_HistComputationCUB<uint16_t>)
+    ->Name("InitCUB")
+    ->Args({4'100'000'000, std::numeric_limits<uint16_t>::max()})
     ->Iterations(1)
     ->Unit(benchmark::kMillisecond);
 
@@ -265,6 +236,16 @@ BENCHMARK(BM_HistComputation<uint8_t>)
     ->Unit(benchmark::kMillisecond);
 
 BENCHMARK(BM_HistComputation<uint16_t>)
+    ->Apply(customArguments<uint16_t>)
+    ->Iterations(10)
+    ->Unit(benchmark::kMillisecond);
+
+BENCHMARK(BM_HistComputationCUB<uint8_t>)
+    ->Apply(customArguments<uint8_t>)
+    ->Iterations(10)
+    ->Unit(benchmark::kMillisecond);
+
+BENCHMARK(BM_HistComputationCUB<uint16_t>)
     ->Apply(customArguments<uint16_t>)
     ->Iterations(10)
     ->Unit(benchmark::kMillisecond);

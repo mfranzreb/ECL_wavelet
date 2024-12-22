@@ -16,8 +16,12 @@
 
 namespace ecl {
 
-__host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
+__host__ RankSelect::RankSelect(BitArray&& bit_array,
+                                uint8_t const GPU_index) noexcept
     : bit_array_(std::move(bit_array)), is_copy_(false) {
+  checkWarpSize(GPU_index);
+  gpuErrchk(cudaSetDevice(GPU_index));
+
   cudaFuncSetCacheConfig(calculateL2EntriesKernel, cudaFuncCachePreferL1);
   auto const num_arrays = bit_array_.numArrays();
 
@@ -144,7 +148,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array) noexcept
            RankSelectConfig::L2_BIT_SIZE - 1) /
           RankSelectConfig::L2_BIT_SIZE;
       auto [_, block_size] =
-          getLaunchConfig(num_l2_blocks - num_last_l2_blocks, MIN_TPB,
+          getLaunchConfig(num_l2_blocks - num_last_l2_blocks, kMinTPB,
                           maxThreadsPerBlockL2Kernel);
 
       // calculate L2 entries for all L1 blocks
@@ -545,12 +549,9 @@ __device__ [[nodiscard]] uint8_t RankSelect::getNBitPos(uint8_t const n,
   }
 }
 
-__global__ __launch_bounds__(
-    64,
-    MIN_BPM* MAX_TPB /
-        64) void calculateL2EntriesKernel(RankSelect rank_select,
-                                          uint32_t const array_index,
-                                          uint8_t const num_last_l2_blocks) {
+__global__ LB(64, MIN_BPM* MAX_TPB / 64) void calculateL2EntriesKernel(
+    RankSelect rank_select, uint32_t const array_index,
+    uint8_t const num_last_l2_blocks) {
   assert(blockDim.x % WS == 0);
   __shared__ RankSelectConfig::L2_TYPE
       l2_entries[RankSelectConfig::NUM_L2_PER_L1];

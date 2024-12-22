@@ -198,7 +198,7 @@ static void BM_HistComputationCUB(benchmark::State& state) {
   gpuErrchk(cudaFree(d_temp_storage));
 }
 
-template <typename T>
+template <typename T, bool IsCUB>
 static void customArguments(benchmark::internal::Benchmark* b) {
   auto const min = 4;
   auto const max = std::numeric_limits<T>::max();
@@ -208,10 +208,15 @@ static void customArguments(benchmark::internal::Benchmark* b) {
   } else {
     step = 400;
   }
-  for (int64_t i = 0; i <= 1; ++i)
-    for (int64_t j = min; j <= max; j += step)
-      for (int64_t k = 100'000'000; k <= 4'100'000'000; k += 500'000'000)
-        for (int64_t l = 0; l <= 1; ++l) b->Args({k, j, i, l});
+  if constexpr (IsCUB) {
+    for (int64_t i = 100'000'000; i <= 4'100'000'000; i += 500'000'000)
+      for (int64_t j = min; j <= max; j += step) b->Args({i, j});
+  } else {
+    for (int64_t i = 0; i <= 1; ++i)
+      for (int64_t j = min; j <= max; j += step)
+        for (int64_t k = 100'000'000; k <= 4'100'000'000; k += 500'000'000)
+          for (int64_t l = 0; l <= 1; ++l) b->Args({k, j, i, l});
+  }
 }
 
 // For initializing CUDA
@@ -231,22 +236,22 @@ BENCHMARK(BM_HistComputationCUB<uint16_t>)
 // alphabet, and the third argument is a boolean that indicates if the alphabet
 // is minimal.
 BENCHMARK(BM_HistComputation<uint8_t>)
-    ->Apply(customArguments<uint8_t>)
+    ->Apply(customArguments<uint8_t, false>)
     ->Iterations(10)
     ->Unit(benchmark::kMillisecond);
 
 BENCHMARK(BM_HistComputation<uint16_t>)
-    ->Apply(customArguments<uint16_t>)
+    ->Apply(customArguments<uint16_t, false>)
     ->Iterations(10)
     ->Unit(benchmark::kMillisecond);
 
 BENCHMARK(BM_HistComputationCUB<uint8_t>)
-    ->Apply(customArguments<uint8_t>)
+    ->Apply(customArguments<uint8_t, true>)
     ->Iterations(10)
     ->Unit(benchmark::kMillisecond);
 
 BENCHMARK(BM_HistComputationCUB<uint16_t>)
-    ->Apply(customArguments<uint16_t>)
+    ->Apply(customArguments<uint16_t, true>)
     ->Iterations(10)
     ->Unit(benchmark::kMillisecond);
 }  // namespace ecl

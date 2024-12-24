@@ -388,7 +388,8 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   auto [num_blocks, threads_per_block] = getLaunchConfig(
       num_warps, kMinTPB, std::min(kMaxTPB, maxThreadsPerBlockFillLevel));
 
-  fillLevelKernel<T><<<num_blocks, threads_per_block>>>(
+  fillLevelKernel<T><<<num_blocks, threads_per_block,
+                       sizeof(uint32_t) * (threads_per_block / WS)>>>(
       bit_array, d_data, data_size, alphabet_start_bit_, 0);
   kernelCheck();
 
@@ -407,7 +408,8 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
         num_warps, kMinTPB, std::min(kMaxTPB, maxThreadsPerBlockFillLevel));
     kernelCheck();
 
-    fillLevelKernel<T><<<num_blocks, threads_per_block>>>(
+    fillLevelKernel<T><<<num_blocks, threads_per_block,
+                         sizeof(uint32_t) * (threads_per_block / WS)>>>(
         bit_array, d_sorted_data, data_size, alphabet_start_bit_, l);
     kernelCheck();
 
@@ -876,9 +878,11 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 uint8_t const alphabet_start_bit,
                                 uint32_t const level) {
   assert(blockDim.x % WS == 0);
+  extern __shared__ uint32_t shared_words[];
   size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
   size_t const num_threads = gridDim.x * blockDim.x;
   uint8_t const local_t_id = threadIdx.x % WS;
+  uint32_t const warps_per_block = blockDim.x / WS;
 
   size_t const data_size_rounded = (data_size + (WS - 1)) & ~(WS - 1);
   size_t const offset = bit_array.getOffset(level);
@@ -894,7 +898,12 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
     uint32_t word = __ballot_sync(~0, getBit(alphabet_start_bit - level, code));
 
     if (local_t_id == 0) {
-      bit_array.writeWordAtBit(level, i, word, offset);
+      shared_words[threadIdx.x / WS] = word;
+    }
+    __syncthreads();
+    if (threadIdx.x < warps_per_block) {
+      size_t const index = i + WS * (threadIdx.x - threadIdx.x / WS);
+      bit_array.writeWordAtBit(level, index, shared_words[threadIdx.x], offset);
     }
   }
 }

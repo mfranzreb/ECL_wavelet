@@ -85,6 +85,20 @@ class BitArray {
                                  uint32_t const value) noexcept;
 
   /*!
+   * \brief Access operator to write to a whole word of the bit array.
+   * \param array_index Index of the bit array to be written to.
+   * \param index Index of a bit that is inside the word to be written to.
+   * \param value Word to be written. Least significant bit corresponds to the
+   * first bit of the word.
+   * \param offset Offset to the bit array to be written to.
+   */
+  __device__ void writeWordAtBit(size_t const array_index, size_t const index,
+                                 uint32_t const value,
+                                 size_t const offset) noexcept;
+
+  __device__ size_t getOffset(size_t const array_index) const noexcept;
+
+  /*!
    * \brief Direct access to one word of the raw data of the bit
    * array.
    * \param array_index Index of the bit array to be read from.

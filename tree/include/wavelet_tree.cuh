@@ -881,6 +881,7 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
   uint8_t const local_t_id = threadIdx.x % WS;
 
   size_t const data_size_rounded = (data_size + (WS - 1)) & ~(WS - 1);
+  size_t const offset = bit_array.getOffset(level);
 
   // Each warp processes a block of data
   for (size_t i = global_t_id; i < data_size_rounded; i += num_threads) {
@@ -893,7 +894,7 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
     uint32_t word = __ballot_sync(~0, getBit(alphabet_start_bit - level, code));
 
     if (local_t_id == 0) {
-      bit_array.writeWordAtBit(level, i, word);
+      bit_array.writeWordAtBit(level, i, word, offset);
     }
   }
 }

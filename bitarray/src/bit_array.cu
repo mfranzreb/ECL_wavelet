@@ -130,6 +130,20 @@ __device__ void BitArray::writeWordAtBit(size_t const array_index,
   d_data_[d_offsets_[array_index] + (index / (sizeof(uint32_t) * 8))] = value;
 }
 
+__device__ void BitArray::writeWordAtBit(size_t const array_index,
+                                         size_t const index,
+                                         uint32_t const value,
+                                         size_t const offset) noexcept {
+  assert(array_index < num_arrays_);
+  assert(index < d_bit_sizes_[array_index]);
+  d_data_[offset + (index / (sizeof(uint32_t) * 8))] = value;
+}
+
+__device__ size_t BitArray::getOffset(size_t const array_index) const noexcept {
+  assert(array_index < num_arrays_);
+  return d_offsets_[array_index];
+}
+
 __device__ uint32_t BitArray::word(size_t const array_index,
                                    size_t const index) const noexcept {
   assert(array_index < num_arrays_);

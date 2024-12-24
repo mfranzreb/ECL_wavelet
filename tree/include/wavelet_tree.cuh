@@ -410,6 +410,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     num_warps = (data_size + WS - 1) / WS;
     std::tie(num_blocks, threads_per_block) = getLaunchConfig(
         num_warps, kMinTPB, std::min(kMaxTPB, maxThreadsPerBlockFillLevel));
+    kernelCheck();
 
     fillLevelKernel<T><<<num_blocks, threads_per_block>>>(
         bit_array, d_sorted_data, alphabet_start_bit_, l);

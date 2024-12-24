@@ -162,6 +162,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
       {  // Run inclusive prefix sum
         gpuErrchk(cub::DeviceScan::InclusiveSum(
             d_temp_storage, temp_storage_bytes, d_data, num_l1_blocks));
+        kernelCheck();
       }
     }
   }

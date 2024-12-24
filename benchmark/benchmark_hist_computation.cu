@@ -191,6 +191,7 @@ static void BM_HistComputationCUB(benchmark::State& state) {
     cub::DeviceHistogram::HistogramEven(
         d_temp_storage, temp_storage_bytes, d_data, (cu_size_t*)d_histogram,
         alphabet_size + 1, T(0), T(alphabet_size), data_size);
+    kernelCheck();
   }
   gpuErrchk(cudaFree(d_data));
   gpuErrchk(cudaFree(d_alphabet));

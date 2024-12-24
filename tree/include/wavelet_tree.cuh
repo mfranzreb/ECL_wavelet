@@ -205,11 +205,13 @@ __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
  * \brief Kernel to fill a level of the wavelet tree.
  * \param bit_array Bit array the level will be stored in.
  * \param data Data to be filled in the level.
+ * \param data_size Size of the data.
  * \param alphabet_start_bit Bit where the alphabet starts. 0 is the LSB.
  * \param level Level to be filled.
  */
 template <typename T>
 __global__ void fillLevelKernel(BitArray bit_array, T* const data,
+                                size_t const data_size,
                                 uint8_t const alphabet_start_bit,
                                 uint32_t const level);
 
@@ -251,8 +253,6 @@ __global__ void selectKernel(WaveletTree<T> tree,
 /****************************************************************************************
  * Implementation
  ****************************************************************************************/
-
-__device__ size_t d_data_len;
 typedef unsigned long long int cu_size_t;
 
 template <typename T>
@@ -331,7 +331,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_counts_,
                                 d_counts_, alphabet_size_);
 
-  //? Cub needs 2*data_size bytes of storage + sorted data
   size_t temp_storage_bytes_radix = 0;
   cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes_radix,
                                  d_data, d_sorted_data, data_size);
@@ -381,9 +380,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   BitArray bit_array(bit_array_sizes, false);
 
-  gpuErrchk(cudaMemcpyToSymbol(d_data_len, &data_size, sizeof(size_t),
-                               size_t(0), cudaMemcpyHostToDevice));
-
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T>));
   uint32_t maxThreadsPerBlockFillLevel = funcAttrib.maxThreadsPerBlock;
@@ -392,15 +388,14 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   auto [num_blocks, threads_per_block] = getLaunchConfig(
       num_warps, kMinTPB, std::min(kMaxTPB, maxThreadsPerBlockFillLevel));
 
-  fillLevelKernel<T><<<num_blocks, threads_per_block>>>(bit_array, d_data,
-                                                        alphabet_start_bit_, 0);
+  fillLevelKernel<T><<<num_blocks, threads_per_block>>>(
+      bit_array, d_data, data_size, alphabet_start_bit_, 0);
   kernelCheck();
 
   data_size = bit_array_sizes[1];
   for (uint32_t l = 1; l < num_levels_; l++) {
     assert(data_size == bit_array_sizes[l]);
-    gpuErrchk(cudaMemcpyToSymbol(d_data_len, &data_size, sizeof(size_t),
-                                 size_t(0), cudaMemcpyHostToDevice));
+
     // Perform radix sort
     cub::DeviceRadixSort::SortKeys(
         d_temp_storage, temp_storage_bytes, d_data, d_sorted_data, data_size,
@@ -413,7 +408,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     kernelCheck();
 
     fillLevelKernel<T><<<num_blocks, threads_per_block>>>(
-        bit_array, d_sorted_data, alphabet_start_bit_, l);
+        bit_array, d_sorted_data, data_size, alphabet_start_bit_, l);
     kernelCheck();
 
     if (l != (num_levels_ - 1) and
@@ -877,19 +872,21 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
 
 template <typename T>
 __global__ void fillLevelKernel(BitArray bit_array, T* const data,
+                                size_t const data_size,
                                 uint8_t const alphabet_start_bit,
                                 uint32_t const level) {
   assert(blockDim.x % WS == 0);
-  size_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
-  size_t const num_warps = gridDim.x * blockDim.x / WS;
+  size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t const num_threads = gridDim.x * blockDim.x;
   uint8_t const local_t_id = threadIdx.x % WS;
 
-  size_t const start = WS * global_warp_id;
+  size_t const data_size_rounded = (data_size + (WS - 1)) & ~(WS - 1);
+
   // Each warp processes a block of data
-  for (size_t i = start; i < d_data_len; i += WS * num_warps) {
+  for (size_t i = global_t_id; i < data_size_rounded; i += num_threads) {
     T code = 0;
-    if (i + local_t_id < d_data_len) {
-      code = data[i + local_t_id];
+    if (i < data_size) {
+      code = data[i];
     }
 
     // Warp vote to all the bits that need to get written to a word

@@ -167,6 +167,9 @@ class WaveletTree {
                                        size_t const data_size, T* d_data,
                                        T* d_alphabet, size_t* d_histogram);
 
+  __host__ void fillLevel(BitArray bit_array, T* const data,
+                          size_t const data_size, uint32_t const level);
+
  private:
   std::vector<T> alphabet_;    /*!< Alphabet of the wavelet tree*/
   size_t alphabet_size_;       /*!< Size of the alphabet*/
@@ -209,11 +212,11 @@ __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
  * \param alphabet_start_bit Bit where the alphabet starts. 0 is the LSB.
  * \param level Level to be filled.
  */
-template <typename T>
+template <typename T, bool UseShmem>
 __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 size_t const data_size,
                                 uint8_t const alphabet_start_bit,
-                                uint32_t const level);
+                                uint32_t const level, bool const padded_shmem);
 
 /*!
  * \brief Kernel for computing access queries on the wavelet tree.
@@ -380,18 +383,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   BitArray bit_array(bit_array_sizes, false);
 
-  struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T>));
-  uint32_t maxThreadsPerBlockFillLevel = funcAttrib.maxThreadsPerBlock;
-
-  auto num_warps = (data_size + WS - 1) / WS;
-  auto [num_blocks, threads_per_block] = getLaunchConfig(
-      num_warps, kMinTPB, std::min(kMaxTPB, maxThreadsPerBlockFillLevel));
-
-  fillLevelKernel<T><<<num_blocks, threads_per_block,
-                       sizeof(uint32_t) * (threads_per_block / WS)>>>(
-      bit_array, d_data, data_size, alphabet_start_bit_, 0);
-  kernelCheck();
+  fillLevel(bit_array, d_data, data_size, 0);
 
   data_size = bit_array_sizes[1];
   for (uint32_t l = 1; l < num_levels_; l++) {
@@ -403,15 +395,8 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
         alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
     // TODO, could launch in different streams
     //  Fill l-th bit array
-    num_warps = (data_size + WS - 1) / WS;
-    std::tie(num_blocks, threads_per_block) = getLaunchConfig(
-        num_warps, kMinTPB, std::min(kMaxTPB, maxThreadsPerBlockFillLevel));
     kernelCheck();
-
-    fillLevelKernel<T><<<num_blocks, threads_per_block,
-                         sizeof(uint32_t) * (threads_per_block / WS)>>>(
-        bit_array, d_sorted_data, data_size, alphabet_start_bit_, l);
-    kernelCheck();
+    fillLevel(bit_array, d_sorted_data, data_size, l);
 
     if (l != (num_levels_ - 1) and
         bit_array_sizes[l] != bit_array_sizes[l + 1]) {
@@ -816,6 +801,72 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
   kernelCheck();
 }
 
+template <typename T>
+__host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
+                                        size_t const data_size,
+                                        uint32_t const level) {
+  struct cudaFuncAttributes funcAttrib;
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T, true>));
+  uint32_t maxThreadsPerBlockFillLevel =
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T, false>));
+  maxThreadsPerBlockFillLevel =
+      std::min(maxThreadsPerBlockFillLevel,
+               static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  struct cudaDeviceProp prop = getDeviceProperties();
+  if (level == 0) {
+    cudaFuncSetAttribute(fillLevelKernel<T, true>,
+                         cudaFuncAttributeMaxDynamicSharedMemorySize,
+                         prop.sharedMemPerBlockOptin);
+  }
+
+  auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
+  auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
+  auto shmem_per_thread = sizeof(uint32_t) * 8 * sizeof(T);
+  bool const enough_shmem =
+      shmem_per_thread * max_threads_per_SM <= max_shmem_per_SM;
+
+  // Pad shmem banks if memory suffices
+  size_t padded_shmem = std::numeric_limits<size_t>::max();
+  if constexpr (kBankSizeBytes <= sizeof(T)) {
+    // If the bank size is smaller than or equal to T, one element of padding
+    // per thread is needed.
+    padded_shmem =
+        shmem_per_thread * max_threads_per_SM + sizeof(T) * max_threads_per_SM;
+  } else {
+    padded_shmem = shmem_per_thread * max_threads_per_SM +
+                   shmem_per_thread * max_threads_per_SM / kBanksPerLine;
+  }
+  bool use_padded_shmem = false;
+  if (enough_shmem and (padded_shmem <= max_shmem_per_SM)) {
+    shmem_per_thread = padded_shmem / max_threads_per_SM;
+    use_padded_shmem = true;
+  }
+
+  size_t num_warps = (data_size + WS - 1) / WS;
+  if (enough_shmem) {
+    num_warps = std::min(
+        num_warps,
+        static_cast<size_t>(
+            (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
+  }
+  auto [num_blocks, threads_per_block] =
+      getLaunchConfig(num_warps, kMinTPB, maxThreadsPerBlockFillLevel);
+
+  if (enough_shmem) {
+    fillLevelKernel<T, true><<<num_blocks, threads_per_block,
+                               shmem_per_thread * threads_per_block>>>(
+        bit_array, data, data_size, alphabet_start_bit_, level,
+        use_padded_shmem);
+  } else {
+    fillLevelKernel<T, false><<<num_blocks, threads_per_block>>>(
+        bit_array, data, data_size, alphabet_start_bit_, level,
+        use_padded_shmem);
+  }
+  kernelCheck();
+}
+
 template <typename T, bool isMinAlphabet, bool isPowTwo, bool UseShmem>
 __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
     WaveletTree<T> tree, T* data, size_t const data_size, size_t* counts,
@@ -872,38 +923,78 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
   }
 }
 
-template <typename T>
+template <typename T, bool UseShmem>
 __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 size_t const data_size,
                                 uint8_t const alphabet_start_bit,
-                                uint32_t const level) {
+                                uint32_t const level, bool const padded_shmem) {
   assert(blockDim.x % WS == 0);
-  extern __shared__ uint32_t shared_words[];
-  size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
-  size_t const num_threads = gridDim.x * blockDim.x;
-  uint8_t const local_t_id = threadIdx.x % WS;
-  uint32_t const warps_per_block = blockDim.x / WS;
+  extern __shared__ __align__(sizeof(T)) uint8_t my_smem[];
+  T* data_slice = reinterpret_cast<T*>(my_smem);
 
-  size_t const data_size_rounded = (data_size + (WS - 1)) & ~(WS - 1);
   size_t const offset = bit_array.getOffset(level);
-
-  // Each warp processes a block of data
-  for (size_t i = global_t_id; i < data_size_rounded; i += num_threads) {
-    T code = 0;
-    if (i < data_size) {
-      code = data[i];
+  if constexpr (UseShmem) {
+    size_t const slice_size = blockDim.x * sizeof(uint32_t) * 8;
+    for (size_t i = blockIdx.x * slice_size; i < data_size;
+         i += gridDim.x * slice_size) {
+      // Load text slice to shared memory
+      uint32_t elems_to_skip = 0;
+      for (size_t j = threadIdx.x; j < min(data_size - i, slice_size);
+           j += blockDim.x) {
+        if (padded_shmem) {
+          if constexpr (kBankSizeBytes < sizeof(T)) {
+            elems_to_skip = j / kBanksPerLine;
+          } else {
+            elems_to_skip = j / ((kBankSizeBytes / sizeof(T)) * kBanksPerLine);
+          }
+        }
+        data_slice[j + elems_to_skip] = data[j + i];
+      }
+      __syncthreads();
+      uint32_t word = 0;
+      uint32_t const start = threadIdx.x * sizeof(uint32_t) * 8;
+      uint32_t const end = min(start + sizeof(uint32_t) * 8, data_size - i);
+      elems_to_skip = 0;
+      if (padded_shmem) {
+        if constexpr (kBankSizeBytes < sizeof(T)) {
+          elems_to_skip = start / kBanksPerLine;
+        } else {
+          elems_to_skip =
+              start / ((kBankSizeBytes / sizeof(T)) * kBanksPerLine);
+        }
+      }
+      // Start from the end, since LSB is the first bit
+      if (end > start) {
+        for (uint32_t j = end - 1; j > start; --j) {
+          word |= static_cast<uint8_t>(getBit(alphabet_start_bit - level,
+                                              data_slice[j + elems_to_skip]));
+          word <<= 1;
+        }
+        word |= static_cast<uint8_t>(getBit(alphabet_start_bit - level,
+                                            data_slice[start + elems_to_skip]));
+        bit_array.writeWordAtBit(level, i + start, word, offset);
+      }
+      __syncthreads();
     }
+  } else {
+    size_t const data_size_rounded = (data_size + (WS - 1)) & ~(WS - 1);
+    size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t const num_threads = gridDim.x * blockDim.x;
+    uint8_t const local_t_id = threadIdx.x % WS;
+    // Each warp processes a block of data
+    for (size_t i = global_t_id; i < data_size_rounded; i += num_threads) {
+      T code = 0;
+      if (i < data_size) {
+        code = data[i];
+      }
 
-    // Warp vote to all the bits that need to get written to a word
-    uint32_t word = __ballot_sync(~0, getBit(alphabet_start_bit - level, code));
+      // Warp vote to all the bits that need to get written to a word
+      uint32_t word =
+          __ballot_sync(~0, getBit(alphabet_start_bit - level, code));
 
-    if (local_t_id == 0) {
-      shared_words[threadIdx.x / WS] = word;
-    }
-    __syncthreads();
-    if (threadIdx.x < warps_per_block) {
-      size_t const index = i + WS * (threadIdx.x - threadIdx.x / WS);
-      bit_array.writeWordAtBit(level, index, shared_words[threadIdx.x], offset);
+      if (local_t_id == 0) {
+        bit_array.writeWordAtBit(level, i, word, offset);
+      }
     }
   }
 }

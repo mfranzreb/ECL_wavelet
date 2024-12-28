@@ -178,6 +178,16 @@
         }
       ],
       "preLaunchTask": "build hist benchmarks"
+    },
+    {
+      "name": "Debug WT profile CUDA",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/benchmark/ecl_WT_profile",
+      "args": ["10000000 4 1"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build WT profile"
     }
   ]
 }

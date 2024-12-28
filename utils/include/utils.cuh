@@ -40,14 +40,16 @@ namespace ecl {
 inline uint32_t kMaxTPB = 0;
 inline uint32_t kMinTPB = 0;
 inline uint32_t kMinBPM = 0;
+constexpr uint8_t kBankSizeBytes = 4;
+constexpr uint8_t kBanksPerLine = 32;
 
 #define gpuErrchk(ans) \
   { gpuAssert((ans), __FILE__, __LINE__); }
-__host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
-                                          int line, bool abort = true) {
+__host__ inline void gpuAssert(cudaError_t code, const char *file, int line,
+                               bool abort = true) {
   if (code != cudaSuccess) {
     printf("GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-    if (abort) assert(0);
+    if (abort) exit(EXIT_FAILURE);
   }
 }
 

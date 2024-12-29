@@ -96,8 +96,8 @@
       "name": "Debug plot",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/plot_benchmarks.py",
-      "args": ["results/bm_hist_computation.json", "."],
+      "program": "${workspaceFolder}/benchmark/plot_hist_comp.py",
+      "args": ["benchmark/results/bm_hist_computation.json", "."],
       "console": "integratedTerminal"
     },
     {

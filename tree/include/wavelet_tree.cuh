@@ -905,7 +905,9 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
         char_data = tree.encode(char_data).code_;
       }
     }
-    data[i] = char_data;
+    if constexpr (not isMinAlphabet or not isPowTwo) {
+      data[i] = char_data;
+    }
   }
 
   if constexpr (UseShmem) {

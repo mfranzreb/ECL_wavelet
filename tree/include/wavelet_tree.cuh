@@ -212,7 +212,7 @@ __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
  * \param alphabet_start_bit Bit where the alphabet starts. 0 is the LSB.
  * \param level Level to be filled.
  */
-template <typename T, bool UseShmem>
+template <typename T, bool UseShmemPerThread>
 __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 size_t const data_size,
                                 uint8_t const alphabet_start_bit,
@@ -844,13 +844,11 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
     use_padded_shmem = true;
   }
 
-  size_t num_warps = (data_size + WS - 1) / WS;
-  if (enough_shmem) {
-    num_warps = std::min(
-        num_warps,
-        static_cast<size_t>(
-            (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
-  }
+  size_t const num_warps = std::min(
+      (data_size + WS - 1) / WS,
+      static_cast<size_t>(
+          (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
+
   auto [num_blocks, threads_per_block] =
       getLaunchConfig(num_warps, kMinTPB, maxThreadsPerBlockFillLevel);
 
@@ -860,7 +858,8 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
         bit_array, data, data_size, alphabet_start_bit_, level,
         use_padded_shmem);
   } else {
-    fillLevelKernel<T, false><<<num_blocks, threads_per_block>>>(
+    fillLevelKernel<T, false><<<num_blocks, threads_per_block,
+                                sizeof(uint32_t) * (threads_per_block / WS)>>>(
         bit_array, data, data_size, alphabet_start_bit_, level,
         use_padded_shmem);
   }
@@ -923,17 +922,17 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
   }
 }
 
-template <typename T, bool UseShmem>
+template <typename T, bool UseShmemPerThread>
 __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 size_t const data_size,
                                 uint8_t const alphabet_start_bit,
                                 uint32_t const level, bool const padded_shmem) {
   assert(blockDim.x % WS == 0);
-  extern __shared__ __align__(sizeof(T)) uint8_t my_smem[];
-  T* data_slice = reinterpret_cast<T*>(my_smem);
-
   size_t const offset = bit_array.getOffset(level);
-  if constexpr (UseShmem) {
+
+  if constexpr (UseShmemPerThread) {
+    extern __shared__ __align__(sizeof(T)) uint8_t my_smem[];
+    T* data_slice = reinterpret_cast<T*>(my_smem);
     size_t const slice_size = blockDim.x * sizeof(uint32_t) * 8;
     for (size_t i = blockIdx.x * slice_size; i < data_size;
          i += gridDim.x * slice_size) {
@@ -977,10 +976,12 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
       __syncthreads();
     }
   } else {
+    extern __shared__ uint32_t shared_words[];
     size_t const data_size_rounded = (data_size + (WS - 1)) & ~(WS - 1);
     size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
     size_t const num_threads = gridDim.x * blockDim.x;
     uint8_t const local_t_id = threadIdx.x % WS;
+    uint32_t const warps_per_block = blockDim.x / WS;
     // Each warp processes a block of data
     for (size_t i = global_t_id; i < data_size_rounded; i += num_threads) {
       T code = 0;
@@ -993,8 +994,15 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
           __ballot_sync(~0, getBit(alphabet_start_bit - level, code));
 
       if (local_t_id == 0) {
-        bit_array.writeWordAtBit(level, i, word, offset);
+        shared_words[threadIdx.x / WS] = word;
       }
+      __syncthreads();
+      if (threadIdx.x < warps_per_block) {
+        size_t const index = i + WS * (threadIdx.x - threadIdx.x / WS);
+        bit_array.writeWordAtBit(level, index, shared_words[threadIdx.x],
+                                 offset);
+      }
+      __syncthreads();
     }
   }
 }

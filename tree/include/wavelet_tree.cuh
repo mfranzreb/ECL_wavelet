@@ -216,7 +216,7 @@ template <typename T, bool UseShmemPerThread>
 __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 size_t const data_size,
                                 uint8_t const alphabet_start_bit,
-                                uint32_t const level, bool const padded_shmem);
+                                uint32_t const level);
 
 /*!
  * \brief Kernel for computing access queries on the wavelet tree.
@@ -824,8 +824,6 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
   auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
   auto shmem_per_thread = sizeof(uint32_t) * 8 * sizeof(T);
-  bool const enough_shmem =
-      shmem_per_thread * max_threads_per_SM <= max_shmem_per_SM;
 
   // Pad shmem banks if memory suffices
   size_t padded_shmem = std::numeric_limits<size_t>::max();
@@ -838,10 +836,9 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
     padded_shmem = shmem_per_thread * max_threads_per_SM +
                    shmem_per_thread * max_threads_per_SM / kBanksPerLine;
   }
-  bool use_padded_shmem = false;
-  if (enough_shmem and (padded_shmem <= max_shmem_per_SM)) {
+  bool const enough_shmem = shmem_per_thread * padded_shmem <= max_shmem_per_SM;
+  if (enough_shmem) {
     shmem_per_thread = padded_shmem / max_threads_per_SM;
-    use_padded_shmem = true;
   }
 
   size_t const num_warps = std::min(
@@ -855,13 +852,11 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
   if (enough_shmem) {
     fillLevelKernel<T, true><<<num_blocks, threads_per_block,
                                shmem_per_thread * threads_per_block>>>(
-        bit_array, data, data_size, alphabet_start_bit_, level,
-        use_padded_shmem);
+        bit_array, data, data_size, alphabet_start_bit_, level);
   } else {
     fillLevelKernel<T, false><<<num_blocks, threads_per_block,
                                 sizeof(uint32_t) * (threads_per_block / WS)>>>(
-        bit_array, data, data_size, alphabet_start_bit_, level,
-        use_padded_shmem);
+        bit_array, data, data_size, alphabet_start_bit_, level);
   }
   kernelCheck();
 }
@@ -928,7 +923,7 @@ template <typename T, bool UseShmemPerThread>
 __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 size_t const data_size,
                                 uint8_t const alphabet_start_bit,
-                                uint32_t const level, bool const padded_shmem) {
+                                uint32_t const level) {
   assert(blockDim.x % WS == 0);
   size_t const offset = bit_array.getOffset(level);
 
@@ -942,12 +937,10 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
       uint32_t elems_to_skip = 0;
       for (size_t j = threadIdx.x; j < min(data_size - i, slice_size);
            j += blockDim.x) {
-        if (padded_shmem) {
-          if constexpr (kBankSizeBytes < sizeof(T)) {
-            elems_to_skip = j / kBanksPerLine;
-          } else {
-            elems_to_skip = j / ((kBankSizeBytes / sizeof(T)) * kBanksPerLine);
-          }
+        if constexpr (kBankSizeBytes < sizeof(T)) {
+          elems_to_skip = j / kBanksPerLine;
+        } else {
+          elems_to_skip = j / ((kBankSizeBytes / sizeof(T)) * kBanksPerLine);
         }
         data_slice[j + elems_to_skip] = data[j + i];
       }
@@ -956,13 +949,10 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
       uint32_t const start = threadIdx.x * sizeof(uint32_t) * 8;
       uint32_t const end = min(start + sizeof(uint32_t) * 8, data_size - i);
       elems_to_skip = 0;
-      if (padded_shmem) {
-        if constexpr (kBankSizeBytes < sizeof(T)) {
-          elems_to_skip = start / kBanksPerLine;
-        } else {
-          elems_to_skip =
-              start / ((kBankSizeBytes / sizeof(T)) * kBanksPerLine);
-        }
+      if constexpr (kBankSizeBytes < sizeof(T)) {
+        elems_to_skip = start / kBanksPerLine;
+      } else {
+        elems_to_skip = start / ((kBankSizeBytes / sizeof(T)) * kBanksPerLine);
       }
       // Start from the end, since LSB is the first bit
       if (end > start) {

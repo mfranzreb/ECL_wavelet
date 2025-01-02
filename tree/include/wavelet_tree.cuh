@@ -920,10 +920,11 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
 }
 
 template <typename T, bool UseShmemPerThread>
-__global__ void fillLevelKernel(BitArray bit_array, T* const data,
-                                size_t const data_size,
-                                uint8_t const alphabet_start_bit,
-                                uint32_t const level) {
+__global__ LB(MAX_TPB,
+              MIN_BPM) void fillLevelKernel(BitArray bit_array, T* const data,
+                                            size_t const data_size,
+                                            uint8_t const alphabet_start_bit,
+                                            uint32_t const level) {
   assert(blockDim.x % WS == 0);
   size_t const offset = bit_array.getOffset(level);
 
@@ -969,11 +970,14 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
     }
   } else {
     extern __shared__ uint32_t shared_words[];
-    size_t const data_size_rounded = (data_size + (WS - 1)) & ~(WS - 1);
+    // Round data size to multiple of block size
+    size_t const data_size_rounded =
+        ((data_size + (blockDim.x - 1)) / blockDim.x) * blockDim.x;
     size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
     size_t const num_threads = gridDim.x * blockDim.x;
     uint8_t const local_t_id = threadIdx.x % WS;
     uint32_t const warps_per_block = blockDim.x / WS;
+    size_t const bit_array_size = bit_array.size(level);
     // Each warp processes a block of data
     for (size_t i = global_t_id; i < data_size_rounded; i += num_threads) {
       T code = 0;
@@ -990,9 +994,11 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
       }
       __syncthreads();
       if (threadIdx.x < warps_per_block) {
-        size_t const index = i + WS * (threadIdx.x - threadIdx.x / WS);
-        bit_array.writeWordAtBit(level, index, shared_words[threadIdx.x],
-                                 offset);
+        size_t const index = (i - threadIdx.x) + WS * threadIdx.x;
+        if (index < bit_array_size) {
+          bit_array.writeWordAtBit(level, index, shared_words[threadIdx.x],
+                                   offset);
+        }
       }
       __syncthreads();
     }

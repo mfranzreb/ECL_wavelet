@@ -1,14 +1,21 @@
-import pandas as pd
+import csv
 import os
 import argparse
 
 
 def get_best_tune(file):
-    df = pd.read_csv(file)
-    # Find row of minimum time
-    best_row = df.loc[df["duration"].idxmin()]
-    best_grid = best_row["num_blocks"]
-    best_block = best_row["num_threads"]
+    best_duration = float("inf")
+    best_block = None
+    best_grid = None
+
+    with open(file, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            duration = float(row["duration"])
+            if duration < best_duration:
+                best_duration = duration
+                best_block = int(row["num_threads"])
+                best_grid = int(row["num_blocks"])
 
     return (best_block, best_grid)
 
@@ -53,5 +60,8 @@ if __name__ == "__main__":
         kernel_name = tune.replace(".csv", "")
         tunes[kernel_name] = best_vals
 
-    GPU_name = pd.read_csv(file_dir + "/" + tune_csvs[0]).iloc[0]["GPU_name"]
-    apply_tunes(args.tune_file, tunes, GPU_name)
+    with open(file_dir + "/" + tune_csvs[0], "r") as f:
+        reader = csv.DictReader(f)
+        first_row = next(reader)  # Get the first row
+        gpu_name = first_row["GPU_name"]
+    apply_tunes(args.tune_file, tunes, gpu_name)

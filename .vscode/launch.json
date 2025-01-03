@@ -101,6 +101,14 @@
       "console": "integratedTerminal"
     },
     {
+      "name": "Debug tune plot",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/kernel_tuning/plot_kernel_tunes.py",
+      "args": ["kernel_tuning/FLK.csv", "."],
+      "console": "integratedTerminal"
+    },
+    {
       "name": "Debug tree tests CUDA",
       "type": "cuda-gdb",
       "request": "launch",
@@ -188,6 +196,38 @@
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "build WT profile"
+    },
+    {
+      "name": "Debug kernel tuner CUDA",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/kernel_tuning/ecl_tune_kernels",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build kernel tuner"
+    },
+    {
+      "name": "Debug kernel tuner",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/kernel_tuning/ecl_tune_kernels",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build kernel tuner"
     }
   ]
 }

@@ -6,6 +6,7 @@ project(ECLWavelet VERSION 0.1.0 LANGUAGES CXX CUDA)
 option(BUILD_TESTS "Build tests" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(PROFILE "Enable profiling" OFF)
+option(BUILD_KERNEL_TUNER "Enable kernel tuning" OFF)
 
 find_package(OpenMP REQUIRED)
 
@@ -55,4 +56,8 @@ if(BUILD_TESTS)
     add_subdirectory(third_party/googletest)
     add_subdirectory(tests)
     enable_testing()
+endif()
+
+if(BUILD_KERNEL_TUNER)
+    add_subdirectory(kernel_tuning)
 endif()

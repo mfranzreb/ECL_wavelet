@@ -50,6 +50,14 @@
       "problemMatcher": []
     },
     {
+      "label": "build kernel tuner",
+      "type": "shell",
+      "command": "cmake",
+      "dependsOn": ["CMake Configure", "Build target kernel tuner"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
       "label": "CMake Configure",
       "type": "shell",
       "command": "cmake",
@@ -57,6 +65,7 @@
         "-DCMAKE_BUILD_TYPE=Debug",
         "-DBUILD_TESTS=ON",
         "-DBUILD_BENCHMARKS=ON",
+        "-DBUILD_KERNEL_TUNER=ON",
         "-S",
         ".",
         "-B",
@@ -92,6 +101,16 @@
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "./build", "--target", "ecl_WT_profile"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Build target kernel tuner",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "./build", "--target", "ecl_tune_kernels"],
       "group": {
         "kind": "build",
         "isDefault": true

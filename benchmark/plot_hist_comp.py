@@ -8,17 +8,6 @@ from matplotlib import pyplot as plt
 import argparse
 
 
-def get_marker(use_shmem, use_small_grid):
-    if use_shmem == 1 and use_small_grid == 1:
-        return "x"
-    elif use_shmem == 1 and use_small_grid == 0:
-        return "^"
-    elif use_shmem == 0 and use_small_grid == 1:
-        return "_"
-    else:
-        return "|"
-
-
 def plot_hist_bm(df, save_path):
     # remove the first two rows
     df = df.iloc[2:]

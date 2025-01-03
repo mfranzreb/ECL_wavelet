@@ -36,13 +36,13 @@ print_status "Running tests"
 print_status "Running Compute Sanitizer - Memory Check"
 ${COMPUTE_SANITIZER} --tool memcheck ./${BUILD_DIR}/tests/${TEST_BINARY} --gtest_brief=1
 
-print_status "Running Compute Sanitizer - Race Check"
-${COMPUTE_SANITIZER} --tool racecheck ./${BUILD_DIR}/tests/${TEST_BINARY} --gtest_brief=1
-
 print_status "Running Compute Sanitizer - Initialize Check"
 ${COMPUTE_SANITIZER} --tool initcheck ./${BUILD_DIR}/tests/${TEST_BINARY} --gtest_brief=1
 
 print_status "Running Compute Sanitizer - Sync Check"
 ${COMPUTE_SANITIZER} --tool synccheck ./${BUILD_DIR}/tests/${TEST_BINARY} --gtest_brief=1
+
+print_status "Running Compute Sanitizer - Race Check"
+${COMPUTE_SANITIZER} --tool racecheck ./${BUILD_DIR}/tests/${TEST_BINARY} --gtest_brief=1
 
 print_status "All checks completed successfully!"

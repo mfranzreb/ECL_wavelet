@@ -221,4 +221,14 @@ __host__ T ceilLog2Host(T n) {
     return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
   }
 }
+
+struct IdealConfigs {
+  uint32_t ideal_TPB_fillLevelKernel = 0;
+  size_t ideal_tot_threads_fillLevelKernel = 0;
+
+  uint32_t ideal_TPB_computeGlobalHistogramKernel = 0;
+  size_t ideal_tot_threads_computeGlobalHistogramKernel = 0;
+};
+
+__host__ IdealConfigs &getIdealConfigs(const std::string &GPU_name);
 }  // namespace ecl

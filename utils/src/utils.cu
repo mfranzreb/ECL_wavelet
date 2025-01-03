@@ -1,3 +1,4 @@
+#include <GPU_tunes.hpp>
 #include <bit>
 #include <cassert>
 #include <cstdio>
@@ -88,5 +89,17 @@ __host__ void checkWarpSize(uint8_t const GPU_index) {
             internal::prop.warpSize);
     exit(EXIT_FAILURE);
   }
+}
+
+__host__ IdealConfigs &getIdealConfigs(const std::string &GPU_name) {
+  auto get_configs = [](std::string GPU_name) {
+    if (configs.find(GPU_name) != configs.end()) {
+      return configs[GPU_name];
+    } else {
+      return IdealConfigs();
+    }
+  };
+  static IdealConfigs ideal_configs = get_configs(GPU_name);
+  return ideal_configs;
 }
 }  // namespace ecl

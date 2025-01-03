@@ -2,7 +2,7 @@ set(TARGET ecl_utils)
 
 add_library(${TARGET} STATIC "${CMAKE_SOURCE_DIR}/utils/src/utils.cu")  
 
-include_directories(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/include")
+include_directories(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 target_include_directories(${TARGET}
     PRIVATE CUDAToolkit_INCLUDE_DIRS

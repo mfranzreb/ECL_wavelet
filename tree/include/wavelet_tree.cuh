@@ -705,37 +705,48 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
           &funcAttrib, computeGlobalHistogramKernel<T, false, false, true>));
     }
   }
-
-  int const maxThreadsPerBlockHist =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-
   struct cudaDeviceProp prop = getDeviceProperties();
 
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
   auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
   size_t const hist_size = sizeof(size_t) * alphabet_size_;
 
-  auto const hists_per_SM = max_shmem_per_SM / hist_size;
+  auto ideal_configs = getIdealConfigs(prop.name);
 
-  auto min_block_size =
-      hists_per_SM < kMinBPM
-          ? kMinTPB
-          : std::max(kMinTPB,
-                     static_cast<uint32_t>(max_threads_per_SM / hists_per_SM));
+  int num_blocks, threads_per_block;
+  if (ideal_configs.ideal_tot_threads_computeGlobalHistogramKernel > 0 and
+      ideal_configs.ideal_TPB_computeGlobalHistogramKernel > 0) {
+    std::tie(num_blocks, threads_per_block) = getLaunchConfig(
+        std::min(
+            (data_size + WS - 1) / WS,
+            ideal_configs.ideal_tot_threads_computeGlobalHistogramKernel / WS),
+        ideal_configs.ideal_TPB_computeGlobalHistogramKernel,
+        ideal_configs.ideal_TPB_computeGlobalHistogramKernel);
+  } else {
+    int const maxThreadsPerBlockHist =
+        std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+    auto const hists_per_SM = max_shmem_per_SM / hist_size;
 
-  // Make the minimum block size a multiple of WS
-  min_block_size = ((min_block_size + WS - 1) / WS) * WS;
-  // Compute global_histogram and change text to min_alphabet
-  size_t num_warps = (data_size + WS - 1) / WS;
-  if (hists_per_SM >= kMinBPM) {
-    num_warps = std::min(
-        num_warps,
-        static_cast<size_t>(
-            (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
+    auto min_block_size =
+        hists_per_SM < kMinBPM
+            ? kMinTPB
+            : std::max(kMinTPB, static_cast<uint32_t>(max_threads_per_SM /
+                                                      hists_per_SM));
+
+    // Make the minimum block size a multiple of WS
+    min_block_size = ((min_block_size + WS - 1) / WS) * WS;
+    // Compute global_histogram and change text to min_alphabet
+    size_t num_warps = (data_size + WS - 1) / WS;
+    if (hists_per_SM >= kMinBPM) {
+      num_warps = std::min(
+          num_warps,
+          static_cast<size_t>(
+              (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
+    }
+
+    std::tie(num_blocks, threads_per_block) =
+        getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockHist);
   }
-
-  auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockHist);
 
   uint16_t const blocks_per_SM = max_threads_per_SM / threads_per_block;
 
@@ -841,13 +852,29 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
     shmem_per_thread = padded_shmem / max_threads_per_SM;
   }
 
-  size_t const num_warps = std::min(
-      (data_size + WS - 1) / WS,
-      static_cast<size_t>(
-          (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
+  int num_blocks, threads_per_block;
 
-  auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_warps, kMinTPB, maxThreadsPerBlockFillLevel);
+  auto ideal_configs = getIdealConfigs(prop.name);
+
+  if (ideal_configs.ideal_TPB_fillLevelKernel > 0 and
+      ideal_configs.ideal_tot_threads_fillLevelKernel > 0) {
+    size_t const num_warps =
+        std::min((data_size + WS - 1) / WS,
+                 ideal_configs.ideal_tot_threads_fillLevelKernel / WS);
+
+    std::tie(num_blocks, threads_per_block) =
+        getLaunchConfig(num_warps, ideal_configs.ideal_TPB_fillLevelKernel,
+                        ideal_configs.ideal_TPB_fillLevelKernel);
+
+  } else {
+    size_t const num_warps = std::min(
+        (data_size + WS - 1) / WS,
+        static_cast<size_t>(
+            (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
+
+    std::tie(num_blocks, threads_per_block) =
+        getLaunchConfig(num_warps, kMinTPB, maxThreadsPerBlockFillLevel);
+  }
 
   if (enough_shmem) {
     fillLevelKernel<T, true><<<num_blocks, threads_per_block,

@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import csv
 import os
 import argparse
@@ -15,7 +16,8 @@ def get_best_tune(file):
             if duration < best_duration:
                 best_duration = duration
                 best_block = int(row["num_threads"])
-                best_grid = int(row["num_blocks"])
+                if "num_blocks" in row:
+                    best_grid = int(row["num_blocks"])
 
     return (best_block, best_grid)
 
@@ -23,7 +25,10 @@ def get_best_tune(file):
 def apply_tunes(tune_file, tunes, GPU_name):
     tune_string = '{"' + GPU_name + '"' + ", IdealConfigs {"
     for kernel_name, (block, grid) in tunes.items():
-        tune_string += f".ideal_TPB_{kernel_name} = {block}, .ideal_tot_threads_{kernel_name} = {grid*block}, "
+        if grid == None:
+            tune_string += f".ideal_TPB_{kernel_name} = {block}, "
+        else:
+            tune_string += f".ideal_TPB_{kernel_name} = {block}, .ideal_tot_threads_{kernel_name} = {grid*block}, "
 
     tune_string = tune_string[:-2] + "}}"
 
@@ -51,10 +56,12 @@ if __name__ == "__main__":
     parser.add_argument("tune_file", type=str)
     args = parser.parse_args()
 
-    tunes = dict()
+    tunes = OrderedDict()
     # Get all csv files in directory of this script
     file_dir = os.path.dirname(os.path.realpath(__file__))
     tune_csvs = [f for f in os.listdir(file_dir) if f.endswith(".csv")]
+    # order files alphabetically
+    tune_csvs.sort()
     for tune in tune_csvs:
         best_vals = get_best_tune(file_dir + "/" + tune)
         kernel_name = tune.replace(".csv", "")

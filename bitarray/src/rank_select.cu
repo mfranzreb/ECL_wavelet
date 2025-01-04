@@ -20,9 +20,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
                                 uint8_t const GPU_index) noexcept
     : bit_array_(std::move(bit_array)), is_copy_(false) {
   checkWarpSize(GPU_index);
-  gpuErrchk(cudaSetDevice(GPU_index));
 
-  cudaFuncSetCacheConfig(calculateL2EntriesKernel, cudaFuncCachePreferL1);
   auto const num_arrays = bit_array_.numArrays();
 
   // Compute the number of L1 blocks.
@@ -105,10 +103,6 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
                        num_l2_blocks_per_arr.size() * sizeof(size_t),
                        cudaMemcpyHostToDevice));
 
-  struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
-  int maxThreadsPerBlockL2Kernel = funcAttrib.maxThreadsPerBlock;
-
   // TODO loop unnecessary for wavelet tree
   // Get maximum storage needed for device sums
   size_t temp_storage_bytes = 0;
@@ -123,7 +117,16 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   void* d_temp_storage = nullptr;
   gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
 
-  auto const max_block_size = getDeviceProperties().maxThreadsPerBlock;
+  struct cudaFuncAttributes funcAttrib;
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
+
+  auto const max_block_size =
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  auto const prop = getDeviceProperties();
+
+  auto const ideal_TPB =
+      getIdealConfigs(prop.name).ideal_TPB_calculateL2EntriesKernel;
 
 #pragma omp parallel for num_threads(num_arrays)
   for (uint32_t i = 0; i < num_arrays; i++) {
@@ -137,8 +140,8 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
     }
 
     if (num_l1_blocks == 1) {
-      size_t block_size = std::min(maxThreadsPerBlockL2Kernel, max_block_size);
-      block_size = std::min(block_size, num_l2_blocks * 32);
+      uint32_t block_size =
+          std::min(max_block_size, static_cast<uint32_t>(num_l2_blocks * WS));
 
       calculateL2EntriesKernel<<<1, block_size>>>(*this, i, num_l2_blocks);
       kernelStreamCheck(0);
@@ -147,9 +150,23 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
           (bit_array_.sizeHost(i) % RankSelectConfig::L1_BIT_SIZE +
            RankSelectConfig::L2_BIT_SIZE - 1) /
           RankSelectConfig::L2_BIT_SIZE;
-      auto [_, block_size] =
-          getLaunchConfig(num_l2_blocks - num_last_l2_blocks, kMinTPB,
-                          maxThreadsPerBlockL2Kernel);
+
+      // Get minimal block size that still fully loads GPU
+      auto const min_threads = static_cast<size_t>(
+          prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount);
+
+      auto block_size = std::min(
+          static_cast<uint32_t>(min_threads / num_l1_blocks), max_block_size);
+
+      block_size = (block_size / WS) * WS;
+
+      if (ideal_TPB == 0) {
+        // If no ideal block size is given, use the minimum block size
+        // possible
+        block_size = std::max(block_size, kMinTPB);
+      } else if (ideal_TPB > block_size) {
+        block_size = ideal_TPB;
+      }
 
       // calculate L2 entries for all L1 blocks
       calculateL2EntriesKernel<<<num_l1_blocks, block_size>>>(
@@ -550,7 +567,7 @@ __device__ [[nodiscard]] uint8_t RankSelect::getNBitPos(uint8_t const n,
   }
 }
 
-__global__ LB(64, MIN_BPM* MAX_TPB / 64) void calculateL2EntriesKernel(
+__global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
     RankSelect rank_select, uint32_t const array_index,
     uint8_t const num_last_l2_blocks) {
   assert(blockDim.x % WS == 0);

@@ -269,9 +269,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   assert(alphabet_.size() > 0);
   assert(std::is_sorted(alphabet_.begin(), alphabet_.end()));
 
-  //? Correct way?
-  // Set device
-  gpuErrchk(cudaSetDevice(GPU_index));
   checkWarpSize(GPU_index);
   alphabet_size_ = alphabet_.size();
 

@@ -1,6 +1,7 @@
 #include <bit_array.cuh>
 #include <chrono>
 #include <cstdint>
+#include <rank_select.cuh>
 #include <test_benchmark_utils.cuh>
 #include <utils.cuh>
 #include <vector>
@@ -8,12 +9,68 @@
 
 namespace ecl {
 
+void tune_calculateL2EntriesKernel(std::string out_file,
+                                   uint32_t const GPU_index) {
+  checkWarpSize(GPU_index);
+
+  // Write column names to CSV
+  std::ofstream file(out_file);
+  file << "data_size,num_threads,duration,GPU_name" << std::endl;
+
+  std::vector<size_t> bit_array_sizes;
+  struct cudaDeviceProp prop = getDeviceProperties();
+  for (size_t i = 100'000'000; i <= prop.totalGlobalMem / 2; i *= 2) {
+    bit_array_sizes.push_back(i);
+  }
+
+  std::vector<uint32_t> block_sizes;
+
+  struct cudaFuncAttributes funcAttrib;
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
+  uint32_t const max_size =
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  for (uint32_t i = kMinTPB; i <= max_size; i *= 2) {
+    block_sizes.push_back(i);
+  }
+
+  for (auto const size : bit_array_sizes) {
+    BitArray bit_array({size});
+    RankSelect rs(std::move(bit_array), GPU_index);
+    size_t const num_blocks = (size + RankSelectConfig::L1_BIT_SIZE - 1) /
+                              RankSelectConfig::L1_BIT_SIZE;
+    for (uint32_t block_size : block_sizes) {
+      uint8_t const num_iters = 5;
+      uint8_t const num_last_l2_blocks =
+          (rs.bit_array_.sizeHost(0) % RankSelectConfig::L1_BIT_SIZE +
+           RankSelectConfig::L2_BIT_SIZE - 1) /
+          RankSelectConfig::L2_BIT_SIZE;
+      auto start = std::chrono::high_resolution_clock::now();
+      for (uint8_t i = 0; i < num_iters; ++i) {
+        calculateL2EntriesKernel<<<num_blocks, block_size>>>(
+            rs, 0, num_last_l2_blocks);
+        kernelCheck();
+      }
+      auto end = std::chrono::high_resolution_clock::now();
+      auto duration =
+          std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+              .count();
+
+      // Write to CSV
+      std::ofstream file(out_file, std::ios_base::app);
+      file << size << "," << block_size << "," << duration << "," << prop.name
+           << std::endl;
+    }
+  }
+}
+
 void tune_computeGlobalHistogramKernel(std::string out_file,
                                        uint32_t const GPU_index) {
   using T = uint8_t;
   // Write column names to CSV
   std::ofstream file(out_file);
-  file << "data_size,alphabet_size,num_blocks,num_threads,duration,used_shmem,"
+  file << "data_size,alphabet_size,num_blocks,num_threads,duration,used_"
+          "shmem,"
           "GPU_name"
        << std::endl;
   // Tuning params
@@ -25,8 +82,8 @@ void tune_computeGlobalHistogramKernel(std::string out_file,
   // No encoding in test, minimal alphabet
   gpuErrchk(cudaFuncGetAttributes(
       &funcAttrib, computeGlobalHistogramKernel<T, true, true, true>));
-  // Using biggest size possible, since it allows for a higher bound on shmem
-  // usage
+  // Using biggest size possible, since it allows for a higher bound on
+  // shmem usage
   uint32_t const block_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
 
@@ -157,8 +214,8 @@ void tune_fillLevelKernel(std::string out_file) {
   // Pad shmem banks if memory suffices
   size_t padded_shmem = std::numeric_limits<size_t>::max();
   if constexpr (kBankSizeBytes <= sizeof(T)) {
-    // If the bank size is smaller than or equal to T, one element of padding
-    // per thread is needed.
+    // If the bank size is smaller than or equal to T, one element of
+    // padding per thread is needed.
     padded_shmem =
         shmem_per_thread * max_threads_per_SM + sizeof(T) * max_threads_per_SM;
   } else {
@@ -223,6 +280,8 @@ int main(int argc, char* argv[]) {
   auto const parent_dir = argv[1];
   auto const GPU_index = std::stoi(argv[2]);
   ecl::checkWarpSize(GPU_index);
+  ecl::tune_calculateL2EntriesKernel(
+      std::string(parent_dir) + "/calculateL2EntriesKernel.csv", GPU_index);
   ecl::tune_fillLevelKernel(std::string(parent_dir) + "/fillLevelKernel.csv");
   ecl::tune_computeGlobalHistogramKernel(
       std::string(parent_dir) + "/computeGlobalHistogramKernel.csv", GPU_index);

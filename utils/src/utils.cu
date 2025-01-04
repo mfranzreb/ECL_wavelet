@@ -72,6 +72,7 @@ __host__ cudaDeviceProp &getDeviceProperties() {
 
 __host__ void checkWarpSize(uint8_t const GPU_index) {
   if (internal::prop.totalGlobalMem == 0) {
+    gpuErrchk(cudaSetDevice(GPU_index));
     cudaGetDeviceProperties(&internal::prop, GPU_index);
     auto const threads_per_sm = internal::prop.maxThreadsPerMultiProcessor;
     kMaxTPB = internal::prop.maxThreadsPerBlock;

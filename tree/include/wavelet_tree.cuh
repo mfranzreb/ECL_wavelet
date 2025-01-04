@@ -844,7 +844,7 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
     padded_shmem = shmem_per_thread * max_threads_per_SM +
                    shmem_per_thread * max_threads_per_SM / kBanksPerLine;
   }
-  bool const enough_shmem = shmem_per_thread * padded_shmem <= max_shmem_per_SM;
+  bool const enough_shmem = padded_shmem <= max_shmem_per_SM;
   if (enough_shmem) {
     shmem_per_thread = padded_shmem / max_threads_per_SM;
   }

@@ -28,6 +28,12 @@ cmake --build $BUILD_DIR --target ecl_tune_kernels
 
 # Command line args are the indices of the GPUs to tune the kernels for
 for i in $@; do
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader,nounits -i $i)
+    python $DIR/check_tuned_GPUs.py $TUNE_FILE "$GPU_NAME"
+    if [ $? -eq 1 ]; then
+        echo "Kernels for GPU $i ($GPU_NAME) are already tuned. Skipping..."
+        continue
+    fi
     echo "Tuning kernels for GPU $i"
     # Tune the kernels for the specified GPU
     $BUILD_DIR/kernel_tuning/ecl_tune_kernels $DIR $i

@@ -177,8 +177,6 @@ class WaveletTree {
                                   least significant bit*/
   Code* d_codes_ =
       nullptr; /*!< Array of codes for each symbol in the alphabet*/
-  uint8_t* d_code_lens_ =
-      nullptr; /*!< Array of code lengths for each symbol in the alphabet*/
   size_t* d_counts_ = nullptr; /*!< Array of counts for each symbol*/
   size_t num_levels_;          /*!< Number of levels in the wavelet tree*/
   bool is_min_alphabet_; /*!< Flag to signal whether the alphabet is already
@@ -295,6 +293,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   // TODO separato codes from code lens
   //  create codes and copy to device
+  uint8_t* d_code_lens = nullptr;
   if (codes.size() > 0) {
     gpuErrchk(cudaMalloc(&d_codes_, codes.size() * sizeof(Code)));
     gpuErrchk(cudaMemcpy(d_codes_, codes.data(), codes.size() * sizeof(Code),
@@ -305,8 +304,8 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     for (size_t i = 0; i < alphabet_size_ - codes_start_; ++i) {
       code_lens[codes[i].code_ - codes_start_] = codes[i].len_;
     }
-    gpuErrchk(cudaMalloc(&d_code_lens_, code_lens.size() * sizeof(uint8_t)));
-    gpuErrchk(cudaMemcpy(d_code_lens_, code_lens.data(),
+    gpuErrchk(cudaMalloc(&d_code_lens, code_lens.size() * sizeof(uint8_t)));
+    gpuErrchk(cudaMemcpy(d_code_lens, code_lens.data(),
                          code_lens.size() * sizeof(uint8_t),
                          cudaMemcpyHostToDevice));
   }
@@ -400,7 +399,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
       //  Reduce text
       T* new_end =
           thrust::remove_if(thrust::device, d_data, d_data + data_size,
-                            isNotLongEnough<T>(d_code_lens_, l, codes_start_));
+                            isNotLongEnough<T>(d_code_lens, l, codes_start_));
       data_size = static_cast<size_t>(std::distance(d_data, new_end));
     }
   }
@@ -424,7 +423,6 @@ __host__ WaveletTree<T>::WaveletTree(WaveletTree const& other)
       alphabet_start_bit_(other.alphabet_start_bit_),
       num_levels_(other.num_levels_),
       d_codes_(other.d_codes_),
-      d_code_lens_(other.d_code_lens_),
       d_counts_(other.d_counts_),
       is_min_alphabet_(other.is_min_alphabet_),
       codes_start_(other.codes_start_),
@@ -434,7 +432,6 @@ template <typename T>
 WaveletTree<T>::~WaveletTree() {
   if (not is_copy_) {
     gpuErrchk(cudaFree(d_codes_));
-    gpuErrchk(cudaFree(d_code_lens_));
     gpuErrchk(cudaFree(d_counts_));
   }
 }

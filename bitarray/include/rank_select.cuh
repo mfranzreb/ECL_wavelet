@@ -208,7 +208,6 @@ class RankSelect {
   RankSelectConfig::L2_TYPE*
       d_l2_indices_; /*!< Device pointer to L2 indices for all arrays.*/
 
-  // TODO: try removing offsets and calculate it on the fly
   size_t*
       d_l1_offsets_; /*!< Offsets where each L1 index for a bit array starts.*/
   size_t*

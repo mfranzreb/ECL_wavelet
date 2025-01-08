@@ -32,7 +32,11 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
   for (size_t i = global_t_id; i < data_size; i += total_threads) {
     char_data = data[i];
     if constexpr (UseShmem) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ <= 520
+      atomicAdd((cu_size_t*)&shared_hist[offset + char_data], size_t(1));
+#else
       atomicAdd_block((cu_size_t*)&shared_hist[offset + char_data], size_t(1));
+#endif
     } else {
       atomicAdd((cu_size_t*)&counts[char_data], size_t(1));
     }

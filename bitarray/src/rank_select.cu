@@ -614,7 +614,8 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
     // perform warp exclusive sum of l2 entries
     // Make sure that a whole warp executes the scan
     // TODO: right now unnecessary, since NUM_L2_PER_L1 is 32
-    uint32_t needed_threads = (RankSelectConfig::NUM_L2_PER_L1 + 31) & ~31;
+    uint32_t constexpr needed_threads =
+        (RankSelectConfig::NUM_L2_PER_L1 + 31) & ~31;
     if (threadIdx.x < needed_threads) {
       RankSelectConfig::L2_TYPE l2_entry = 0;
       if (threadIdx.x < RankSelectConfig::NUM_L2_PER_L1) {

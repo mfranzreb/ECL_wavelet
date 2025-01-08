@@ -292,7 +292,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   alphabet_start_bit_ = num_levels_ - 1;
   codes_start_ = alphabet_size_ - codes.size();
 
-  // TODO separato codes from code lens
   //  create codes and copy to device
   uint8_t* d_code_lens = nullptr;
   if (codes.size() > 0) {
@@ -300,7 +299,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     gpuErrchk(cudaMemcpy(d_codes_, codes.data(), codes.size() * sizeof(Code),
                          cudaMemcpyHostToDevice));
 
-    // TODO: Allocate as many code_lens_as codes, not more
     std::vector<uint8_t> code_lens(codes.back().code_ + 1 - codes_start_);
     for (size_t i = 0; i < alphabet_size_ - codes_start_; ++i) {
       code_lens[codes[i].code_ - codes_start_] = codes[i].len_;
@@ -910,13 +908,15 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
                                       alphabet + alphabet_size, char_data) -
                   alphabet;
     }
-    // TODO: atomic block not available for CC <=5.2
     if constexpr (UseShmem) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ <= 520
+      atomicAdd((cu_size_t*)&shared_hist[offset + char_data], size_t(1));
+#else
       atomicAdd_block((cu_size_t*)&shared_hist[offset + char_data], size_t(1));
+#endif
     } else {
       atomicAdd((cu_size_t*)&counts[char_data], size_t(1));
     }
-    // TODO: could calculate code on the fly
     if constexpr (not isPowTwo) {
       if (char_data >= tree.getCodesStart()) {
         char_data = tree.encode(char_data).code_;

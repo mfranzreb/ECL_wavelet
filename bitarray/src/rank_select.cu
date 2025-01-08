@@ -583,6 +583,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
   uint32_t const local_t_id = threadIdx.x % WS;
   uint32_t const num_warps = blockDim.x / WS;
   if (blockIdx.x < gridDim.x - 1) {
+    size_t const offset = rank_select.bit_array_.getOffset(array_index);
     // find L1 block index
     uint32_t const l1_index = blockIdx.x;
 
@@ -597,7 +598,8 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
       for (size_t j = start_word + 2 * local_t_id; j < end_word; j += 2 * WS) {
         // Global memory load
         // load as 64 bits.
-        uint64_t const word = rank_select.bit_array_.twoWords(array_index, j);
+        uint64_t const word =
+            rank_select.bit_array_.twoWords(array_index, j, offset);
         num_ones += __popcll(word);
       }
 

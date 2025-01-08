@@ -120,6 +120,9 @@ class BitArray {
   __device__ [[nodiscard]] uint64_t twoWords(size_t const array_index,
                                              size_t const index) const noexcept;
 
+  __device__ [[nodiscard]] uint64_t twoWords(size_t const array_index,
+                                             size_t const index, size_t const offset) const noexcept;
+
   /*!
    * \brief Direct access to one word of the raw data of the bit
    * array.

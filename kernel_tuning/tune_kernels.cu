@@ -17,12 +17,6 @@ void tune_calculateL2EntriesKernel(std::string out_file,
   std::ofstream file(out_file);
   file << "data_size,num_threads,duration,GPU_name" << std::endl;
 
-  std::vector<size_t> bit_array_sizes;
-  struct cudaDeviceProp prop = getDeviceProperties();
-  for (size_t i = 100'000'000; i <= prop.totalGlobalMem / 2; i *= 2) {
-    bit_array_sizes.push_back(i);
-  }
-
   std::vector<uint32_t> block_sizes;
 
   struct cudaFuncAttributes funcAttrib;
@@ -34,33 +28,34 @@ void tune_calculateL2EntriesKernel(std::string out_file,
     block_sizes.push_back(i);
   }
 
-  for (auto const size : bit_array_sizes) {
-    BitArray bit_array({size});
-    RankSelect rs(std::move(bit_array), GPU_index);
-    size_t const num_blocks = (size + RankSelectConfig::L1_BIT_SIZE - 1) /
-                              RankSelectConfig::L1_BIT_SIZE;
-    for (uint32_t block_size : block_sizes) {
-      uint8_t const num_iters = 5;
-      uint8_t const num_last_l2_blocks =
-          (rs.bit_array_.sizeHost(0) % RankSelectConfig::L1_BIT_SIZE +
-           RankSelectConfig::L2_BIT_SIZE - 1) /
-          RankSelectConfig::L2_BIT_SIZE;
-      auto start = std::chrono::high_resolution_clock::now();
-      for (uint8_t i = 0; i < num_iters; ++i) {
-        calculateL2EntriesKernel<<<num_blocks, block_size>>>(
-            rs, 0, num_last_l2_blocks);
-        kernelCheck();
-      }
-      auto end = std::chrono::high_resolution_clock::now();
-      auto duration =
-          std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-              .count();
+  struct cudaDeviceProp prop = getDeviceProperties();
 
-      // Write to CSV
-      std::ofstream file(out_file, std::ios_base::app);
-      file << size << "," << block_size << "," << duration << "," << prop.name
-           << std::endl;
+  size_t const ba_size = prop.totalGlobalMem / 10;
+  BitArray bit_array({ba_size});
+  RankSelect rs(std::move(bit_array), GPU_index);
+  size_t const num_blocks = (ba_size + RankSelectConfig::L1_BIT_SIZE - 1) /
+                            RankSelectConfig::L1_BIT_SIZE;
+  for (uint32_t block_size : block_sizes) {
+    uint8_t const num_iters = 5;
+    uint8_t const num_last_l2_blocks =
+        (rs.bit_array_.sizeHost(0) % RankSelectConfig::L1_BIT_SIZE +
+         RankSelectConfig::L2_BIT_SIZE - 1) /
+        RankSelectConfig::L2_BIT_SIZE;
+    auto start = std::chrono::high_resolution_clock::now();
+    for (uint8_t i = 0; i < num_iters; ++i) {
+      calculateL2EntriesKernel<<<num_blocks, block_size>>>(rs, 0,
+                                                           num_last_l2_blocks);
+      kernelCheck();
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+            .count();
+
+    // Write to CSV
+    std::ofstream file(out_file, std::ios_base::app);
+    file << ba_size << "," << block_size << "," << duration << "," << prop.name
+         << std::endl;
   }
 }
 

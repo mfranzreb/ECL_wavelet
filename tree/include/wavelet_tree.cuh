@@ -14,6 +14,7 @@
 #include "rank_select.cuh"
 #include "utils.cuh"
 
+// TODO: add restricts
 namespace ecl {
 
 /*!

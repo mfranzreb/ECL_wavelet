@@ -57,7 +57,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_tree_constructio
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include" "${CMAKE_SOURCE_DIR}/third_party/NVBIO")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -69,6 +69,7 @@ target_link_libraries(${TARGET}
     PRIVATE ecl_wavelet_tree
     PRIVATE ecl_utils
     PRIVATE ecl_test_bm_utils
+    PRIVATE nvbio
     OpenMP::OpenMP_CXX
     CUDA::cudart
     benchmark

@@ -49,6 +49,8 @@ if(BUILD_BENCHMARKS)
     set(BENCHMARK_ENABLE_TESTING OFF)
     add_subdirectory(third_party/benchmark)
     add_subdirectory(benchmark)
+    set(GPU_ARCHITECTURE "sm_62")
+    add_subdirectory(third_party/NVBIO)
 endif()
 
 

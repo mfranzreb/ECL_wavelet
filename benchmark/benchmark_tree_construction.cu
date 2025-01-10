@@ -33,6 +33,24 @@ static void BM_WaveletTreeConstruction(benchmark::State& state) {
   state.counters["param.alphabet_size"] = alphabet_size;
   state.counters["param.is_min_alphabet"] = is_min_alphabet;
 
+  // Memory usage
+  {
+    size_t max_memory_usage = 0;
+    std::atomic_bool done{false};
+    std::atomic_bool can_start{false};
+    std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
+                  std::ref(max_memory_usage));
+    while (not can_start) {
+      std::this_thread::yield();
+    }
+    auto alphabet_copy = alphabet;
+    auto wt =
+        WaveletTree<T>(data.data(), data_size, std::move(alphabet_copy), 0);
+    done = true;
+    t.join();
+    state.counters["memory_usage"] = max_memory_usage;
+  }
+
   for (auto _ : state) {
     state.PauseTiming();
     auto alphabet_copy = alphabet;

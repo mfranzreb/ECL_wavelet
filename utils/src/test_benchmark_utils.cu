@@ -34,7 +34,8 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels) {
   gpuErrchk(cudaMalloc(&d_words_arr, num_words * sizeof(uint32_t)));
   gpuErrchk(cudaMemcpy(d_words_arr, uint32_vec.data(),
                        num_words * sizeof(uint32_t), cudaMemcpyHostToDevice));
-  auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, kMaxTPB);
+  auto [blocks, threads] = getLaunchConfig(
+      num_words / 32 == 0 ? 1 : num_words / 32, kMinTPB, kMaxTPB);
   for (uint8_t i = 0; i < num_levels; ++i) {
     writeWordsParallelKernel<<<blocks, threads>>>(ba, i, d_words_arr,
                                                   num_words);
@@ -67,4 +68,22 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
 
   return std::make_pair(alphabet, data);
 }
+
+void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
+                        size_t& max_memory_usage) {
+  max_memory_usage = 0;
+  size_t free_bytes;
+  size_t total_bytes;
+  size_t start_bytes;
+  gpuErrchk(cudaMemGetInfo(&free_bytes, &total_bytes));
+  start_bytes = total_bytes - free_bytes;
+  can_start = true;
+  while (not stop.load()) {
+    gpuErrchk(cudaMemGetInfo(&free_bytes, &total_bytes));
+    max_memory_usage = std::max(max_memory_usage, total_bytes - free_bytes);
+    std::this_thread::sleep_for(std::chrono::microseconds(1));
+  }
+  max_memory_usage -= start_bytes;
+}
+
 }  // namespace ecl

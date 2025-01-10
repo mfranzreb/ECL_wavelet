@@ -70,4 +70,8 @@ std::vector<T> generateRandomData(std::vector<T> const& alphabet,
 
   return data;
 }
+
+void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
+                        size_t& max_memory_usage);
+
 }  // namespace ecl

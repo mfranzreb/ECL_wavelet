@@ -408,9 +408,8 @@ TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
   for (int i = 0; i < 10; i++) {
     // Random data size between 1000 and 1'000'000
     size_t data_size = 1000 + (rand() % 1'000'000);
-    size_t alphabet_size =
-        std::min(3 + (rand() % (data_size - 3)),
-                 size_t(std::numeric_limits<TypeParam>::max()));
+    size_t alphabet_size = std::min(
+        data_size, size_t(rand() % std::numeric_limits<TypeParam>::max()));
 
     auto [alphabet, data] =
         generateRandomAlphabetAndData<TypeParam>(alphabet_size, data_size);

@@ -225,7 +225,7 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
  * \param num_indices Number of indices.
  * \param results Array to store the accessed symbols.
  */
-template <typename T>
+template <typename T, bool ShmemCounts>
 __global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
                              size_t const num_indices, T* results);
 
@@ -440,12 +440,31 @@ __host__ std::vector<T> WaveletTree<T>::access(
     std::vector<size_t> const& indices) {
   // launch kernel with 1 warp per index
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, accessKernel<T>));
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, accessKernel<T, true>));
+
   auto maxThreadsPerBlockAccess =
       std::max(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   size_t const num_indices = indices.size();
+
+  size_t const counts_size = sizeof(size_t) * alphabet_size_;
+
+  struct cudaDeviceProp prop = getDeviceProperties();
+  auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
+  auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
+
+  bool const use_shmem = counts_size * kMinBPM <= max_shmem_per_SM;
+
+  auto min_block_size =
+      use_shmem
+          ? std::max(kMinTPB,
+                     static_cast<uint32_t>(max_threads_per_SM /
+                                           (max_shmem_per_SM / counts_size)))
+          : kMinTPB;
+  // Make the minimum block size a multiple of WS
+  min_block_size = ((min_block_size + WS - 1) / WS) * WS;
+
   auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_indices, kMinTPB, maxThreadsPerBlockAccess);
+      getLaunchConfig(num_indices, min_block_size, maxThreadsPerBlockAccess);
 
   // allocate space for results
   T* d_results;
@@ -457,8 +476,13 @@ __host__ std::vector<T> WaveletTree<T>::access(
   gpuErrchk(cudaMemcpy(d_indices, indices.data(), num_indices * sizeof(size_t),
                        cudaMemcpyHostToDevice));
 
-  accessKernel<T><<<num_blocks, threads_per_block>>>(*this, d_indices,
-                                                     num_indices, d_results);
+  if (use_shmem) {
+    accessKernel<T, true><<<num_blocks, threads_per_block, counts_size>>>(
+        *this, d_indices, num_indices, d_results);
+  } else {
+    accessKernel<T, false><<<num_blocks, threads_per_block>>>(
+        *this, d_indices, num_indices, d_results);
+  }
   kernelCheck();
 
   // copy results back to host
@@ -1028,14 +1052,24 @@ __global__ LB(MAX_TPB,
   }
 }
 
-template <typename T>
+template <typename T, bool ShmemCounts>
 __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
                                                   size_t* const indices,
                                                   size_t const num_indices,
                                                   T* results) {
   assert(blockDim.x % WS == 0);
   //? COrrect?
-  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage[WS];
+  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage[2 * WS];
+  extern __shared__ size_t counts[];
+
+  uint32_t const alphabet_size = tree.getAlphabetSize();
+
+  if constexpr (ShmemCounts) {
+    for (uint32_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
+      counts[i] = tree.getCounts(i);
+    }
+    __syncthreads();
+  }
 
   uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
   uint32_t const num_warps = gridDim.x * blockDim.x / WS;
@@ -1045,21 +1079,24 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
     size_t index = indices[i];
 
     uint32_t char_start = 0;
-    uint32_t char_end = tree.getAlphabetSize();
+    uint32_t char_end = alphabet_size;
     uint32_t start, pos;
     for (uint32_t l = 0; l < tree.getNumLevels(); ++l) {
       if (char_end - char_start == 1) {
         break;
       }
-      // TODO: could be done in parallel, and combined if index is less than
-      // L2 block size
-      start = tree.rank_select_.rank0(l, tree.getCounts(char_start), local_t_id,
-                                      WS, &temp_storage[threadIdx.x / WS]);
-      pos = tree.rank_select_.rank0(l, tree.getCounts(char_start) + index,
-                                    local_t_id, WS,
+      size_t char_counts;
+      if constexpr (ShmemCounts) {
+        char_counts = counts[char_start];
+      } else {
+        char_counts = tree.getCounts(char_start);
+      }
+      start = tree.rank_select_.rank0(l, char_counts, local_t_id, WS,
+                                      &temp_storage[threadIdx.x / WS]);
+      pos = tree.rank_select_.rank0(l, char_counts + index, local_t_id, WS,
                                     &temp_storage[threadIdx.x / WS]);
-      if (tree.rank_select_.bit_array_.access(
-              l, tree.getCounts(char_start) + index) == false) {
+      if (tree.rank_select_.bit_array_.access(l, char_counts + index) ==
+          false) {
         index = pos - start;
         char_end = char_start + getPrevPowTwo(char_end - char_start);
       } else {
@@ -1078,7 +1115,7 @@ __global__ void rankKernel(WaveletTree<T> tree,
                            RankSelectQuery<T>* const queries,
                            size_t const num_queries, size_t* const ranks) {
   assert(blockDim.x % WS == 0);
-  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage[WS];
+  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage[2 * WS];
   uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
   uint32_t const num_warps = gridDim.x * blockDim.x / WS;
   uint32_t const local_t_id = threadIdx.x % WS;
@@ -1138,7 +1175,7 @@ __global__ void selectKernel(WaveletTree<T> tree,
                              RankSelectQuery<T>* const queries,
                              size_t const num_queries, size_t* const results) {
   assert(blockDim.x % WS == 0);
-  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage[WS];
+  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage[2 * WS];
   uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
   uint32_t const num_warps = gridDim.x * blockDim.x / WS;
   uint32_t const local_t_id = threadIdx.x % WS;

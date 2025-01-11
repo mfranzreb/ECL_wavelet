@@ -9,11 +9,7 @@ int main(int argc, char** argv) {
   auto const alphabet_size = std::stoul(argv[2]);
   auto const num_queries = std::stoul(argv[3]);
 
-  std::vector<size_t> queries(num_queries);
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> dis(0, data_size - 1);
-  std::generate(queries.begin(), queries.end(), [&]() { return dis(gen); });
+  auto queries = ecl::generateRandomQueries(data_size, num_queries);
 
   if (alphabet_size < std::numeric_limits<uint8_t>::max()) {
     std::vector<uint8_t> alphabet;

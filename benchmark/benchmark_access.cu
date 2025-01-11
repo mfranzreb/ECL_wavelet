@@ -12,26 +12,22 @@
 namespace ecl {
 
 template <typename T>
-static void BM_WaveletTreeConstruction(benchmark::State& state) {
+static void BM_Access(benchmark::State& state) {
   auto const data_size = state.range(0);
   auto const alphabet_size = state.range(1);
-  bool const is_min_alphabet = state.range(2);
+  auto const num_queries = state.range(2);
 
-  std::vector<T> alphabet;
-  std::vector<T> data;
-  if (is_min_alphabet) {
-    alphabet = std::vector<T>(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
-    data = generateRandomData<T>(alphabet, data_size);
-  } else {
-    std::tie(alphabet, data) =
-        generateRandomAlphabetAndData<T>(alphabet_size, data_size, true);
-  }
+  auto alphabet = std::vector<T>(alphabet_size);
+  std::iota(alphabet.begin(), alphabet.end(), 0);
+  auto data = generateRandomData<T>(alphabet, data_size);
 
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;
-  state.counters["param.is_min_alphabet"] = is_min_alphabet;
+  state.counters["param.num_queries"] = num_queries;
 
+  auto queries = generateRandomQueries(data_size, num_queries);
+
+  auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);
   // Memory usage
   {
     size_t max_memory_usage = 0;
@@ -42,19 +38,14 @@ static void BM_WaveletTreeConstruction(benchmark::State& state) {
     while (not can_start) {
       std::this_thread::yield();
     }
-    auto alphabet_copy = alphabet;
-    auto wt =
-        WaveletTree<T>(data.data(), data_size, std::move(alphabet_copy), 0);
+    wt.access(queries);
     done = true;
     t.join();
     state.counters["memory_usage"] = max_memory_usage;
   }
 
   for (auto _ : state) {
-    state.PauseTiming();
-    auto alphabet_copy = alphabet;
-    state.ResumeTiming();
-    WaveletTree<T> wt(data.data(), data_size, std::move(alphabet_copy), 0);
+    wt.access(queries);
   }
 }
 
@@ -103,130 +94,94 @@ static void BM_NVBIO(benchmark::State& state) {
   }
   uint32_t const data_size = static_cast<uint32_t>(state.range(0));
   uint8_t const alphabet_size = static_cast<uint8_t>(state.range(1));
+  auto const num_queries = state.range(2);
 
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;
 
+  auto queries = generateRandomQueries(data_size, num_queries);
+
   if (alphabet_size == 4) {
     auto d_data = getNVbioArgs<nvbio::DNA>(data_size);
     nvbio::WaveletTreeStorage<nvbio::device_tag> wt;
-    // Memory usage
-    {
-      size_t max_memory_usage = 0;
-      std::atomic_bool done{false};
-      std::atomic_bool can_start{false};
-      std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                    std::ref(max_memory_usage));
-      while (not can_start) {
-        std::this_thread::yield();
-      }
-      nvbio::WaveletTreeStorage<nvbio::device_tag> wt_mem;
-      nvbio::setup(data_size, d_data.begin(), wt_mem);
-      done = true;
-      t.join();
-      state.counters["memory_usage"] = max_memory_usage;
-    }
+    nvbio::setup(data_size, d_data.begin(), wt);
+    auto const wt_view = nvbio::plain_view(
+        (const nvbio::WaveletTreeStorage<nvbio::device_tag>&)wt);
     for (auto _ : state) {
-      nvbio::setup(data_size, d_data.begin(), wt);
+#pragma omp parallel for
+      for (auto const& query : queries) {
+        nvbio::text(wt_view, query);
+      }
     }
   } else if (alphabet_size == 5) {
     auto d_data = getNVbioArgs<nvbio::DNA_N>(data_size);
     nvbio::WaveletTreeStorage<nvbio::device_tag> wt;
-    // Memory usage
-    {
-      size_t max_memory_usage = 0;
-      std::atomic_bool done{false};
-      std::atomic_bool can_start{false};
-      std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                    std::ref(max_memory_usage));
-      while (not can_start) {
-        std::this_thread::yield();
-      }
-      nvbio::WaveletTreeStorage<nvbio::device_tag> wt_mem;
-      nvbio::setup(data_size, d_data.begin(), wt_mem);
-      done = true;
-      t.join();
-      state.counters["memory_usage"] = max_memory_usage;
-    }
+    nvbio::setup(data_size, d_data.begin(), wt);
+    auto const wt_view = nvbio::plain_view(
+        (const nvbio::WaveletTreeStorage<nvbio::device_tag>&)wt);
     for (auto _ : state) {
-      nvbio::setup(data_size, d_data.begin(), wt);
+#pragma omp parallel for
+      for (auto const& query : queries) {
+        nvbio::text(wt_view, query);
+      }
     }
   } else if (alphabet_size == 24) {
     auto d_data = getNVbioArgs<nvbio::PROTEIN>(data_size);
     nvbio::WaveletTreeStorage<nvbio::device_tag> wt;
-    // Memory usage
-    {
-      size_t max_memory_usage = 0;
-      std::atomic_bool done{false};
-      std::atomic_bool can_start{false};
-      std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                    std::ref(max_memory_usage));
-      while (not can_start) {
-        std::this_thread::yield();
-      }
-      nvbio::WaveletTreeStorage<nvbio::device_tag> wt_mem;
-      nvbio::setup(data_size, d_data.begin(), wt_mem);
-      done = true;
-      t.join();
-      state.counters["memory_usage"] = max_memory_usage;
-    }
+    nvbio::setup(data_size, d_data.begin(), wt);
+    auto const wt_view = nvbio::plain_view(
+        (const nvbio::WaveletTreeStorage<nvbio::device_tag>&)wt);
     for (auto _ : state) {
-      nvbio::setup(data_size, d_data.begin(), wt);
+#pragma omp parallel for
+      for (auto const& query : queries) {
+        nvbio::text(wt_view, query);
+      }
     }
   } else {
     auto d_data = getNVbioArgs<nvbio::ASCII>(data_size, alphabet_size);
     nvbio::WaveletTreeStorage<nvbio::device_tag> wt;
-    // Memory usage
-    {
-      size_t max_memory_usage = 0;
-      std::atomic_bool done{false};
-      std::atomic_bool can_start{false};
-      std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                    std::ref(max_memory_usage));
-      while (not can_start) {
-        std::this_thread::yield();
-      }
-      nvbio::WaveletTreeStorage<nvbio::device_tag> wt_mem;
-      nvbio::setup(data_size, d_data.begin(), wt_mem);
-      done = true;
-      t.join();
-      state.counters["memory_usage"] = max_memory_usage;
-    }
+    nvbio::setup(data_size, d_data.begin(), wt);
+    auto const wt_view = nvbio::plain_view(
+        (const nvbio::WaveletTreeStorage<nvbio::device_tag>&)wt);
     for (auto _ : state) {
-      nvbio::setup(data_size, d_data.begin(), wt);
+#pragma omp parallel for
+      for (auto const& query : queries) {
+        nvbio::text(wt_view, query);
+      }
     }
   }
 }
 
 // For initializing CUDA
-BENCHMARK(BM_WaveletTreeConstruction<uint8_t>)
-    ->Args({100, 4, 1})
+BENCHMARK(BM_Access<uint8_t>)
+    ->Args({100, 4})
     ->Iterations(10)
     ->Unit(benchmark::kMillisecond);
 
 // First argument is the size of the data, second argument is the size of the
-// alphabet, and the third argument is a boolean that indicates if the
-// alphabet is minimal.
-BENCHMARK(BM_WaveletTreeConstruction<uint8_t>)
+// alphabet.
+BENCHMARK(BM_Access<uint8_t>)
     ->ArgsProduct({{200'000'000, 500'000'000, 800'000'000, 1'000'000'000,
                     1'500'000'000, 2'000'000'000},
                    {4, 5, 24, 64, 100, 155, 256},
-                   {0, 1}})
+                   {100, 1'000, 5'000, 10'000, 50'000, 100'000}})
     ->Iterations(5)
     ->Unit(benchmark::kMillisecond);
 
-// BENCHMARK(BM_WaveletTreeConstruction<uint16_t>)
+// BENCHMARK(BM_Access<uint16_t>)
 //     ->ArgsProduct({{200'000'000, 500'000'000, 800'000'000, 1'000'000'000,
 //                     1'200'000'000},
-//                    {500, 1'000, 2'000, 4'000, 8'000, 16'000, 32'000, 64'000},
-//                    {0, 1}})
+//                    {500, 1'000, 2'000, 4'000, 8'000, 16'000, 32'000,
+//                    64'000},
+//{100, 1'000, 5'000, 10'000, 50'000, 100'000}})
 //     ->Iterations(5)
 //     ->Unit(benchmark::kMillisecond);
 
 BENCHMARK(BM_NVBIO)
     ->ArgsProduct({{200'000'000, 500'000'000, 800'000'000, 1'000'000'000,
                     1'500'000'000, 2'000'000'000},
-                   {4, 5, 24, 64, 100, 155, 256}})
+                   {4, 5, 24, 64, 100, 155, 256},
+                   {100, 1'000, 5'000, 10'000, 50'000, 100'000}})
     ->Iterations(5)
     ->Unit(benchmark::kMillisecond);
 }  // namespace ecl

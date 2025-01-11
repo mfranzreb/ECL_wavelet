@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_scan.cuh>
+#include <cub/warp/warp_reduce.cuh>
 #include <numeric>
 #include <vector>
 
@@ -388,7 +389,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     cub::DeviceRadixSort::SortKeys(
         d_temp_storage, temp_storage_bytes, d_data, d_sorted_data, data_size,
         alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
-    // TODO, could launch in different streams
     //  Fill l-th bit array
     kernelCheck();
     fillLevel(bit_array, d_sorted_data, data_size, l);
@@ -441,8 +441,9 @@ __host__ std::vector<T> WaveletTree<T>::access(
   // launch kernel with 1 warp per index
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, accessKernel<T>));
-  int maxThreadsPerBlockAccess = funcAttrib.maxThreadsPerBlock;
-  size_t num_indices = indices.size();
+  auto maxThreadsPerBlockAccess =
+      std::max(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  size_t const num_indices = indices.size();
   auto [num_blocks, threads_per_block] =
       getLaunchConfig(num_indices, kMinTPB, maxThreadsPerBlockAccess);
 
@@ -1028,9 +1029,14 @@ __global__ LB(MAX_TPB,
 }
 
 template <typename T>
-__global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
-                             size_t const num_indices, T* results) {
+__global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
+                                                  size_t* const indices,
+                                                  size_t const num_indices,
+                                                  T* results) {
   assert(blockDim.x % WS == 0);
+  //? COrrect?
+  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage[WS];
+
   uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
   uint32_t const num_warps = gridDim.x * blockDim.x / WS;
   uint32_t const local_t_id = threadIdx.x % WS;
@@ -1048,9 +1054,10 @@ __global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
       // TODO: could be done in parallel, and combined if index is less than
       // L2 block size
       start = tree.rank_select_.rank0(l, tree.getCounts(char_start), local_t_id,
-                                      WS);
+                                      WS, &temp_storage[threadIdx.x / WS]);
       pos = tree.rank_select_.rank0(l, tree.getCounts(char_start) + index,
-                                    local_t_id, WS);
+                                    local_t_id, WS,
+                                    &temp_storage[threadIdx.x / WS]);
       if (tree.rank_select_.bit_array_.access(
               l, tree.getCounts(char_start) + index) == false) {
         index = pos - start;
@@ -1071,6 +1078,7 @@ __global__ void rankKernel(WaveletTree<T> tree,
                            RankSelectQuery<T>* const queries,
                            size_t const num_queries, size_t* const ranks) {
   assert(blockDim.x % WS == 0);
+  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage[WS];
   uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
   uint32_t const num_warps = gridDim.x * blockDim.x / WS;
   uint32_t const local_t_id = threadIdx.x % WS;
@@ -1089,9 +1097,10 @@ __global__ void rankKernel(WaveletTree<T> tree,
       // TODO: could be done in parallel, and combined if index is less than
       // L2 block size
       start = tree.rank_select_.rank0(l, tree.getCounts(char_start), local_t_id,
-                                      WS);
+                                      WS, &temp_storage[threadIdx.x / WS]);
       pos = tree.rank_select_.rank0(
-          l, tree.getCounts(char_start) + query.index_, local_t_id, WS);
+          l, tree.getCounts(char_start) + query.index_, local_t_id, WS,
+          &temp_storage[threadIdx.x / WS]);
       char_split = char_start + getPrevPowTwo(char_end - char_start);
       if (query.symbol_ < char_split) {
         query.index_ = pos - start;
@@ -1129,6 +1138,7 @@ __global__ void selectKernel(WaveletTree<T> tree,
                              RankSelectQuery<T>* const queries,
                              size_t const num_queries, size_t* const results) {
   assert(blockDim.x % WS == 0);
+  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage[WS];
   uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
   uint32_t const num_warps = gridDim.x * blockDim.x / WS;
   uint32_t const local_t_id = threadIdx.x % WS;
@@ -1155,14 +1165,16 @@ __global__ void selectKernel(WaveletTree<T> tree,
 
         char_start = getPrevCharStart(char_start, is_rightmost_child,
                                       alphabet_size, l, code.len_);
-        start = tree.rank_select_.rank1(l, tree.getCounts(char_start),
-                                        local_t_id, WS);
+        start =
+            tree.rank_select_.rank1(l, tree.getCounts(char_start), local_t_id,
+                                    WS, &temp_storage[threadIdx.x / WS]);
         query.index_ = tree.rank_select_.select<1>(l, start + query.index_,
                                                    local_t_id, WS) +
                        1;
       } else {
-        start = tree.rank_select_.rank0(l, tree.getCounts(char_start),
-                                        local_t_id, WS);
+        start =
+            tree.rank_select_.rank0(l, tree.getCounts(char_start), local_t_id,
+                                    WS, &temp_storage[threadIdx.x / WS]);
         query.index_ = tree.rank_select_.select<0>(l, start + query.index_,
                                                    local_t_id, WS) +
                        1;

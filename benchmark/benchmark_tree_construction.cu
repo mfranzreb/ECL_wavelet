@@ -9,7 +9,6 @@
 
 #include "test_benchmark_utils.cuh"
 
-//? How to get max memory usage?
 namespace ecl {
 
 template <typename T>

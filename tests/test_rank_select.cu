@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cub/warp/warp_reduce.cuh>
 #include <fstream>
 #include <random>
 #include <vector>
@@ -53,13 +54,17 @@ __global__ void writeWordKernel(BitArray bit_array, size_t array_index,
 __global__ void rank0Kernel(RankSelect rank_select, uint32_t array_index,
                             size_t index, size_t *output) {
   assert(blockDim.x == WS);
-  *output = rank_select.rank0(array_index, index, threadIdx.x, blockDim.x);
+  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage;
+  *output = rank_select.rank0(array_index, index, threadIdx.x, blockDim.x,
+                              &temp_storage);
 }
 
 __global__ void rank1Kernel(RankSelect rank_select, uint32_t array_index,
                             size_t index, size_t *output) {
   assert(blockDim.x == WS);
-  *output = rank_select.rank1(array_index, index, threadIdx.x, blockDim.x);
+  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage;
+  *output = rank_select.rank1(array_index, index, threadIdx.x, blockDim.x,
+                              &temp_storage);
 }
 
 __global__ void select0Kernel(RankSelect rank_select, uint32_t array_index,

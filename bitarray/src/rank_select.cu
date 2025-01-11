@@ -230,17 +230,17 @@ __host__ RankSelect::~RankSelect() {
   }
 }
 
-__device__ [[nodiscard]] size_t RankSelect::rank0(uint32_t const array_index,
-                                                  size_t const index,
-                                                  uint32_t const t_id,
-                                                  uint32_t const num_threads) {
-  return index - rank1(array_index, index, t_id, num_threads);
+__device__ [[nodiscard]] size_t RankSelect::rank0(
+    uint32_t const array_index, size_t const index, uint32_t const t_id,
+    uint32_t const num_threads,
+    typename cub::WarpReduce<size_t>::TempStorage* temp_storage) {
+  return index - rank1(array_index, index, t_id, num_threads, temp_storage);
 }
 
-__device__ [[nodiscard]] size_t RankSelect::rank1(uint32_t const array_index,
-                                                  size_t const index,
-                                                  uint32_t const t_id,
-                                                  uint32_t const num_threads) {
+__device__ [[nodiscard]] size_t RankSelect::rank1(
+    uint32_t const array_index, size_t const index, uint32_t const t_id,
+    uint32_t const num_threads,
+    typename cub::WarpReduce<size_t>::TempStorage* temp_storage) {
   assert(array_index < bit_array_.numArrays());
   assert(index < bit_array_.size(array_index));
   if (index == 0) {
@@ -257,20 +257,19 @@ __device__ [[nodiscard]] size_t RankSelect::rank1(uint32_t const array_index,
       (t_id == 0);
   size_t const start_word = l1_pos * RankSelectConfig::L1_WORD_SIZE +
                             l2_pos * RankSelectConfig::L2_WORD_SIZE;
-  size_t const end_word = index / 32;
+  size_t const end_word = index / (sizeof(uint32_t) * 8);
 
   for (size_t i = start_word + t_id; i <= end_word; i += num_threads) {
     if (i == end_word) {
       // Only consider bits up to the index.
-      result += __popc(bit_array_.partialWord(array_index, i, index % 32));
+      result += __popc(bit_array_.partialWord(array_index, i,
+                                              index % (sizeof(uint32_t) * 8)));
     } else {
       result += __popc(bit_array_.word(array_index, i));
     }
   }
 
-  __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage;
-
-  result = cub::WarpReduce<size_t>(temp_storage).Sum(result);
+  result = cub::WarpReduce<size_t>(*temp_storage).Sum(result);
 
   // communicate the result to all threads
   shareVar<size_t>(t_id == 0, result, ~0);
@@ -414,7 +413,7 @@ __device__ [[nodiscard]] size_t RankSelect::select(uint32_t const array_index,
     }
     uint32_t num_vals = 0;
     if constexpr (Value == 0) {
-      num_vals = 32 - __popc(word);
+      num_vals = (sizeof(uint32_t) * 8) - __popc(word);
     } else {
       num_vals = __popc(word);
     }
@@ -550,7 +549,7 @@ __device__ [[nodiscard]] uint8_t RankSelect::getNBitPos(uint8_t const n,
                                                         uint32_t word) {
   static_assert(Value == 0 or Value == 1, "Template parameter must be 0 or 1");
   assert(n > 0);
-  assert(n <= 32);
+  assert(n <= (sizeof(uint32_t) * 8));
   if constexpr (Value == 0) {
     // Find the position of the n-th zero in the word
     for (uint8_t i = 1; i < n; i++) {

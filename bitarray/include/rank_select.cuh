@@ -65,12 +65,14 @@ class RankSelect {
    * \param index Index the rank of zeros is computed for.
    * \param t_id Thread ID, has to start at 0.
    * \param num_threads Number of threads accessing the function.
+   * \param temp_storage Temporary storage for the warp reduction.
    * \return Number of zeros (rank) before position \c index, i.e. in the slice
    * [0, i).
    */
-  __device__ [[nodiscard]] size_t rank0(uint32_t const array_index,
-                                        size_t const index, uint32_t const t_id,
-                                        uint32_t const num_threads);
+  __device__ [[nodiscard]] size_t rank0(
+      uint32_t const array_index, size_t const index, uint32_t const t_id,
+      uint32_t const num_threads,
+      typename cub::WarpReduce<size_t>::TempStorage* temp_storage);
 
   /*!
    * \brief Computes rank of ones.
@@ -78,13 +80,15 @@ class RankSelect {
    * \param index Index the rank of ones is computed for.
    * \param t_id Thread ID, has to start at 0.
    * \param num_threads Number of threads accessing the function. Right now 32
-   * is assumed
+   * is assumed.
+   * \param temp_storage Temporary storage for the warp reduction.
    * \return Numbers of ones (rank) before position \c index, i.e. in the slice
    * [0, i).
    */
-  __device__ [[nodiscard]] size_t rank1(uint32_t const array_index,
-                                        size_t const index, uint32_t const t_id,
-                                        uint32_t const num_threads);
+  __device__ [[nodiscard]] size_t rank1(
+      uint32_t const array_index, size_t const index, uint32_t const t_id,
+      uint32_t const num_threads,
+      typename cub::WarpReduce<size_t>::TempStorage* temp_storage);
 
   /*!
    * \brief Get position of i-th zero or one. Starting from 1.

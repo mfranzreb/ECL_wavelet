@@ -181,7 +181,7 @@ __device__ [[nodiscard]] uint32_t BitArray::partialWord(
     uint8_t const bit_index) const noexcept {
   assert(array_index < num_arrays_);
   assert(index < sizeInWords(array_index));
-  assert(bit_index <= 32);
+  assert(bit_index <= sizeof(uint32_t) * 8);
   return word(array_index, index) & ((1UL << bit_index) - 1);
 }
 

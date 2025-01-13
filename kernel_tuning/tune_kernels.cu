@@ -9,6 +9,95 @@
 
 namespace ecl {
 
+void tune_accessKernel(std::string out_file, uint32_t const GPU_index) {
+  using T = uint16_t;
+  // Write column names to CSV
+  std::ofstream file(out_file);
+  file << "alphabet_size,num_blocks,num_threads,duration,use_shmem,GPU_name"
+       << std::endl;
+
+  std::vector<uint32_t> block_sizes;
+
+  struct cudaFuncAttributes funcAttrib;
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, accessKernel<T, true>));
+  uint32_t const max_size =
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  for (uint32_t i = kMinTPB; i <= max_size; i *= 2) {
+    block_sizes.push_back(i);
+  }
+
+  std::vector<T> alphabet_sizes{4, 50, 200, 2000, 10000, 60000};
+
+  struct cudaDeviceProp prop = getDeviceProperties();
+  size_t const data_size = prop.totalGlobalMem / 10;
+
+  size_t const num_queries = 10'000;
+  std::vector<size_t> queries(num_queries);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<size_t> dis(0, data_size - 1);
+  std::generate(queries.begin(), queries.end(), [&]() { return dis(gen); });
+
+  size_t* d_queries;
+  gpuErrchk(cudaMalloc(&d_queries, num_queries * sizeof(size_t)));
+  gpuErrchk(cudaMemcpy(d_queries, queries.data(), num_queries * sizeof(size_t),
+                       cudaMemcpyHostToDevice));
+
+  T* d_results;
+  gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(T)));
+
+  for (T alphabet_size : alphabet_sizes) {
+    std::vector<T> alphabet(alphabet_size);
+    std::iota(alphabet.begin(), alphabet.end(), 0);
+    auto data = generateRandomData<T>(alphabet, data_size);
+    WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), GPU_index);
+    uint32_t const min_warps = static_cast<uint32_t>(
+        (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount + WS - 1) /
+        WS);
+    for (uint32_t num_warps = min_warps; num_warps <= num_queries;
+         num_warps *= 2) {
+      for (uint32_t block_size : block_sizes) {
+        auto const [num_blocks, num_threads] =
+            getLaunchConfig(num_warps, block_size, block_size);
+
+        if (num_blocks == -1 or num_threads == -1) {
+          continue;
+        }
+        bool const use_shmem =
+            sizeof(size_t) * alphabet_size *
+                (prop.maxThreadsPerMultiProcessor / num_threads) <=
+            prop.sharedMemPerMultiprocessor;
+        uint8_t const num_iters = 5;
+        auto start = std::chrono::high_resolution_clock::now();
+        for (uint8_t i = 0; i < num_iters; ++i) {
+          if (use_shmem) {
+            accessKernel<T, true>
+                <<<num_blocks, num_threads, sizeof(size_t) * alphabet_size>>>(
+                    wt, d_queries, num_queries, d_results);
+          } else {
+            accessKernel<T, false><<<num_blocks, num_threads>>>(
+                wt, d_queries, num_queries, d_results);
+          }
+          kernelCheck();
+        }
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+                .count();
+
+        // Write to CSV
+        std::ofstream file(out_file, std::ios_base::app);
+        file << alphabet_size << "," << num_blocks << "," << num_threads << ","
+             << duration << "," << use_shmem << "," << prop.name << std::endl;
+        file.close();
+      }
+    }
+  }
+  gpuErrchk(cudaFree(d_queries));
+  gpuErrchk(cudaFree(d_results));
+}
+
 void tune_calculateL2EntriesKernel(std::string out_file,
                                    uint32_t const GPU_index) {
   checkWarpSize(GPU_index);
@@ -275,6 +364,8 @@ int main(int argc, char* argv[]) {
   auto const parent_dir = argv[1];
   auto const GPU_index = std::stoi(argv[2]);
   ecl::checkWarpSize(GPU_index);
+  ecl::tune_accessKernel(std::string(parent_dir) + "/accessKernel.csv",
+                         GPU_index);
   ecl::tune_calculateL2EntriesKernel(
       std::string(parent_dir) + "/calculateL2EntriesKernel.csv", GPU_index);
   ecl::tune_fillLevelKernel(std::string(parent_dir) + "/fillLevelKernel.csv");

@@ -223,6 +223,9 @@ __host__ T ceilLog2Host(T n) {
 }
 
 struct IdealConfigs {
+  uint32_t ideal_TPB_accessKernel = 0;
+  size_t ideal_tot_threads_accessKernel = 0;
+
   uint32_t ideal_TPB_calculateL2EntriesKernel = 0;
 
   uint32_t ideal_TPB_computeGlobalHistogramKernel = 0;

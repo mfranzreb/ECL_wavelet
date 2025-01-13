@@ -460,11 +460,25 @@ __host__ std::vector<T> WaveletTree<T>::access(
                      static_cast<uint32_t>(max_threads_per_SM /
                                            (max_shmem_per_SM / counts_size)))
           : kMinTPB;
-  // Make the minimum block size a multiple of WS
   min_block_size = ((min_block_size + WS - 1) / WS) * WS;
 
-  auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_indices, min_block_size, maxThreadsPerBlockAccess);
+  int num_blocks, threads_per_block;
+  IdealConfigs ideal_configs = getIdealConfigs(prop.name);
+  if (ideal_configs.ideal_TPB_accessKernel != 0) {
+    if (ideal_configs.ideal_TPB_accessKernel < min_block_size) {
+      std::tie(num_blocks, threads_per_block) =
+          getLaunchConfig(ideal_configs.ideal_tot_threads_accessKernel / WS,
+                          min_block_size, maxThreadsPerBlockAccess);
+    } else {
+      threads_per_block = ideal_configs.ideal_TPB_accessKernel;
+      num_blocks =
+          ideal_configs.ideal_tot_threads_accessKernel / threads_per_block;
+    }
+  } else {
+    // Make the minimum block size a multiple of WS
+    std::tie(num_blocks, threads_per_block) =
+        getLaunchConfig(num_indices, min_block_size, maxThreadsPerBlockAccess);
+  }
 
   // allocate space for results
   T* d_results;

@@ -7,6 +7,7 @@
 #include <utils.cuh>
 #include <wavelet_tree.cuh>
 
+#include "sdsl/wavelet_trees.hpp"
 #include "test_benchmark_utils.cuh"
 
 namespace ecl {
@@ -152,9 +153,42 @@ static void BM_NVBIO(benchmark::State& state) {
   }
 }
 
+template <typename T>
+static void BM_SDSL(benchmark::State& state) {
+  auto const data_size = state.range(0);
+  auto const alphabet_size = state.range(1);
+  auto const num_queries = state.range(2);
+
+  state.counters["param.data_size"] = data_size;
+  state.counters["param.alphabet_size"] = alphabet_size;
+  state.counters["param.num_queries"] = num_queries;
+
+  auto queries = generateRandomQueries(data_size, num_queries);
+
+  auto [alphabet, data] =
+      generateRandomAlphabetAndData<T>(alphabet_size, data_size, true);
+
+  // write data to file
+  std::ofstream data_file("data_file");
+  for (auto const& d : data) {
+    data_file << d;
+  }
+  data_file.close();
+
+  sdsl::wt_ap<> wt;
+  sdsl::construct(wt, "data_file", sizeof(T));
+
+  for (auto _ : state) {
+#pragma omp parallel for
+    for (auto const& query : queries) {
+      wt[query];
+    }
+  }
+}
+
 // For initializing CUDA
 BENCHMARK(BM_Access<uint8_t>)
-    ->Args({100, 4})
+    ->Args({100, 4, 1})
     ->Iterations(10)
     ->Unit(benchmark::kMillisecond);
 
@@ -184,4 +218,22 @@ BENCHMARK(BM_NVBIO)
                    {100, 1'000, 5'000, 10'000, 50'000, 100'000}})
     ->Iterations(5)
     ->Unit(benchmark::kMillisecond);
+
+BENCHMARK(BM_SDSL<uint8_t>)
+    ->ArgsProduct({{200'000'000, 500'000'000, 800'000'000, 1'000'000'000,
+                    1'500'000'000, 2'000'000'000},
+                   {4, 5, 24, 64, 100, 155, 256},
+                   {100, 1'000, 5'000, 10'000, 50'000, 100'000}})
+    ->Iterations(5)
+    ->Unit(benchmark::kMillisecond);
+
+// BENCHMARK(BM_SDSL<uint16_t>)
+//     ->ArgsProduct({{200'000'000, 500'000'000, 800'000'000, 1'000'000'000,
+//                     1'200'000'000},
+//                    {500, 1'000, 2'000, 4'000, 8'000, 16'000, 32'000,
+//                    64'000},
+//{100, 1'000, 5'000, 10'000, 50'000, 100'000}})
+//     ->Iterations(5)
+//     ->Unit(benchmark::kMillisecond);
+
 }  // namespace ecl

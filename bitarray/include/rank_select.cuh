@@ -1,6 +1,7 @@
 #pragma once
 #include <bit_array.cuh>
 #include <cstdint>
+#include <cub/warp/warp_reduce.cuh>
 
 namespace ecl {
 /*!

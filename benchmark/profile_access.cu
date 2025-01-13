@@ -1,3 +1,5 @@
+#include <cuda_profiler_api.h>
+
 #include <random>
 #include <wavelet_tree.cuh>
 
@@ -19,7 +21,9 @@ int main(int argc, char** argv) {
     data = ecl::generateRandomData<uint8_t>(alphabet, data_size);
     ecl::WaveletTree<uint8_t> wt(data.data(), data_size, std::move(alphabet),
                                  0);
+    cudaProfilerStart();
     wt.access(queries);
+    cudaProfilerStop();
   } else if (alphabet_size < std::numeric_limits<uint16_t>::max()) {
     std::vector<uint16_t> alphabet;
     std::vector<uint16_t> data;
@@ -28,7 +32,9 @@ int main(int argc, char** argv) {
     data = ecl::generateRandomData<uint16_t>(alphabet, data_size);
     ecl::WaveletTree<uint16_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
+    cudaProfilerStart();
     wt.access(queries);
+    cudaProfilerStop();
   } else {
     std::vector<uint32_t> alphabet;
     std::vector<uint32_t> data;
@@ -38,6 +44,8 @@ int main(int argc, char** argv) {
 
     ecl::WaveletTree<uint32_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
+    cudaProfilerStart();
     wt.access(queries);
+    cudaProfilerStop();
   }
 }

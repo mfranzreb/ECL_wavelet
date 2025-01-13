@@ -1082,14 +1082,18 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
     uint32_t char_end = alphabet_size;
     uint32_t start, pos;
     for (uint32_t l = 0; l < tree.getNumLevels(); ++l) {
-      if (char_end - char_start == 1) {
-        break;
-      }
       size_t char_counts;
       if constexpr (ShmemCounts) {
         char_counts = counts[char_start];
       } else {
         char_counts = tree.getCounts(char_start);
+      }
+      if (char_end - char_start < 3) {
+        if (char_end - char_start > 1 and tree.rank_select_.bit_array_.access(
+                                              l, char_counts + index) == true) {
+          char_start++;
+        }
+        break;
       }
       start = tree.rank_select_.rank0(l, char_counts, local_t_id, WS,
                                       &temp_storage[threadIdx.x / WS]);

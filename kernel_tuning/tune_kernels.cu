@@ -30,7 +30,7 @@ void tune_accessKernel(std::string out_file, uint32_t const GPU_index) {
   struct cudaDeviceProp prop = getDeviceProperties();
   size_t const data_size = prop.totalGlobalMem / 10;
 
-  size_t const num_queries = 1'000'000;
+  size_t const num_queries = 50'000;
   std::vector<size_t> queries(num_queries);
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -121,7 +121,7 @@ void tune_rankKernel(std::string out_file, uint32_t const GPU_index) {
   std::vector<T> alphabet(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0);
 
-  size_t const num_queries = 1'000'000;
+  size_t const num_queries = 50'000;
   std::vector<RankSelectQuery<T>> queries(num_queries);
   std::random_device rd;
   std::mt19937 gen(rd());

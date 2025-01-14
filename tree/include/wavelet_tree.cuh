@@ -443,7 +443,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, accessKernel<T, true>));
 
   auto maxThreadsPerBlockAccess =
-      std::max(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   size_t const num_indices = indices.size();
 
   size_t const counts_size = sizeof(size_t) * alphabet_size_;
@@ -524,7 +524,8 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::rank(
                      }));
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, rankKernel<T, true>));
-  int maxThreadsPerBlock = funcAttrib.maxThreadsPerBlock;
+  int maxThreadsPerBlock =
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   // launch kernel with 1 warp per index
   size_t const num_queries = queries.size();
 
@@ -545,8 +546,23 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::rank(
   // Make the minimum block size a multiple of WS
   min_block_size = ((min_block_size + WS - 1) / WS) * WS;
 
-  auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_queries, min_block_size, maxThreadsPerBlock);
+  int num_blocks, threads_per_block;
+  IdealConfigs ideal_configs = getIdealConfigs(prop.name);
+  if (ideal_configs.ideal_TPB_rankKernel != 0) {
+    if (ideal_configs.ideal_TPB_rankKernel < min_block_size) {
+      std::tie(num_blocks, threads_per_block) =
+          getLaunchConfig(ideal_configs.ideal_tot_threads_rankKernel / WS,
+                          min_block_size, maxThreadsPerBlock);
+    } else {
+      threads_per_block = ideal_configs.ideal_TPB_rankKernel;
+      num_blocks =
+          ideal_configs.ideal_tot_threads_rankKernel / threads_per_block;
+    }
+  } else {
+    // Make the minimum block size a multiple of WS
+    std::tie(num_blocks, threads_per_block) =
+        getLaunchConfig(num_queries, min_block_size, maxThreadsPerBlock);
+  }
 
   // allocate space for results
   size_t* d_results;
@@ -1152,9 +1168,11 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
 }
 
 template <typename T, bool ShmemCounts>
-__global__ void rankKernel(WaveletTree<T> tree,
-                           RankSelectQuery<T>* const queries,
-                           size_t const num_queries, size_t* const ranks) {
+__global__ LB(MAX_TPB,
+              MIN_BPM) void rankKernel(WaveletTree<T> tree,
+                                       RankSelectQuery<T>* const queries,
+                                       size_t const num_queries,
+                                       size_t* const ranks) {
   assert(blockDim.x % WS == 0);
   __shared__ typename cub::WarpReduce<size_t>::TempStorage temp_storage[2 * WS];
   extern __shared__ size_t counts[];

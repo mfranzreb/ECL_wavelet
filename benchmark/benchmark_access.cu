@@ -175,7 +175,7 @@ static void BM_SDSL(benchmark::State& state) {
   }
   data_file.close();
 
-  sdsl::wt_ap<> wt;
+  sdsl::wt_blcd<> wt;
   sdsl::construct(wt, "data_file", sizeof(T));
 
   for (auto _ : state) {

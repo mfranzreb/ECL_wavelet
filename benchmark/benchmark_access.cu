@@ -29,21 +29,6 @@ static void BM_Access(benchmark::State& state) {
   auto queries = generateRandomQueries(data_size, num_queries);
 
   auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);
-  // Memory usage
-  {
-    size_t max_memory_usage = 0;
-    std::atomic_bool done{false};
-    std::atomic_bool can_start{false};
-    std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                  std::ref(max_memory_usage));
-    while (not can_start) {
-      std::this_thread::yield();
-    }
-    auto results = wt.access(queries);
-    done = true;
-    t.join();
-    state.counters["memory_usage"] = max_memory_usage;
-  }
 
   for (auto _ : state) {
     auto results = wt.access(queries);

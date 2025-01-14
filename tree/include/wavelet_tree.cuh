@@ -444,23 +444,35 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
 
   auto maxThreadsPerBlockAccess =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
   size_t const num_indices = indices.size();
 
   size_t const counts_size = sizeof(size_t) * alphabet_size_;
 
   struct cudaDeviceProp prop = getDeviceProperties();
+  gpuErrchk(cudaFuncSetAttribute(
+      accessKernel<T, true>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
+
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
   auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
 
-  bool const use_shmem = counts_size * kMinBPM <= max_shmem_per_SM;
+  bool const use_shmem =
+      counts_size * kMinBPM <=
+      max_shmem_per_SM - kMinBPM * funcAttrib.sharedSizeBytes;
 
-  auto min_block_size =
-      use_shmem
-          ? std::max(kMinTPB,
-                     static_cast<uint32_t>(max_threads_per_SM /
-                                           (max_shmem_per_SM / counts_size)))
-          : kMinTPB;
-  min_block_size = ((min_block_size + WS - 1) / WS) * WS;
+  auto min_block_size = kMinTPB;
+  if (use_shmem) {
+    for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
+         block_size /= 2) {
+      auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
+      if (counts_size * blocks_per_sm >
+          max_shmem_per_SM - blocks_per_sm * funcAttrib.sharedSizeBytes) {
+        min_block_size = 2 * block_size;
+        break;
+      }
+    }
+  }
 
   int num_blocks, threads_per_block;
   IdealConfigs ideal_configs = getIdealConfigs(prop.name);
@@ -526,25 +538,35 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::rank(
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, rankKernel<T, true>));
   int maxThreadsPerBlock =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
   // launch kernel with 1 warp per index
   size_t const num_queries = queries.size();
 
   size_t const counts_size = sizeof(size_t) * alphabet_size_;
 
   struct cudaDeviceProp prop = getDeviceProperties();
+  gpuErrchk(cudaFuncSetAttribute(
+      rankKernel<T, true>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
   auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
 
-  bool const use_shmem = counts_size * kMinBPM <= max_shmem_per_SM;
+  bool const use_shmem =
+      counts_size * kMinBPM <=
+      max_shmem_per_SM - kMinBPM * funcAttrib.sharedSizeBytes;
 
-  auto min_block_size =
-      use_shmem
-          ? std::max(kMinTPB,
-                     static_cast<uint32_t>(max_threads_per_SM /
-                                           (max_shmem_per_SM / counts_size)))
-          : kMinTPB;
-  // Make the minimum block size a multiple of WS
-  min_block_size = ((min_block_size + WS - 1) / WS) * WS;
+  auto min_block_size = kMinTPB;
+  if (use_shmem) {
+    for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
+         block_size /= 2) {
+      auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
+      if (counts_size * blocks_per_sm >
+          max_shmem_per_SM - blocks_per_sm * funcAttrib.sharedSizeBytes) {
+        min_block_size = 2 * block_size;
+        break;
+      }
+    }
+  }
 
   int num_blocks, threads_per_block;
   IdealConfigs ideal_configs = getIdealConfigs(prop.name);
@@ -898,9 +920,9 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
 
   struct cudaDeviceProp prop = getDeviceProperties();
   if (level == 0) {
-    cudaFuncSetAttribute(fillLevelKernel<T, true>,
-                         cudaFuncAttributeMaxDynamicSharedMemorySize,
-                         prop.sharedMemPerBlockOptin);
+    gpuErrchk(cudaFuncSetAttribute(fillLevelKernel<T, true>,
+                                   cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                   prop.sharedMemPerBlockOptin));
   }
 
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;

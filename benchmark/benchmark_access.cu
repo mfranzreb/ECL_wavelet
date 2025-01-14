@@ -155,13 +155,14 @@ static void BM_SDSL(benchmark::State& state) {
 
   // write data to file
   std::ofstream data_file("data_file");
-  for (auto const& d : data) {
-    data_file << d;
-  }
+  data_file.write(reinterpret_cast<const char*>(data.data()),
+                  data.size() * sizeof(T));
   data_file.close();
 
   sdsl::wt_blcd<> wt;
   sdsl::construct(wt, "data_file", sizeof(T));
+  // delete file
+  std::remove("data_file");
 
   std::vector<size_t> results_sdsl(num_queries);
   for (auto _ : state) {

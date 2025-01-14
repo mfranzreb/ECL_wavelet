@@ -436,7 +436,7 @@ WaveletTree<T>::~WaveletTree() {
 }
 
 template <typename T>
-__host__ std::vector<T> WaveletTree<T>::access(
+__host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
     std::vector<size_t> const& indices) {
   // launch kernel with 1 warp per index
   struct cudaFuncAttributes funcAttrib;
@@ -516,7 +516,7 @@ __host__ std::vector<T> WaveletTree<T>::access(
 }
 
 template <typename T>
-__host__ std::vector<size_t> WaveletTree<T>::rank(
+__host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::rank(
     std::vector<RankSelectQuery<T>>& queries) {
   assert(std::all_of(queries.begin(), queries.end(),
                      [&](const RankSelectQuery<T>& s) {
@@ -569,7 +569,7 @@ __host__ std::vector<size_t> WaveletTree<T>::rank(
 }
 
 template <typename T>
-__host__ std::vector<size_t> WaveletTree<T>::select(
+__host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
     std::vector<RankSelectQuery<T>>& queries) {
   assert(std::all_of(queries.begin(), queries.end(),
                      [](const RankSelectQuery<T>& s) { return s.index_ > 0; }));

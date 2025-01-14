@@ -11,8 +11,6 @@ int main(int argc, char** argv) {
   auto const alphabet_size = std::stoul(argv[2]);
   auto const num_queries = std::stoul(argv[3]);
 
-  auto queries = ecl::generateRandomQueries(data_size, num_queries);
-
   if (alphabet_size < std::numeric_limits<uint8_t>::max()) {
     std::vector<uint8_t> alphabet;
     std::vector<uint8_t> data;
@@ -21,8 +19,17 @@ int main(int argc, char** argv) {
     data = ecl::generateRandomData<uint8_t>(alphabet, data_size);
     ecl::WaveletTree<uint8_t> wt(data.data(), data_size, std::move(alphabet),
                                  0);
+
+    std::vector<ecl::RankSelectQuery<uint8_t>> queries(num_queries);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<size_t> dis(0, data_size - 1);
+    std::uniform_int_distribution<uint8_t> dis2(0, alphabet_size - 1);
+    std::generate(queries.begin(), queries.end(), [&]() {
+      return ecl::RankSelectQuery<uint8_t>(dis(gen), dis2(gen));
+    });
     cudaProfilerStart();
-    auto results = wt.access(queries);
+    auto results = wt.rank(queries);
     cudaProfilerStop();
   } else if (alphabet_size < std::numeric_limits<uint16_t>::max()) {
     std::vector<uint16_t> alphabet;
@@ -32,8 +39,17 @@ int main(int argc, char** argv) {
     data = ecl::generateRandomData<uint16_t>(alphabet, data_size);
     ecl::WaveletTree<uint16_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
+
+    std::vector<ecl::RankSelectQuery<uint16_t>> queries(num_queries);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<size_t> dis(0, data_size - 1);
+    std::uniform_int_distribution<uint16_t> dis2(0, alphabet_size - 1);
+    std::generate(queries.begin(), queries.end(), [&]() {
+      return ecl::RankSelectQuery<uint16_t>(dis(gen), dis2(gen));
+    });
     cudaProfilerStart();
-    auto results = wt.access(queries);
+    auto results = wt.rank(queries);
     cudaProfilerStop();
   } else {
     std::vector<uint32_t> alphabet;
@@ -44,8 +60,17 @@ int main(int argc, char** argv) {
 
     ecl::WaveletTree<uint32_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
+
+    std::vector<ecl::RankSelectQuery<uint32_t>> queries(num_queries);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<size_t> dis(0, data_size - 1);
+    std::uniform_int_distribution<uint32_t> dis2(0, alphabet_size - 1);
+    std::generate(queries.begin(), queries.end(), [&]() {
+      return ecl::RankSelectQuery<uint32_t>(dis(gen), dis2(gen));
+    });
     cudaProfilerStart();
-    auto results = wt.access(queries);
+    auto results = wt.rank(queries);
     cudaProfilerStop();
   }
 }

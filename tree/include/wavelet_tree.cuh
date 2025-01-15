@@ -483,7 +483,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   if (ideal_configs.ideal_TPB_accessKernel != 0) {
     size_t const num_warps =
         std::min(ideal_configs.ideal_tot_threads_accessKernel / WS,
-                 (num_indices * WS) / kThreadsPerQuery);
+                 (num_indices * kThreadsPerQuery) / WS);
     if (ideal_configs.ideal_TPB_accessKernel < min_block_size) {
       std::tie(num_blocks, threads_per_block) =
           getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockAccess);
@@ -494,7 +494,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   } else {
     // Make the minimum block size a multiple of WS
     std::tie(num_blocks, threads_per_block) =
-        getLaunchConfig((num_indices * WS) / kThreadsPerQuery, min_block_size,
+        getLaunchConfig((num_indices * kThreadsPerQuery) / WS, min_block_size,
                         maxThreadsPerBlockAccess);
   }
 

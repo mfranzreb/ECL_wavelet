@@ -122,9 +122,11 @@ class RankSelect {
 
     result = cub::WarpReduce<size_t, NumThreads>(*temp_storage).Sum(result);
 
-#pragma warning(suppress 63 - D)
-    uint32_t const mask = ((1 << NumThreads) - 1)
-                          << (NumThreads * ((threadIdx.x % WS) / NumThreads));
+    uint32_t mask = ~0;
+    if constexpr (NumThreads < 32) {
+      mask = ((1 << NumThreads) - 1)
+             << (NumThreads * ((threadIdx.x % WS) / NumThreads));
+    }
     // communicate the result to all threads
     shareVar<size_t>(t_id == 0, result, mask);
 

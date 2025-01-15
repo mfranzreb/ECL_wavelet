@@ -230,53 +230,6 @@ __host__ RankSelect::~RankSelect() {
   }
 }
 
-__device__ [[nodiscard]] size_t RankSelect::rank0(
-    uint32_t const array_index, size_t const index, uint32_t const t_id,
-    uint32_t const num_threads,
-    typename cub::WarpReduce<size_t>::TempStorage* temp_storage) {
-  return index - rank1(array_index, index, t_id, num_threads, temp_storage);
-}
-
-__device__ [[nodiscard]] size_t RankSelect::rank1(
-    uint32_t const array_index, size_t const index, uint32_t const t_id,
-    uint32_t const num_threads,
-    typename cub::WarpReduce<size_t>::TempStorage* temp_storage) {
-  assert(array_index < bit_array_.numArrays());
-  assert(index < bit_array_.size(array_index));
-  if (index == 0) {
-    return 0;
-  }
-  size_t const l1_pos = index / RankSelectConfig::L1_BIT_SIZE;
-  size_t const l2_pos =
-      (index % RankSelectConfig::L1_BIT_SIZE) / RankSelectConfig::L2_BIT_SIZE;
-  // Only first thread in the local block stores the result
-  size_t result =
-      (d_l1_indices_[d_l1_offsets_[array_index] + l1_pos] +
-       d_l2_indices_[d_l2_offsets_[array_index] +
-                     l1_pos * RankSelectConfig::NUM_L2_PER_L1 + l2_pos]) *
-      (t_id == 0);
-  size_t const start_word = l1_pos * RankSelectConfig::L1_WORD_SIZE +
-                            l2_pos * RankSelectConfig::L2_WORD_SIZE;
-  size_t const end_word = index / (sizeof(uint32_t) * 8);
-
-  for (size_t i = start_word + t_id; i <= end_word; i += num_threads) {
-    if (i == end_word) {
-      // Only consider bits up to the index.
-      result += __popc(bit_array_.partialWord(array_index, i,
-                                              index % (sizeof(uint32_t) * 8)));
-    } else {
-      result += __popc(bit_array_.word(array_index, i));
-    }
-  }
-
-  result = cub::WarpReduce<size_t>(*temp_storage).Sum(result);
-
-  // communicate the result to all threads
-  shareVar<size_t>(t_id == 0, result, ~0);
-
-  return result;
-}
-
 template <uint32_t Value>
 __device__ [[nodiscard]] size_t RankSelect::select(uint32_t const array_index,
                                                    size_t i,
@@ -529,19 +482,6 @@ __device__ void RankSelect::writeNumLastL2Blocks(uint32_t const array_index,
                                                  uint8_t const value) noexcept {
   assert(array_index < bit_array_.numArrays());
   d_num_last_l2_blocks_[array_index] = value;
-}
-
-template <typename T>
-__device__ void RankSelect::shareVar(bool condition, T& var,
-                                     uint32_t const mask) {
-  static_assert(std::is_integral<T>::value or std::is_floating_point<T>::value,
-                "T must be an integral or floating-point type.");
-  __syncwarp(mask);
-  uint32_t src_thread = __ballot_sync(mask, condition);
-  // Get the value from the first thread that fulfills the condition
-  src_thread = __ffs(src_thread) - 1;
-  __syncwarp(mask);
-  var = __shfl_sync(mask, var, src_thread);
 }
 
 template <uint32_t Value>

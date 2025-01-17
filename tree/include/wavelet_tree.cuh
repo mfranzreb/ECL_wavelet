@@ -448,6 +448,9 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   auto maxThreadsPerBlockAccess =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
 
+  maxThreadsPerBlockAccess =
+      findLargestDivisor(kMaxTPB, maxThreadsPerBlockAccess);
+
   size_t const num_indices = indices.size();
 
   size_t const counts_size = sizeof(size_t) * alphabet_size_;
@@ -538,8 +541,10 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::rank(
                      }));
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, rankKernel<T, true>));
-  int maxThreadsPerBlock =
+  uint32_t maxThreadsPerBlock =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  maxThreadsPerBlock = findLargestDivisor(kMaxTPB, maxThreadsPerBlock);
 
   // launch kernel with 1 warp per index
   size_t const num_queries = queries.size();
@@ -634,7 +639,10 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
                      [](const RankSelectQuery<T>& s) { return s.index_ > 0; }));
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, selectKernel<T>));
-  int maxThreadsPerBlock = funcAttrib.maxThreadsPerBlock;
+  uint32_t maxThreadsPerBlock =
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  maxThreadsPerBlock = findLargestDivisor(kMaxTPB, maxThreadsPerBlock);
   // launch kernel with 1 warp per index
   size_t const num_queries = queries.size();
   auto [num_blocks, threads_per_block] =
@@ -814,8 +822,11 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
         ideal_configs.ideal_TPB_computeGlobalHistogramKernel,
         ideal_configs.ideal_TPB_computeGlobalHistogramKernel);
   } else {
-    int const maxThreadsPerBlockHist =
+    auto maxThreadsPerBlockHist =
         std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+    maxThreadsPerBlockHist =
+        findLargestDivisor(kMaxTPB, maxThreadsPerBlockHist);
+
     auto const hists_per_SM = max_shmem_per_SM / hist_size;
 
     auto min_block_size =
@@ -915,6 +926,9 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
   maxThreadsPerBlockFillLevel =
       std::min(maxThreadsPerBlockFillLevel,
                static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  maxThreadsPerBlockFillLevel =
+      findLargestDivisor(kMaxTPB, maxThreadsPerBlockFillLevel);
 
   struct cudaDeviceProp prop = getDeviceProperties();
   if (level == 0) {

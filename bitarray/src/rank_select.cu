@@ -119,8 +119,10 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
 
-  auto const max_block_size =
+  auto max_block_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  max_block_size = findLargestDivisor(kMaxTPB, max_block_size);
 
   auto const prop = getDeviceProperties();
 

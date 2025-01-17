@@ -93,6 +93,7 @@
     "syncstream": "cpp",
     "valarray": "cpp",
     "hash_map": "cpp",
-    "__config": "cpp"
+    "__config": "cpp",
+    "__nullptr": "cpp"
   }
 }

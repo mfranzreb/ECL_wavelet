@@ -64,8 +64,10 @@ __host__ bool computeGlobalHistogram(size_t const data_size, T* d_data,
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
                                   computeGlobalHistogramKernel<T, true>));
 
-  int const maxThreadsPerBlockHist =
+  uint32_t maxThreadsPerBlockHist =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  maxThreadsPerBlockHist = findLargestDivisor(kMaxTPB, maxThreadsPerBlockHist);
 
   struct cudaDeviceProp prop = getDeviceProperties();
 

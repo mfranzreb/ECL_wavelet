@@ -14,8 +14,8 @@
 // __CUDA_ARCH__ is not defined in host code
 #if defined(__CUDA_ARCH__)
 #if __CUDA_ARCH__ > 800 && __CUDA_ARCH__ < 900
-#define MAX_TPB 512
-#define MIN_BPM 3
+#define MAX_TPB 768
+#define MIN_BPM 2
 #elif __CUDA_ARCH__ == 750
 #define MAX_TPB 1024
 #define MIN_BPM 1
@@ -239,4 +239,17 @@ struct IdealConfigs {
 };
 
 __host__ IdealConfigs &getIdealConfigs(const std::string &GPU_name);
+
+/*!
+ * \brief Find the largest divisor of \c n that is smaller than \c divisor.
+ * \tparam T Type of the number to find the divisor for.
+ * \param n Number to find the divisor for.
+ * \param divisor Divisor to start from.
+ * \return Largest divisor of \c n that is smaller than \c divisor.
+ */
+template <typename T>
+__host__ T findLargestDivisor(T const n, T const divisor) {
+  if (divisor == 0) return 1;
+  return divisor - n % divisor;
+}
 }  // namespace ecl

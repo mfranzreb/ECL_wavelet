@@ -20,8 +20,10 @@ void tune_accessKernel(std::string out_file, uint32_t const GPU_index) {
 
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, accessKernel<T, true>));
-  uint32_t const max_size =
+  uint32_t max_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  max_size = findLargestDivisor(kMaxTPB, max_size);
 
   for (uint32_t i = kMinTPB; i <= max_size; i *= 2) {
     block_sizes.push_back(i);
@@ -107,8 +109,10 @@ void tune_rankKernel(std::string out_file, uint32_t const GPU_index) {
 
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, rankKernel<T, true>));
-  uint32_t const max_size =
+  uint32_t max_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  max_size = findLargestDivisor(kMaxTPB, max_size);
 
   for (uint32_t i = kMinTPB; i <= max_size; i *= 2) {
     block_sizes.push_back(i);
@@ -201,8 +205,10 @@ void tune_calculateL2EntriesKernel(std::string out_file,
 
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
-  uint32_t const max_size =
+  uint32_t max_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  max_size = findLargestDivisor(kMaxTPB, max_size);
 
   for (uint32_t i = kMinTPB; i <= max_size; i *= 2) {
     block_sizes.push_back(i);
@@ -259,9 +265,12 @@ void tune_computeGlobalHistogramKernel(std::string out_file,
       &funcAttrib, computeGlobalHistogramKernel<T, true, true, true>));
   // Using biggest size possible, since it allows for a higher bound on
   // shmem usage
-  // TODO: make sure BS is max occpunacy
-  uint32_t const block_size =
+
+  uint32_t block_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  // Make block_size a divisor of kMaxTPB
+  block_size = findLargestDivisor(kMaxTPB, block_size);
 
   // Test also with low occupancy
   size_t min_warps = static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
@@ -366,6 +375,8 @@ void tune_fillLevelKernel(std::string out_file) {
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T, false>));
   max_size =
       std::min(max_size, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+  max_size = findLargestDivisor(kMaxTPB, max_size);
 
   for (uint32_t i = kMinTPB; i <= max_size; i *= 2) {
     block_sizes.push_back(i);

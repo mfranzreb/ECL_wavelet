@@ -44,7 +44,6 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
   if constexpr (UseShmem) {
     __syncthreads();
     // Reduce shared histograms to first one
-    // TODO: Could maybe be improved
     for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
       size_t sum = shared_hist[i];
       for (size_t j = 1; j < hists_per_block; ++j) {

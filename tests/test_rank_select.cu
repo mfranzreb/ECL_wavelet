@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cub/warp/warp_reduce.cuh>
 #include <fstream>
 #include <random>
 #include <vector>
@@ -51,20 +50,18 @@ __global__ void writeWordKernel(BitArray bit_array, size_t array_index,
   bit_array.writeWord(array_index, index, value);
 }
 
+template <int NumThreads>
 __global__ void rank0Kernel(RankSelect rank_select, uint32_t array_index,
                             size_t index, size_t *output) {
-  assert(blockDim.x == WS);
-  __shared__ typename cub::WarpReduce<size_t, WS>::TempStorage temp_storage;
-  *output =
-      rank_select.rank0<WS>(array_index, index, threadIdx.x, &temp_storage);
+  assert(blockDim.x == NumThreads);
+  *output = rank_select.rank0<NumThreads>(array_index, index);
 }
 
+template <int NumThreads>
 __global__ void rank1Kernel(RankSelect rank_select, uint32_t array_index,
                             size_t index, size_t *output) {
-  assert(blockDim.x == WS);
-  __shared__ typename cub::WarpReduce<size_t, WS>::TempStorage temp_storage;
-  *output =
-      rank_select.rank1<WS>(array_index, index, threadIdx.x, &temp_storage);
+  assert(blockDim.x == NumThreads);
+  *output = rank_select.rank1<NumThreads>(array_index, index);
 }
 
 __global__ void select0Kernel(RankSelect rank_select, uint32_t array_index,
@@ -444,64 +441,78 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
       std::generate(random_positions.begin(), random_positions.end(),
                     [&]() { return dis(gen); });
 
-      for (auto const &pos : random_positions) {
-        if (val == true) {
-          rank1Kernel<<<1, 32>>>(rank_select, i, pos, result);
-          kernelCheck();
-          EXPECT_EQ(*result, pos);
-          select1Kernel<<<1, 32>>>(rank_select, i, pos, result);
-          kernelCheck();
-          EXPECT_EQ(*result, pos - 1);
-        } else {
-          rank0Kernel<<<1, 32>>>(rank_select, i, pos, result);
-          kernelCheck();
-          EXPECT_EQ(*result, pos);
-          select0Kernel<<<1, 32>>>(rank_select, i, pos, result);
-          kernelCheck();
-          EXPECT_EQ(*result, pos - 1);
+      auto rank_tests = [&]<int NumThreads>() {
+        for (auto const &pos : random_positions) {
+          if (val == true) {
+            rank1Kernel<NumThreads>
+                <<<1, NumThreads>>>(rank_select, i, pos, result);
+            kernelCheck();
+            EXPECT_EQ(*result, pos);
+            select1Kernel<<<1, 32>>>(rank_select, i, pos, result);
+            kernelCheck();
+            EXPECT_EQ(*result, pos - 1);
+          } else {
+            rank0Kernel<NumThreads>
+                <<<1, NumThreads>>>(rank_select, i, pos, result);
+            kernelCheck();
+            EXPECT_EQ(*result, pos);
+            select0Kernel<<<1, 32>>>(rank_select, i, pos, result);
+            kernelCheck();
+            EXPECT_EQ(*result, pos - 1);
+          }
         }
-      }
-      if (val == true) {
-        rank1Kernel<<<1, 32>>>(rank_select, i, 0, result);
-        kernelCheck();
-        EXPECT_EQ(*result, 0);
-        rank1Kernel<<<1, 32>>>(rank_select, i, bit_size - 1, result);
-        kernelCheck();
-        EXPECT_EQ(*result, bit_size - 1);
-        select1Kernel<<<1, 32>>>(rank_select, i, 1, result);
-        kernelCheck();
-        EXPECT_EQ(*result, 0);
-        select1Kernel<<<1, 32>>>(rank_select, i, bit_size, result);
-        kernelCheck();
-        EXPECT_EQ(*result, bit_size - 1);
+        if (val == true) {
+          rank1Kernel<NumThreads><<<1, NumThreads>>>(rank_select, i, 0, result);
+          kernelCheck();
+          EXPECT_EQ(*result, 0);
+          rank1Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
+          kernelCheck();
+          EXPECT_EQ(*result, bit_size - 1);
+          select1Kernel<<<1, 32>>>(rank_select, i, 1, result);
+          kernelCheck();
+          EXPECT_EQ(*result, 0);
+          select1Kernel<<<1, 32>>>(rank_select, i, bit_size, result);
+          kernelCheck();
+          EXPECT_EQ(*result, bit_size - 1);
 
-        rank0Kernel<<<1, 32>>>(rank_select, i, bit_size - 1, result);
-        kernelCheck();
-        EXPECT_EQ(*result, 0);
-        select0Kernel<<<1, 32>>>(rank_select, i, 1, result);
-        kernelCheck();
-        EXPECT_EQ(*result, bit_size);
-      } else {
-        rank0Kernel<<<1, 32>>>(rank_select, i, 0, result);
-        kernelCheck();
-        EXPECT_EQ(*result, 0);
-        rank0Kernel<<<1, 32>>>(rank_select, i, bit_size - 1, result);
-        kernelCheck();
-        EXPECT_EQ(*result, bit_size - 1);
-        select0Kernel<<<1, 32>>>(rank_select, i, 1, result);
-        kernelCheck();
-        EXPECT_EQ(*result, 0);
-        select0Kernel<<<1, 32>>>(rank_select, i, bit_size, result);
-        kernelCheck();
-        EXPECT_EQ(*result, bit_size - 1);
+          rank0Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
+          kernelCheck();
+          EXPECT_EQ(*result, 0);
+          select0Kernel<<<1, 32>>>(rank_select, i, 1, result);
+          kernelCheck();
+          EXPECT_EQ(*result, bit_size);
+        } else {
+          rank0Kernel<NumThreads><<<1, NumThreads>>>(rank_select, i, 0, result);
+          kernelCheck();
+          EXPECT_EQ(*result, 0);
+          rank0Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
+          kernelCheck();
+          EXPECT_EQ(*result, bit_size - 1);
+          select0Kernel<<<1, 32>>>(rank_select, i, 1, result);
+          kernelCheck();
+          EXPECT_EQ(*result, 0);
+          select0Kernel<<<1, 32>>>(rank_select, i, bit_size, result);
+          kernelCheck();
+          EXPECT_EQ(*result, bit_size - 1);
 
-        rank1Kernel<<<1, 32>>>(rank_select, i, bit_size - 1, result);
-        kernelCheck();
-        EXPECT_EQ(*result, 0);
-        select1Kernel<<<1, 32>>>(rank_select, i, 1, result);
-        kernelCheck();
-        EXPECT_EQ(*result, bit_size);
-      }
+          rank1Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
+          kernelCheck();
+          EXPECT_EQ(*result, 0);
+          select1Kernel<<<1, 32>>>(rank_select, i, 1, result);
+          kernelCheck();
+          EXPECT_EQ(*result, bit_size);
+        }
+      };
+      rank_tests.operator()<32>();
+      rank_tests.operator()<16>();
+      rank_tests.operator()<8>();
+      rank_tests.operator()<4>();
+      rank_tests.operator()<2>();
+      rank_tests.operator()<1>();
     }
   }
 
@@ -555,7 +566,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
                   [&]() { return dis(gen); });
 
     for (auto const &pos : random_positions) {
-      rank1Kernel<<<1, 32>>>(rank_select, i, pos, result);
+      rank1Kernel<WS><<<1, WS>>>(rank_select, i, pos, result);
       int8_t set_bits_in_last_word = pos % 32 - 16;
       size_t num_words = pos / 32;
       size_t rank1 = 32 * num_words / 2 +
@@ -573,7 +584,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
       kernelCheck();
       EXPECT_EQ(*result, select1);
 
-      rank0Kernel<<<1, 32>>>(rank_select, i, pos, result);
+      rank0Kernel<WS><<<1, WS>>>(rank_select, i, pos, result);
       size_t rank0 = 32 * num_words / 2 + std::min(16UL, pos % 32);
       assert(rank0 == helpers[i].rank0(pos));
       kernelCheck();
@@ -637,30 +648,41 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
   uint32_t num_queries = 500;
   RankSelect rank_select(std::move(bit_array), 0);
   for (uint32_t i = 0; i < num_arrays; ++i) {
-    for (uint32_t j = 0; j < num_queries; ++j) {
-      uint32_t index = random_nums[j] % sizes[i];
-      rank0Kernel<<<1, 32>>>(rank_select, i, index, result);
-      auto rank0 = helpers[i].rank0(index);
-      kernelCheck();
-      EXPECT_EQ(*result, rank0);
-      rank1Kernel<<<1, 32>>>(rank_select, i, index, result);
-      auto rank1 = helpers[i].rank1(index);
-      kernelCheck();
-      EXPECT_EQ(*result, rank1);
-      if (rank0 == 0 or rank1 == 0) continue;
-      if (*result != rank1) {
-        rank1Kernel<<<1, 32>>>(rank_select, i, index, result);
+    auto tests = [&]<int NumThreads>() {
+      for (uint32_t j = 0; j < num_queries; ++j) {
+        uint32_t index = random_nums[j] % sizes[i];
+        rank0Kernel<NumThreads>
+            <<<1, NumThreads>>>(rank_select, i, index, result);
+        auto rank0 = helpers[i].rank0(index);
         kernelCheck();
+        EXPECT_EQ(*result, rank0);
+        rank1Kernel<NumThreads>
+            <<<1, NumThreads>>>(rank_select, i, index, result);
+        auto rank1 = helpers[i].rank1(index);
+        kernelCheck();
+        EXPECT_EQ(*result, rank1);
+        if (rank0 == 0 or rank1 == 0) continue;
+        if (*result != rank1) {
+          rank1Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, index, result);
+          kernelCheck();
+        }
+        select1Kernel<<<1, 32>>>(rank_select, i, rank1, result);
+        auto select1 = helpers[i].select1(rank1);
+        kernelCheck();
+        EXPECT_EQ(*result, select1);
+        select0Kernel<<<1, 32>>>(rank_select, i, rank0, result);
+        auto select0 = helpers[i].select0(rank0);
+        kernelCheck();
+        EXPECT_EQ(*result, select0);
       }
-      select1Kernel<<<1, 32>>>(rank_select, i, rank1, result);
-      auto select1 = helpers[i].select1(rank1);
-      kernelCheck();
-      EXPECT_EQ(*result, select1);
-      select0Kernel<<<1, 32>>>(rank_select, i, rank0, result);
-      auto select0 = helpers[i].select0(rank0);
-      kernelCheck();
-      EXPECT_EQ(*result, select0);
-    }
+    };
+    tests.operator()<32>();
+    tests.operator()<16>();
+    tests.operator()<8>();
+    tests.operator()<4>();
+    tests.operator()<2>();
+    tests.operator()<1>();
   }
 }
 

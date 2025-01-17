@@ -259,6 +259,7 @@ void tune_computeGlobalHistogramKernel(std::string out_file,
       &funcAttrib, computeGlobalHistogramKernel<T, true, true, true>));
   // Using biggest size possible, since it allows for a higher bound on
   // shmem usage
+  // TODO: make sure BS is max occpunacy
   uint32_t const block_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
 

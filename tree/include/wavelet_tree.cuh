@@ -8,7 +8,6 @@
 #include <cmath>
 #include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_scan.cuh>
-#include <cub/warp/warp_reduce.cuh>
 #include <numeric>
 #include <vector>
 
@@ -97,6 +96,7 @@ class WaveletTree {
    * \param indices Indices of the symbols to be accessed.
    * \return Vector of symbols.
    */
+  template <int NumThreads = 32>
   __host__ std::vector<T> access(std::vector<size_t> const& indices);
 
   /*!
@@ -437,14 +437,13 @@ WaveletTree<T>::~WaveletTree() {
 
 // TODO: possible bug
 template <typename T>
+template <int NumThreads>
 __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
     std::vector<size_t> const& indices) {
-  uint8_t constexpr kThreadsPerQuery = WS;
-
   // launch kernel with 1 warp per index
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
-                                  accessKernel<T, true, kThreadsPerQuery>));
+  gpuErrchk(
+      cudaFuncGetAttributes(&funcAttrib, accessKernel<T, true, NumThreads>));
 
   auto maxThreadsPerBlockAccess =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
@@ -454,24 +453,20 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   size_t const counts_size = sizeof(size_t) * alphabet_size_;
 
   struct cudaDeviceProp prop = getDeviceProperties();
-  gpuErrchk(cudaFuncSetAttribute(
-      accessKernel<T, true, kThreadsPerQuery>,
-      cudaFuncAttributeMaxDynamicSharedMemorySize,
-      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
+  gpuErrchk(cudaFuncSetAttribute(accessKernel<T, true, NumThreads>,
+                                 cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                 prop.sharedMemPerBlockOptin));
 
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
 
-  bool const use_shmem =
-      counts_size * kMinBPM <=
-      max_shmem_per_SM - kMinBPM * funcAttrib.sharedSizeBytes;
+  bool const use_shmem = counts_size * kMinBPM <= max_shmem_per_SM;
 
   auto min_block_size = kMinTPB;
   if (use_shmem) {
     for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
          block_size /= 2) {
       auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
-      if (counts_size * blocks_per_sm >
-          max_shmem_per_SM - blocks_per_sm * funcAttrib.sharedSizeBytes) {
+      if (counts_size * blocks_per_sm > max_shmem_per_SM) {
         min_block_size = 2 * block_size;
         break;
       }
@@ -483,7 +478,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   if (ideal_configs.ideal_TPB_accessKernel != 0) {
     size_t const num_warps =
         std::min(ideal_configs.ideal_tot_threads_accessKernel / WS,
-                 (num_indices * kThreadsPerQuery) / WS);
+                 (num_indices * NumThreads) / WS);
     if (ideal_configs.ideal_TPB_accessKernel < min_block_size) {
       std::tie(num_blocks, threads_per_block) =
           getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockAccess);
@@ -493,9 +488,9 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
     }
   } else {
     // Make the minimum block size a multiple of WS
-    std::tie(num_blocks, threads_per_block) =
-        getLaunchConfig((num_indices * kThreadsPerQuery) / WS, min_block_size,
-                        maxThreadsPerBlockAccess);
+    std::tie(num_blocks, threads_per_block) = getLaunchConfig(
+        (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount) / WS,
+        min_block_size, maxThreadsPerBlockAccess);
   }
 
   // allocate space for results
@@ -509,11 +504,11 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
                        cudaMemcpyHostToDevice));
 
   if (use_shmem) {
-    accessKernel<T, true, kThreadsPerQuery>
+    accessKernel<T, true, NumThreads>
         <<<num_blocks, threads_per_block, counts_size>>>(
             *this, d_indices, num_indices, d_results);
   } else {
-    accessKernel<T, false, kThreadsPerQuery><<<num_blocks, threads_per_block>>>(
+    accessKernel<T, false, NumThreads><<<num_blocks, threads_per_block>>>(
         *this, d_indices, num_indices, d_results);
   }
   kernelCheck();
@@ -552,22 +547,19 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::rank(
   size_t const counts_size = sizeof(size_t) * alphabet_size_;
 
   struct cudaDeviceProp prop = getDeviceProperties();
-  gpuErrchk(cudaFuncSetAttribute(
-      rankKernel<T, true>, cudaFuncAttributeMaxDynamicSharedMemorySize,
-      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
+  gpuErrchk(cudaFuncSetAttribute(rankKernel<T, true>,
+                                 cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                 prop.sharedMemPerBlockOptin));
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
 
-  bool const use_shmem =
-      counts_size * kMinBPM <=
-      max_shmem_per_SM - kMinBPM * funcAttrib.sharedSizeBytes;
+  bool const use_shmem = counts_size * kMinBPM <= max_shmem_per_SM;
 
   auto min_block_size = kMinTPB;
   if (use_shmem) {
     for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
          block_size /= 2) {
       auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
-      if (counts_size * blocks_per_sm >
-          max_shmem_per_SM - blocks_per_sm * funcAttrib.sharedSizeBytes) {
+      if (counts_size * blocks_per_sm > max_shmem_per_SM) {
         min_block_size = 2 * block_size;
         break;
       }
@@ -1139,9 +1131,6 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
                                                   size_t const num_indices,
                                                   T* results) {
   assert(blockDim.x % WS == 0);
-  //? COrrect?
-  __shared__ typename cub::WarpReduce<size_t, ThreadsPerQuery>::TempStorage
-      temp_storage[1024 / ThreadsPerQuery];
   extern __shared__ size_t counts[];
 
   uint32_t const alphabet_size = tree.getAlphabetSize();
@@ -1178,12 +1167,8 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
         }
         break;
       }
-      start = tree.rank_select_.rank0<ThreadsPerQuery>(
-          l, char_counts, local_t_id,
-          &temp_storage[threadIdx.x / ThreadsPerQuery]);
-      pos = tree.rank_select_.rank0<ThreadsPerQuery>(
-          l, char_counts + index, local_t_id,
-          &temp_storage[threadIdx.x / ThreadsPerQuery]);
+      start = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts);
+      pos = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts + index);
       if (tree.rank_select_.bit_array_.access(l, char_counts + index) ==
           false) {
         index = pos - start;
@@ -1206,7 +1191,6 @@ __global__ LB(MAX_TPB,
                                        size_t const num_queries,
                                        size_t* const ranks) {
   assert(blockDim.x % WS == 0);
-  __shared__ typename cub::WarpReduce<size_t, WS>::TempStorage temp_storage[WS];
   extern __shared__ size_t counts[];
 
   uint32_t const alphabet_size = tree.getAlphabetSize();
@@ -1239,11 +1223,8 @@ __global__ LB(MAX_TPB,
       } else {
         char_counts = tree.getCounts(char_start);
       }
-      start = tree.rank_select_.rank0<WS>(l, char_counts, local_t_id,
-                                          &temp_storage[threadIdx.x / WS]);
-      pos =
-          tree.rank_select_.rank0<WS>(l, char_counts + query.index_, local_t_id,
-                                      &temp_storage[threadIdx.x / WS]);
+      start = tree.rank_select_.rank0<WS>(l, char_counts);
+      pos = tree.rank_select_.rank0<WS>(l, char_counts + query.index_);
       char_split = char_start + getPrevPowTwo(char_end - char_start);
       if (query.symbol_ < char_split) {
         query.index_ = pos - start;
@@ -1281,7 +1262,6 @@ __global__ void selectKernel(WaveletTree<T> tree,
                              RankSelectQuery<T>* const queries,
                              size_t const num_queries, size_t* const results) {
   assert(blockDim.x % WS == 0);
-  __shared__ typename cub::WarpReduce<size_t, WS>::TempStorage temp_storage[WS];
   uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
   uint32_t const num_warps = gridDim.x * blockDim.x / WS;
   uint32_t const local_t_id = threadIdx.x % WS;
@@ -1308,16 +1288,12 @@ __global__ void selectKernel(WaveletTree<T> tree,
 
         char_start = getPrevCharStart(char_start, is_rightmost_child,
                                       alphabet_size, l, code.len_);
-        start = tree.rank_select_.rank1<WS>(l, tree.getCounts(char_start),
-                                            local_t_id,
-                                            &temp_storage[threadIdx.x / WS]);
+        start = tree.rank_select_.rank1<WS>(l, tree.getCounts(char_start));
         query.index_ = tree.rank_select_.select<1>(l, start + query.index_,
                                                    local_t_id, WS) +
                        1;
       } else {
-        start = tree.rank_select_.rank0<WS>(l, tree.getCounts(char_start),
-                                            local_t_id,
-                                            &temp_storage[threadIdx.x / WS]);
+        start = tree.rank_select_.rank0<WS>(l, tree.getCounts(char_start));
         query.index_ = tree.rank_select_.select<0>(l, start + query.index_,
                                                    local_t_id, WS) +
                        1;

@@ -76,6 +76,16 @@ __global__ void BAaccessKernel(BitArray bit_array, size_t array_index,
   *output = static_cast<T>(bit_array.access(array_index, index));
 }
 
+template <typename T, int NumThreads>
+__host__ void compareAccessResults(WaveletTree<T>& wt,
+                                   std::vector<size_t>& indices,
+                                   std::vector<T> const& data) {
+  auto const results = wt.template access<NumThreads>(indices);
+  for (size_t i = 0; i < indices.size(); ++i) {
+    EXPECT_EQ(data[indices[i]], results[i]);
+  }
+}
+
 using MyTypes = testing::Types<uint8_t, uint16_t, uint32_t, uint64_t>;
 TYPED_TEST_SUITE(WaveletTreeTestFixture, MyTypes);
 
@@ -398,10 +408,12 @@ TYPED_TEST(WaveletTreeTestFixture, access) {
 
   std::vector<size_t> indices(data.size());
   std::iota(indices.begin(), indices.end(), 0);
-  auto results = wt.access(indices);
-  for (size_t i = 0; i < data.size(); ++i) {
-    EXPECT_EQ(data[indices[i]], results[i]);
-  }
+  compareAccessResults<TypeParam, 1>(wt, indices, data);
+  compareAccessResults<TypeParam, 2>(wt, indices, data);
+  compareAccessResults<TypeParam, 4>(wt, indices, data);
+  compareAccessResults<TypeParam, 8>(wt, indices, data);
+  compareAccessResults<TypeParam, 16>(wt, indices, data);
+  compareAccessResults<TypeParam, 32>(wt, indices, data);
 }
 
 TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
@@ -425,10 +437,12 @@ TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
     std::uniform_int_distribution<size_t> dis(0, data_size - 1);
     std::generate(indices.begin(), indices.end(), [&]() { return dis(gen); });
 
-    auto results = wt.access(indices);
-    for (size_t j = 0; j < indices.size(); ++j) {
-      EXPECT_EQ(data[indices[j]], results[j]);
-    }
+    compareAccessResults<TypeParam, 1>(wt, indices, data);
+    compareAccessResults<TypeParam, 2>(wt, indices, data);
+    compareAccessResults<TypeParam, 4>(wt, indices, data);
+    compareAccessResults<TypeParam, 8>(wt, indices, data);
+    compareAccessResults<TypeParam, 16>(wt, indices, data);
+    compareAccessResults<TypeParam, 32>(wt, indices, data);
   }
 }
 

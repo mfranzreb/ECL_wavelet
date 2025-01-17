@@ -22,7 +22,12 @@ int main(int argc, char** argv) {
     ecl::WaveletTree<uint8_t> wt(data.data(), data_size, std::move(alphabet),
                                  0);
     cudaProfilerStart();
-    auto results = wt.access(queries);
+    auto results = wt.template access<1>(queries);
+    results = wt.template access<2>(queries);
+    results = wt.template access<4>(queries);
+    results = wt.template access<8>(queries);
+    results = wt.template access<16>(queries);
+    results = wt.template access<32>(queries);
     cudaProfilerStop();
   } else if (alphabet_size < std::numeric_limits<uint16_t>::max()) {
     std::vector<uint16_t> alphabet;
@@ -33,7 +38,12 @@ int main(int argc, char** argv) {
     ecl::WaveletTree<uint16_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
     cudaProfilerStart();
-    auto results = wt.access(queries);
+    auto results = wt.template access<1>(queries);
+    results = wt.template access<2>(queries);
+    results = wt.template access<4>(queries);
+    results = wt.template access<8>(queries);
+    results = wt.template access<16>(queries);
+    results = wt.template access<32>(queries);
     cudaProfilerStop();
   } else {
     std::vector<uint32_t> alphabet;
@@ -45,7 +55,12 @@ int main(int argc, char** argv) {
     ecl::WaveletTree<uint32_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
     cudaProfilerStart();
-    auto results = wt.access(queries);
+    auto results = wt.template access<1>(queries);
+    results = wt.template access<2>(queries);
+    results = wt.template access<4>(queries);
+    results = wt.template access<8>(queries);
+    results = wt.template access<16>(queries);
+    results = wt.template access<32>(queries);
     cudaProfilerStop();
   }
 }

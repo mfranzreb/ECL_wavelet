@@ -1,7 +1,6 @@
 #pragma once
 #include <bit_array.cuh>
 #include <cstdint>
-#include <cub/warp/warp_reduce.cuh>
 
 namespace ecl {
 /*!
@@ -62,40 +61,37 @@ class RankSelect {
 
   /*!
    * \brief Computes rank of zeros.
+   * \tparam NumThreads Number of threads accessing the function.
    * \param array_index Index of the bit array to be used.
    * \param index Index the rank of zeros is computed for.
-   * \param t_id Thread ID, has to start at 0.
-   * \param num_threads Number of threads accessing the function.
-   * \param temp_storage Temporary storage for the warp reduction.
    * \return Number of zeros (rank) before position \c index, i.e. in the slice
    * [0, i).
    */
   template <int NumThreads>
-  __device__ [[nodiscard]] size_t rank0(
-      uint32_t const array_index, size_t const index, uint32_t const t_id,
-      typename cub::WarpReduce<size_t, NumThreads>::TempStorage* temp_storage) {
-    return index - rank1<NumThreads>(array_index, index, t_id, temp_storage);
+  __device__ [[nodiscard]] size_t rank0(uint32_t const array_index,
+                                        size_t const index) {
+    return index - rank1<NumThreads>(array_index, index);
   }
 
   /*!
    * \brief Computes rank of ones.
+   * \tparam NumThreads Number of threads accessing the function.
    * \param array_index Index of the bit array to be used.
-   * \param index Index the rank of ones is computed for.
-   * \param t_id Thread ID, has to start at 0.
-   * \param num_threads Number of threads accessing the function. Right now 32
-   * is assumed.
-   * \param temp_storage Temporary storage for the warp reduction.
+   * \param index Index the rank of zeros is computed for.
    * \return Numbers of ones (rank) before position \c index, i.e. in the slice
    * [0, i).
    */
   template <int NumThreads>
-  __device__ [[nodiscard]] size_t rank1(
-      uint32_t const array_index, size_t const index, uint32_t const t_id,
-      typename cub::WarpReduce<size_t, NumThreads>::TempStorage* temp_storage) {
+  __device__ [[nodiscard]] size_t rank1(uint32_t const array_index,
+                                        size_t const index) {
     assert(array_index < bit_array_.numArrays());
     assert(index <= bit_array_.size(array_index));
     if (index == 0) {
       return 0;
+    }
+    uint8_t t_id = 0;
+    if constexpr (NumThreads > 1) {
+      t_id = threadIdx.x % NumThreads;
     }
     size_t const l1_pos = index / RankSelectConfig::L1_BIT_SIZE;
     size_t const l2_pos =
@@ -110,7 +106,9 @@ class RankSelect {
                               l2_pos * RankSelectConfig::L2_WORD_SIZE;
     size_t const end_word = index / (sizeof(uint32_t) * 8);
 
+    // TODO: do popc outside of the if
     for (size_t i = start_word + t_id; i <= end_word; i += NumThreads) {
+      // TODO: read word before if
       if (i == end_word) {
         // Only consider bits up to the index.
         result += __popc(bit_array_.partialWord(
@@ -120,15 +118,16 @@ class RankSelect {
       }
     }
 
-    result = cub::WarpReduce<size_t, NumThreads>(*temp_storage).Sum(result);
-
-    uint32_t mask = ~0;
-    if constexpr (NumThreads < 32) {
-      mask = ((1 << NumThreads) - 1)
-             << (NumThreads * ((threadIdx.x % WS) / NumThreads));
+    if constexpr (NumThreads > 1) {
+      uint32_t mask = ~0;
+      if constexpr (NumThreads < 32) {
+        mask = ((1 << NumThreads) - 1)
+               << (NumThreads * ((threadIdx.x % WS) / NumThreads));
+      }
+      result = warpSum<size_t, NumThreads>(mask, result);
+      // communicate the result to all threads
+      shareVar<size_t>(t_id == 0, result, mask);
     }
-    // communicate the result to all threads
-    shareVar<size_t>(t_id == 0, result, mask);
 
     return result;
   }
@@ -225,6 +224,30 @@ class RankSelect {
    */
   __device__ void writeNumLastL2Blocks(uint32_t const array_index,
                                        uint8_t const value) noexcept;
+
+  /*!
+   * \brief Do a sum reduction with a subset of a warp.
+   * \tparam T Type of the value to be summed.
+   * \tparam NumThreads Number of threads accessing the function.
+   * \param mask Mask representing the threads that should participate in the
+   * reduction.
+   * \param val Value to be summed.
+   * \return Sum of the values of the threads in the mask. Only valid for the
+   * first thread in the mask.
+   */
+
+  template <typename T, int NumThreads>
+  __device__ T warpSum(uint32_t const mask, T val) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    //? do all threads get the result?
+    val = __reduce_add_sync(mask, val);
+#else
+    for (int offset = NumThreads / 2; offset > 0; offset /= 2) {
+      val += __shfl_down_sync(mask, val, offset);
+    }
+    return val;
+#endif
+  }
 
  private:
   /*!

@@ -92,6 +92,7 @@
     "stacktrace": "cpp",
     "syncstream": "cpp",
     "valarray": "cpp",
-    "hash_map": "cpp"
+    "hash_map": "cpp",
+    "__config": "cpp"
   }
 }

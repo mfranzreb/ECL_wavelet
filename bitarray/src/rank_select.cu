@@ -5,7 +5,6 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cub/device/device_scan.cuh>
-#include <cub/warp/warp_reduce.cuh>
 #include <cub/warp/warp_scan.cuh>
 #include <mutex>
 #include <numeric>
@@ -513,10 +512,8 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
   __shared__ RankSelectConfig::L2_TYPE
       l2_entries[RankSelectConfig::NUM_L2_PER_L1];
   __shared__ RankSelectConfig::L1_TYPE next_l1_entry;
-  __shared__ union {
-    typename cub::WarpReduce<RankSelectConfig::L2_TYPE>::TempStorage reduce;
-    typename cub::WarpScan<RankSelectConfig::L2_TYPE>::TempStorage scan;
-  } cub_storage;
+  __shared__ typename cub::WarpScan<RankSelectConfig::L2_TYPE>::TempStorage
+      scan_storage;
 
   uint32_t const warp_id = threadIdx.x / WS;
   uint32_t const local_t_id = threadIdx.x % WS;
@@ -526,7 +523,6 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
     // find L1 block index
     uint32_t const l1_index = blockIdx.x;
 
-    cub::WarpReduce<RankSelectConfig::L2_TYPE> warp_reduce(cub_storage.reduce);
     for (uint32_t i = warp_id; i < RankSelectConfig::NUM_L2_PER_L1;
          i += num_warps) {
       RankSelectConfig::L2_TYPE num_ones = 0;
@@ -543,7 +539,8 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
       }
 
       // Warp reduction
-      RankSelectConfig::L2_TYPE const total_ones = warp_reduce.Sum(num_ones);
+      RankSelectConfig::L2_TYPE const total_ones =
+          rank_select.warpSum<RankSelectConfig::L2_TYPE, WS>(~0, num_ones);
       __syncwarp();
 
       if (local_t_id == 0) {
@@ -566,7 +563,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
       if (threadIdx.x == RankSelectConfig::NUM_L2_PER_L1 - 1) {
         next_l1_entry = l2_entry;
       }
-      cub::WarpScan<RankSelectConfig::L2_TYPE>(cub_storage.scan)
+      cub::WarpScan<RankSelectConfig::L2_TYPE>(scan_storage)
           .ExclusiveSum(l2_entry, l2_entry);
 
       // last thread adds it's entry to the following L1 block
@@ -593,7 +590,6 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
     auto const l1_start_word = (rank_select.getNumL1Blocks(array_index) - 1) *
                                RankSelectConfig::L1_WORD_SIZE;
 
-    cub::WarpReduce<RankSelectConfig::L2_TYPE> warp_reduce(cub_storage.reduce);
     for (uint32_t i = warp_id; i < num_last_l2_blocks; i += num_warps) {
       RankSelectConfig::L2_TYPE num_ones = 0;
       size_t const start_word =
@@ -610,7 +606,8 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
       }
 
       // Warp reduction
-      RankSelectConfig::L2_TYPE const total_ones = warp_reduce.Sum(num_ones);
+      RankSelectConfig::L2_TYPE const total_ones =
+          rank_select.warpSum<RankSelectConfig::L2_TYPE, WS>(~0, num_ones);
       __syncwarp();
       if (local_t_id == 0) {
         l2_entries[i] = total_ones;
@@ -626,7 +623,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
         l2_entry = l2_entries[threadIdx.x];
       }
 
-      cub::WarpScan<RankSelectConfig::L2_TYPE>(cub_storage.scan)
+      cub::WarpScan<RankSelectConfig::L2_TYPE>(scan_storage)
           .ExclusiveSum(l2_entry, l2_entry);
 
       // All threads write their result to global memory

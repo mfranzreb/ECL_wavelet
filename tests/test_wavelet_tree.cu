@@ -30,22 +30,34 @@ class WaveletTreeTestFixture : public ::testing::Test {
 
 template <typename T>
 std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetDataAndHist(
-    size_t alphabet_size, size_t const data_size,
+    size_t const alphabet_size, size_t const data_size,
     std::unordered_map<T, size_t>& hist) {
+  if (alphabet_size < 3) {
+    throw std::invalid_argument("Alphabet size must be at least 3");
+  }
   std::vector<T> alphabet(alphabet_size);
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<T> dis(0, std::numeric_limits<T>::max());
-  std::generate(alphabet.begin(), alphabet.end(), [&]() { return dis(gen); });
-  // Check that all elements are unique
-  std::sort(alphabet.begin(), alphabet.end());
-  // remove duplicates
-  auto it = std::unique(alphabet.begin(), alphabet.end());
-  alphabet_size = std::distance(alphabet.begin(), it);
-  alphabet.resize(alphabet_size);
+  size_t filled = 0;
+  do {
+    std::generate(alphabet.begin() + filled, alphabet.end(),
+                  [&]() { return dis(gen); });
+    // Check that all elements are unique
+    std::sort(alphabet.begin(), alphabet.end());
+    // remove duplicates
+    auto it = std::unique(alphabet.begin(), alphabet.end());
+    filled = std::distance(alphabet.begin(), it);
+    if (filled > 2) {
+      if (filled < alphabet_size) {
+        alphabet.resize(filled);
+      }
+      break;
+    }
+  } while (filled != alphabet_size);
 
   std::vector<T> data(data_size);
-  std::uniform_int_distribution<size_t> dis2(0, alphabet_size - 1);
+  std::uniform_int_distribution<size_t> dis2(0, filled - 1);
   std::generate(data.begin(), data.end(), [&]() {
     auto const symbol = alphabet[dis2(gen)];
     hist[symbol]++;
@@ -330,69 +342,117 @@ TYPED_TEST(WaveletTreeTestFixture, structure) {
   for (size_t i = 0; i < data.size(); ++i) {
     data[i] = i % alphabet.size();
   }
-  WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+  {
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                              kGPUIndex);
+
+    // First level
+    for (size_t i = 0; i < data.size(); ++i) {
+      // 0 to 7 is 0, 8 and 9 is 1
+      BAaccessKernel<TypeParam>
+          <<<1, 1>>>(wt.rank_select_.bit_array_, 0, i, this->result);
+      kernelCheck();
+      if (i % 10 < 8) {
+        EXPECT_EQ(*this->result, 0);
+      } else {
+        EXPECT_EQ(*this->result, 1);
+      }
+    }
+
+    // Second level
+    for (size_t i = 0; i < 80; ++i) {
+      // 4 0s and then 4 1s
+      BAaccessKernel<TypeParam>
+          <<<1, 1>>>(wt.rank_select_.bit_array_, 1, i, this->result);
+      kernelCheck();
+      if (i % 8 < 4) {
+        EXPECT_EQ(*this->result, 0);
+      } else {
+        EXPECT_EQ(*this->result, 1);
+      }
+    }
+    for (size_t i = 80; i < 100; ++i) {
+      // 0101...
+      BAaccessKernel<TypeParam>
+          <<<1, 1>>>(wt.rank_select_.bit_array_, 1, i, this->result);
+      kernelCheck();
+      if (i % 2 == 0) {
+        EXPECT_EQ(*this->result, 0);
+      } else {
+        EXPECT_EQ(*this->result, 1);
+      }
+    }
+
+    // Third level
+    for (size_t i = 0; i < 80; ++i) {
+      // 2 0s and then 2 1s
+      BAaccessKernel<TypeParam>
+          <<<1, 1>>>(wt.rank_select_.bit_array_, 2, i, this->result);
+      kernelCheck();
+      if (i % 4 < 2) {
+        EXPECT_EQ(*this->result, 0);
+      } else {
+        EXPECT_EQ(*this->result, 1);
+      }
+    }
+
+    // Fourth level
+    for (size_t i = 0; i < 80; ++i) {
+      // 0101...
+      BAaccessKernel<TypeParam>
+          <<<1, 1>>>(wt.rank_select_.bit_array_, 3, i, this->result);
+      kernelCheck();
+      if (i % 2 == 0) {
+        EXPECT_EQ(*this->result, 0);
+      } else {
+        EXPECT_EQ(*this->result, 1);
+      }
+    }
+  }
+
+  std::vector<TypeParam> alphabet2{0, 1, 2, 3, 4};
+  data = {4, 1, 1, 2, 1, 1, 3, 4, 4, 0, 0, 2, 3, 2, 4, 2, 4, 1, 3, 2};
+  WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet2),
                             kGPUIndex);
 
   // First level
+  // 10000001100000101000
   for (size_t i = 0; i < data.size(); ++i) {
-    // 0 to 7 is 0, 8 and 9 is 1
     BAaccessKernel<TypeParam>
         <<<1, 1>>>(wt.rank_select_.bit_array_, 0, i, this->result);
     kernelCheck();
-    if (i % 10 < 8) {
-      EXPECT_EQ(*this->result, 0);
-    } else {
+    if (i == 0 or i == 7 or i == 8 or i == 14 or i == 16) {
       EXPECT_EQ(*this->result, 1);
+    } else {
+      EXPECT_EQ(*this->result, 0);
     }
   }
 
   // Second level
-  for (size_t i = 0; i < 80; ++i) {
-    // 4 0s and then 4 1s
+  // 001001001111011
+  for (size_t i = 0; i < data.size() - 5; ++i) {
     BAaccessKernel<TypeParam>
         <<<1, 1>>>(wt.rank_select_.bit_array_, 1, i, this->result);
     kernelCheck();
-    if (i % 8 < 4) {
-      EXPECT_EQ(*this->result, 0);
-    } else {
+    if (i == 2 or i == 5 or i == 8 or i == 9 or i == 10 or i == 11 or i == 13 or
+        i == 14) {
       EXPECT_EQ(*this->result, 1);
-    }
-  }
-  for (size_t i = 80; i < 100; ++i) {
-    // 0101...
-    BAaccessKernel<TypeParam>
-        <<<1, 1>>>(wt.rank_select_.bit_array_, 1, i, this->result);
-    kernelCheck();
-    if (i % 2 == 0) {
-      EXPECT_EQ(*this->result, 0);
     } else {
-      EXPECT_EQ(*this->result, 1);
+      EXPECT_EQ(*this->result, 0);
     }
   }
 
   // Third level
-  for (size_t i = 0; i < 80; ++i) {
-    // 2 0s and then 2 1s
+  // 111100101010010
+  for (size_t i = 0; i < data.size() - 5; ++i) {
     BAaccessKernel<TypeParam>
         <<<1, 1>>>(wt.rank_select_.bit_array_, 2, i, this->result);
     kernelCheck();
-    if (i % 4 < 2) {
-      EXPECT_EQ(*this->result, 0);
-    } else {
+    if (i == 0 or i == 1 or i == 2 or i == 3 or i == 6 or i == 8 or i == 10 or
+        i == 13) {
       EXPECT_EQ(*this->result, 1);
-    }
-  }
-
-  // Fourth level
-  for (size_t i = 0; i < 80; ++i) {
-    // 0101...
-    BAaccessKernel<TypeParam>
-        <<<1, 1>>>(wt.rank_select_.bit_array_, 3, i, this->result);
-    kernelCheck();
-    if (i % 2 == 0) {
-      EXPECT_EQ(*this->result, 0);
     } else {
-      EXPECT_EQ(*this->result, 1);
+      EXPECT_EQ(*this->result, 0);
     }
   }
 }
@@ -420,8 +480,12 @@ TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
   for (int i = 0; i < 10; i++) {
     // Random data size between 1000 and 1'000'000
     size_t data_size = 1000 + (rand() % 1'000'000);
-    size_t alphabet_size = std::min(
-        data_size, size_t(rand() % std::numeric_limits<TypeParam>::max()));
+    size_t alphabet_size =
+        3 +
+        (rand() %
+         (std::min(static_cast<size_t>(std::numeric_limits<TypeParam>::max()),
+                   data_size) -
+          3));
 
     auto [alphabet, data] =
         generateRandomAlphabetAndData<TypeParam>(alphabet_size, data_size);
@@ -470,8 +534,11 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
     // Random data size between 1000 and 1'000'000
     size_t data_size = 1000 + (rand() % 1'000'000);
     size_t alphabet_size =
-        std::min(3 + (rand() % (data_size - 3)),
-                 size_t(std::numeric_limits<TypeParam>::max()));
+        3 +
+        (rand() %
+         (std::min(static_cast<size_t>(std::numeric_limits<TypeParam>::max()),
+                   data_size) -
+          3));
 
     auto [alphabet, data] =
         generateRandomAlphabetAndData<TypeParam>(alphabet_size, data_size);

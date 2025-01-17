@@ -29,6 +29,9 @@ template <typename T>
 std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
     size_t const alphabet_size, size_t const data_size,
     bool enforce_alphabet_size = false) {
+  if (alphabet_size < 3) {
+    throw std::invalid_argument("Alphabet size must be at least 3");
+  }
   std::vector<T> alphabet(alphabet_size);
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -42,7 +45,7 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
     // remove duplicates
     auto it = std::unique(alphabet.begin(), alphabet.end());
     filled = std::distance(alphabet.begin(), it);
-    if (not enforce_alphabet_size) {
+    if (not enforce_alphabet_size and filled > 2) {
       if (filled < alphabet_size) {
         alphabet.resize(filled);
       }

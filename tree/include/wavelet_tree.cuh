@@ -379,19 +379,20 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   BitArray bit_array(bit_array_sizes, false);
 
-  fillLevel(bit_array, d_data, data_size, 0);
-
-  data_size = bit_array_sizes[1];
-  for (uint32_t l = 1; l < num_levels_; l++) {
+  for (uint32_t l = 0; l < num_levels_; l++) {
     assert(data_size == bit_array_sizes[l]);
 
-    // Perform radix sort
-    cub::DeviceRadixSort::SortKeys(
-        d_temp_storage, temp_storage_bytes, d_data, d_sorted_data, data_size,
-        alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
-    //  Fill l-th bit array
-    kernelCheck();
-    fillLevel(bit_array, d_sorted_data, data_size, l);
+    if (l > 0) {
+      // Perform radix sort
+      cub::DeviceRadixSort::SortKeys(
+          d_temp_storage, temp_storage_bytes, d_data, d_sorted_data, data_size,
+          alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
+      //  Fill l-th bit array
+      kernelCheck();
+      fillLevel(bit_array, d_sorted_data, data_size, l);
+    } else {
+      fillLevel(bit_array, d_data, data_size, l);
+    }
 
     if (l != (num_levels_ - 1) and
         bit_array_sizes[l] != bit_array_sizes[l + 1]) {
@@ -435,7 +436,6 @@ WaveletTree<T>::~WaveletTree() {
   }
 }
 
-// TODO: possible bug
 template <typename T>
 template <int NumThreads>
 __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
@@ -1139,6 +1139,7 @@ __global__ LB(MAX_TPB,
   }
 }
 
+// TODO: remove spillage
 template <typename T, bool ShmemCounts, int ThreadsPerQuery>
 __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
                                                   size_t* const indices,

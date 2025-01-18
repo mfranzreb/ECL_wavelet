@@ -30,7 +30,8 @@ __global__ void wordAtBitKernel(BitArray bit_array, size_t array_index,
 __global__ void partialWordKernel(BitArray bit_array, size_t array_index,
                                   size_t index, uint8_t bit_index,
                                   uint32_t* output) {
-  *output = bit_array.partialWord(array_index, index, bit_index);
+  auto word = bit_array.word(array_index, index);
+  *output = bit_array.partialWord(word, bit_index);
 }
 
 __global__ void twoWordsKernel(BitArray bit_array, size_t array_index,

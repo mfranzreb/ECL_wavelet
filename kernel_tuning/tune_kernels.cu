@@ -75,10 +75,10 @@ void tune_accessKernel(std::string out_file, uint32_t const GPU_index) {
         if (use_shmem) {
           accessKernel<T, true>
               <<<num_blocks, num_threads, sizeof(size_t) * alphabet_size>>>(
-                  wt, d_queries, num_queries, d_results);
+                  wt, d_queries, num_queries, d_results, alphabet_size);
         } else {
           accessKernel<T, false><<<num_blocks, num_threads>>>(
-              wt, d_queries, num_queries, d_results);
+              wt, d_queries, num_queries, d_results, alphabet_size);
         }
         kernelCheck();
       }

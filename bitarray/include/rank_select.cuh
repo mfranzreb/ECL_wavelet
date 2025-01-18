@@ -82,7 +82,7 @@ class RankSelect {
    * [0, i).
    */
   template <int NumThreads>
-  __device__ [[nodiscard]] size_t rank1(uint32_t const array_index,
+  __device__ [[nodiscard]] size_t rank1(uint8_t const array_index,
                                         size_t const index) {
     assert(array_index < bit_array_.numArrays());
     assert(index <= bit_array_.size(array_index));
@@ -94,7 +94,7 @@ class RankSelect {
       t_id = threadIdx.x % NumThreads;
     }
     size_t const l1_pos = index / RankSelectConfig::L1_BIT_SIZE;
-    size_t const l2_pos =
+    uint16_t const l2_pos =
         (index % RankSelectConfig::L1_BIT_SIZE) / RankSelectConfig::L2_BIT_SIZE;
     // Only first thread in the local block stores the result
     size_t result =
@@ -106,16 +106,13 @@ class RankSelect {
                               l2_pos * RankSelectConfig::L2_WORD_SIZE;
     size_t const end_word = index / (sizeof(uint32_t) * 8);
 
-    // TODO: do popc outside of the if
     for (size_t i = start_word + t_id; i <= end_word; i += NumThreads) {
-      // TODO: read word before if
+      uint32_t word = bit_array_.word(array_index, i);
       if (i == end_word) {
         // Only consider bits up to the index.
-        result += __popc(bit_array_.partialWord(
-            array_index, i, index % (sizeof(uint32_t) * 8)));
-      } else {
-        result += __popc(bit_array_.word(array_index, i));
+        word = bit_array_.partialWord(word, index % (sizeof(uint32_t) * 8));
       }
+      result += __popc(word);
     }
 
     if constexpr (NumThreads > 1) {
@@ -264,6 +261,7 @@ class RankSelect {
     static_assert(
         std::is_integral<T>::value or std::is_floating_point<T>::value,
         "T must be an integral or floating-point type.");
+    // TODO: remove syncwarps?
     __syncwarp(mask);
     uint32_t src_thread = __ballot_sync(mask, condition);
     // Get the value from the first thread that fulfills the condition

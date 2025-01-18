@@ -12,6 +12,7 @@
 namespace ecl {
 __host__ BitArray::BitArray(std::vector<size_t> const& sizes)
     : num_arrays_(sizes.size()), is_copy_(false) {
+  assert(sizes.size() < std::numeric_limits<uint8_t>::max());
   // if any of the sizes is 0, abort
   for (auto const& size : sizes) {
     assert(size > 0);
@@ -177,12 +178,9 @@ __device__ uint32_t BitArray::wordAtBit(size_t const array_index,
 }
 
 __device__ [[nodiscard]] uint32_t BitArray::partialWord(
-    size_t const array_index, size_t const index,
-    uint8_t const bit_index) const noexcept {
-  assert(array_index < num_arrays_);
-  assert(index < sizeInWords(array_index));
+    uint32_t const word, uint8_t const bit_index) const noexcept {
   assert(bit_index <= sizeof(uint32_t) * 8);
-  return word(array_index, index) & ((1UL << bit_index) - 1);
+  return word & ((1UL << bit_index) - 1);
 }
 
 __device__ [[nodiscard]] size_t BitArray::size(
@@ -204,7 +202,7 @@ __device__ [[nodiscard]] size_t BitArray::sizeInWords(
          (sizeof(uint32_t) * 8);
 }
 
-__host__ __device__ [[nodiscard]] size_t BitArray::numArrays() const noexcept {
+__host__ __device__ [[nodiscard]] uint8_t BitArray::numArrays() const noexcept {
   return num_arrays_;
 }
 }  // namespace ecl

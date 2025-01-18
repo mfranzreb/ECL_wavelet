@@ -25,7 +25,8 @@ class BitArray {
   /*!
    * \brief Constructor. Creates a number of bit array that hold a specific,
    * fixed number of bits.
-   * \param sizes Number of bits each bit array contains.
+   * \param sizes Number of bits each bit array contains. IMPORTANT: A BitArray
+   * object cannot hold more than 256 bit arrays.
    */
   __host__ BitArray(std::vector<size_t> const& sizes);
 
@@ -120,8 +121,9 @@ class BitArray {
   __device__ [[nodiscard]] uint64_t twoWords(size_t const array_index,
                                              size_t const index) const noexcept;
 
-  __device__ [[nodiscard]] uint64_t twoWords(size_t const array_index,
-                                             size_t const index, size_t const offset) const noexcept;
+  __device__ [[nodiscard]] uint64_t twoWords(
+      size_t const array_index, size_t const index,
+      size_t const offset) const noexcept;
 
   /*!
    * \brief Direct access to one word of the raw data of the bit
@@ -138,16 +140,14 @@ class BitArray {
   /*!
    * \brief Direct access to one word of the raw data of the bit
    * array.
-   * \param array_index Index of the bit array to be read from.
-   * \param index Index of the word that should be accessed.
+   * \param word Word to be modified.
    * \param bit_index Index up to which the bits should be returned. Exclusive.
    * \return index-th word of the raw bit array data, with the bits [0,
    * bit_index) left unchanged, and all others set to 0. Least significant bit
    * corresponds to the first bit of the word.
    */
   __device__ [[nodiscard]] uint32_t partialWord(
-      size_t const array_index, size_t const index,
-      uint8_t const bit_index) const noexcept;
+      uint32_t const word, uint8_t const bit_index) const noexcept;
   /*!
    * \brief Get the size of the bit array in
    * bits.
@@ -173,12 +173,12 @@ class BitArray {
    * \brief Get the number of bit arrays stored in the global array.
    * \return Number of bit arrays stored in the global array.
    */
-  __host__ __device__ [[nodiscard]] size_t numArrays() const noexcept;
+  __host__ __device__ [[nodiscard]] uint8_t numArrays() const noexcept;
 
   // TODO: add counter per copied class
   // TODO template word size
  private:
-  size_t num_arrays_;   /*!< Number of bit arrays stored in the global array.*/
+  uint8_t num_arrays_;  /*!< Number of bit arrays stored in the global array.*/
   size_t total_size_;   /*!< Total size of the global array in words.*/
   size_t* d_bit_sizes_; /*!< Size of each array in bits.*/
   std::vector<size_t>

@@ -143,7 +143,7 @@ class WaveletTree {
    * \brief Get the number of levels in the wavelet tree.
    * \return Number of levels.
    */
-  __device__ size_t getNumLevels() const;
+  __device__ uint8_t getNumLevels() const;
 
   /*!
    * \brief Get the number of occurrences of all symbols that are
@@ -180,7 +180,7 @@ class WaveletTree {
   Code* d_codes_ =
       nullptr; /*!< Array of codes for each symbol in the alphabet*/
   size_t* d_counts_ = nullptr; /*!< Array of counts for each symbol*/
-  size_t num_levels_;          /*!< Number of levels in the wavelet tree*/
+  uint8_t num_levels_;         /*!< Number of levels in the wavelet tree*/
   bool is_min_alphabet_; /*!< Flag to signal whether the alphabet is already
                             minimal*/
   T codes_start_;        /*!< Minimal alphabet symbol where the codes start*/
@@ -227,7 +227,10 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
  */
 template <typename T, bool ShmemCounts, int ThreadsPerQuery>
 __global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
-                             size_t const num_indices, T* results);
+                             size_t const num_indices, T* results,
+                             size_t const alphabet_size,
+                             uint32_t const num_groups,
+                             uint8_t const num_levels);
 
 /*!
  * \brief Kernel for computing rank queries on the wavelet tree.
@@ -506,13 +509,16 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   gpuErrchk(cudaMemcpy(d_indices, indices.data(), num_indices * sizeof(size_t),
                        cudaMemcpyHostToDevice));
 
+  uint32_t const num_groups = (num_blocks * threads_per_block) / NumThreads;
   if (use_shmem) {
     accessKernel<T, true, NumThreads>
         <<<num_blocks, threads_per_block, counts_size>>>(
-            *this, d_indices, num_indices, d_results);
+            *this, d_indices, num_indices, d_results, alphabet_size_,
+            num_groups, num_levels_);
   } else {
     accessKernel<T, false, NumThreads><<<num_blocks, threads_per_block>>>(
-        *this, d_indices, num_indices, d_results);
+        *this, d_indices, num_indices, d_results, alphabet_size_, num_groups,
+        num_levels_);
   }
   kernelCheck();
 
@@ -762,7 +768,7 @@ __device__ size_t WaveletTree<T>::getAlphabetSize() const {
 }
 
 template <typename T>
-__device__ size_t WaveletTree<T>::getNumLevels() const {
+__device__ uint8_t WaveletTree<T>::getNumLevels() const {
   return num_levels_;
 }
 
@@ -1141,17 +1147,17 @@ __global__ LB(MAX_TPB,
 
 // TODO: remove spillage
 template <typename T, bool ShmemCounts, int ThreadsPerQuery>
-__global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
-                                                  size_t* const indices,
-                                                  size_t const num_indices,
-                                                  T* results) {
+__global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
+    WaveletTree<T> tree, size_t* const indices, size_t const num_indices,
+    T* results, size_t const alphabet_size, uint32_t const num_groups,
+    uint8_t const num_levels) {
+  static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
+                "T must be an unsigned integral type");
   assert(blockDim.x % WS == 0);
   extern __shared__ size_t counts[];
 
-  uint32_t const alphabet_size = tree.getAlphabetSize();
-
   if constexpr (ShmemCounts) {
-    for (uint32_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
+    for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
       counts[i] = tree.getCounts(i);
     }
     __syncthreads();
@@ -1159,16 +1165,15 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
 
   uint32_t const global_group_id =
       (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerQuery;
-  uint32_t const num_groups = gridDim.x * blockDim.x / ThreadsPerQuery;
-  uint32_t const local_t_id = threadIdx.x % ThreadsPerQuery;
+  uint8_t const local_t_id = threadIdx.x % ThreadsPerQuery;
 
   for (uint32_t i = global_group_id; i < num_indices; i += num_groups) {
     size_t index = indices[i];
 
-    uint32_t char_start = 0;
-    uint32_t char_end = alphabet_size;
-    uint32_t start, pos;
-    for (uint32_t l = 0; l < tree.getNumLevels(); ++l) {
+    size_t char_start = 0;
+    size_t char_end = alphabet_size;
+    size_t start, pos;
+    for (uint8_t l = 0; l < num_levels; ++l) {
       size_t char_counts;
       if constexpr (ShmemCounts) {
         char_counts = counts[char_start];
@@ -1187,10 +1192,10 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(WaveletTree<T> tree,
       if (tree.rank_select_.bit_array_.access(l, char_counts + index) ==
           false) {
         index = pos - start;
-        char_end = char_start + getPrevPowTwo(char_end - char_start);
+        char_end = char_start + getPrevPowTwo<size_t>(char_end - char_start);
       } else {
         index -= pos - start;
-        char_start += getPrevPowTwo(char_end - char_start);
+        char_start += getPrevPowTwo<size_t>(char_end - char_start);
       }
     }
     if (local_t_id == 0) {
@@ -1228,7 +1233,7 @@ __global__ LB(MAX_TPB,
     uint32_t char_end = alphabet_size;
     uint32_t char_split;
     size_t start, pos;
-    for (uint32_t l = 0; l < tree.getNumLevels(); ++l) {
+    for (uint8_t l = 0; l < tree.getNumLevels(); ++l) {
       if (char_end - char_start == 1) {
         break;
       }

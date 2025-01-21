@@ -109,13 +109,13 @@ class RankSelect {
                               l2_pos * RankSelectConfig::L2_WORD_SIZE;
     size_t const end_word = index / (sizeof(uint32_t) * 8);
 
-    for (size_t i = start_word + t_id; i <= end_word; i += NumThreads) {
-      uint32_t word = bit_array_.word(array_index, i, offset);
-      if (i == end_word) {
+    for (size_t i = start_word + 2 * t_id; i <= end_word; i += 2 * NumThreads) {
+      uint64_t word = bit_array_.twoWords(array_index, i, offset);
+      if (end_word == 0 or i >= end_word - 1) {
         // Only consider bits up to the index.
-        word = bit_array_.partialWord(word, index % (sizeof(uint32_t) * 8));
+        word = bit_array_.partialTwoWords(word, index % (sizeof(uint64_t) * 8));
       }
-      result += __popc(word);
+      result += __popcll(word);
     }
 
     if constexpr (NumThreads > 1) {

@@ -1086,6 +1086,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
   }
 }
 
+// TODO reduce register usage
 template <typename T, bool UseShmemPerThread>
 __global__ LB(MAX_TPB,
               MIN_BPM) void fillLevelKernel(BitArray bit_array, T* const data,
@@ -1172,6 +1173,8 @@ __global__ LB(MAX_TPB,
   }
 }
 
+//? What are wavefronts, what is their relevance?
+//? use texture cache?
 // TODO: remove spillage
 template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets>
 __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(

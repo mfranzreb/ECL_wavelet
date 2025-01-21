@@ -155,7 +155,10 @@ class BitArray {
    * corresponds to the first bit of the word.
    */
   __device__ [[nodiscard]] uint32_t partialWord(
-      uint32_t const word, uint8_t const bit_index) const noexcept;
+      uint32_t word, uint8_t const bit_index) noexcept;
+
+  __device__ [[nodiscard]] uint64_t partialTwoWords(
+      uint64_t word, uint8_t const bit_index) noexcept;
   /*!
    * \brief Get the size of the bit array in
    * bits.

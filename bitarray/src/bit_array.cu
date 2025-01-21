@@ -40,6 +40,10 @@ __host__ BitArray::BitArray(std::vector<size_t> const& sizes)
   for (auto const& size : array_offsets) {
     total_size += size;
   }
+  // Make total size a multiple of 2 so that "twoWords" function does not go out
+  // of bounds
+  total_size += total_size % 2;
+
   gpuErrchk(cudaMalloc(&d_data_, total_size * sizeof(uint32_t)));
   total_size_ = total_size;
 
@@ -184,7 +188,7 @@ __device__ uint64_t BitArray::twoWords(size_t const array_index,
                                        size_t const index,
                                        size_t const offset) const noexcept {
   assert(array_index < num_arrays_);
-  assert(index + 1 < sizeInWords(array_index));
+  assert(index < sizeInWords(array_index));
   assert(index % 2 == 0 or index == 0);
   return reinterpret_cast<const uint64_t*>(d_data_)[(offset + index) / 2];
 }
@@ -197,9 +201,15 @@ __device__ uint32_t BitArray::wordAtBit(size_t const array_index,
 }
 
 __device__ [[nodiscard]] uint32_t BitArray::partialWord(
-    uint32_t const word, uint8_t const bit_index) const noexcept {
+    uint32_t word, uint8_t const bit_index) noexcept {
   assert(bit_index <= sizeof(uint32_t) * 8);
   return word & ((1UL << bit_index) - 1);
+}
+
+__device__ [[nodiscard]] uint64_t BitArray::partialTwoWords(
+    uint64_t word, uint8_t const bit_index) noexcept {
+  assert(bit_index <= sizeof(uint64_t) * 8);
+  return word & ((1ULL << bit_index) - 1);
 }
 
 __device__ [[nodiscard]] size_t BitArray::size(

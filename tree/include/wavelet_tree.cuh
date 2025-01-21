@@ -1182,19 +1182,15 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
                 "T must be an unsigned integral type");
   assert(blockDim.x % WS == 0);
   extern __shared__ size_t shmem[];
-  size_t* counts;
-  size_t* offsets;
 
   if constexpr (ShmemOffsets) {
-    offsets = shmem;
     for (uint32_t i = threadIdx.x; i < num_levels; i += blockDim.x) {
-      offsets[i] = tree.rank_select_.bit_array_.getOffset(i);
+      shmem[i] = tree.rank_select_.bit_array_.getOffset(i);
     }
 
     if constexpr (ShmemCounts) {
-      counts = shmem + num_levels;
       for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
-        counts[i] = tree.getCounts(i);
+        shmem[num_levels + i] = tree.getCounts(i);
       }
     }
     __syncthreads();
@@ -1203,28 +1199,27 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
   uint32_t const global_group_id =
       (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerQuery;
   uint8_t const local_t_id = threadIdx.x % ThreadsPerQuery;
-
   for (uint32_t i = global_group_id; i < num_indices; i += num_groups) {
     size_t index = indices[i];
 
-    size_t char_start = 0;
-    size_t char_end = alphabet_size;
+    T char_start = 0;
+    T char_end = alphabet_size - 1;
     size_t start, pos;
     for (uint8_t l = 0; l < num_levels; ++l) {
       size_t char_counts;
       if constexpr (ShmemCounts) {
-        char_counts = counts[char_start];
+        char_counts = shmem[num_levels + char_start];
       } else {
         char_counts = tree.getCounts(char_start);
       }
       size_t offset;
       if constexpr (ShmemOffsets) {
-        offset = offsets[l];
+        offset = shmem[l];
       } else {
         offset = tree.rank_select_.bit_array_.getOffset(l);
       }
-      if (char_end - char_start < 3) {
-        if (char_end - char_start > 1 and
+      if (char_end - char_start < 2) {
+        if (char_end - char_start > 0 and
             tree.rank_select_.bit_array_.access(l, char_counts + index,
                                                 offset) == true) {
           char_start++;
@@ -1234,13 +1229,14 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
       start = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts, offset);
       pos = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts + index,
                                                      offset);
+      T const diff = getPrevPowTwo<T>(char_end - char_start + 1);
       if (tree.rank_select_.bit_array_.access(l, char_counts + index, offset) ==
           false) {
         index = pos - start;
-        char_end = char_start + getPrevPowTwo<size_t>(char_end - char_start);
+        char_end = char_start + (diff - 1);
       } else {
         index -= pos - start;
-        char_start += getPrevPowTwo<size_t>(char_end - char_start);
+        char_start += diff;
       }
     }
     if (local_t_id == 0) {

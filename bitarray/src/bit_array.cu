@@ -27,12 +27,13 @@ __host__ BitArray::BitArray(std::vector<size_t> const& sizes)
   std::vector<size_t> array_sizes(sizes.size());
   std::vector<size_t> array_offsets(sizes.size());
 
-  // Pad arrays to 128 bytes (32 words)
+  //  Pad arrays to 128 bytes (32 words)
   for (size_t i = 0; i < sizes.size(); ++i) {
     auto size_in_words =
         (sizes[i] + sizeof(uint32_t) * 8 - 1) / (sizeof(uint32_t) * 8);
     array_sizes[i] = size_in_words;
-    array_offsets[i] = (size_in_words + 31) & ~31;
+    array_offsets[i] = (size_in_words + sizeof(uint32_t) * 8 - 1) &
+                       ~(sizeof(uint32_t) * 8 - 1);
   }
 
   size_t total_size = 0;
@@ -115,6 +116,17 @@ __device__ [[nodiscard]] bool BitArray::access(
   return (d_data_[d_offsets_[array_index] + (index >> 5)] >> offset) & 1UL;
 }
 
+__device__ [[nodiscard]] bool BitArray::access(
+    size_t const array_index, size_t const index,
+    size_t const offset) const noexcept {
+  assert(array_index < num_arrays_);
+  assert(index < d_bit_sizes_[array_index]);
+  // Get position in 32-bit word
+  uint8_t const bit_offset = index & uint32_t(0b11111);
+  // Get relevant word, shift and return bit
+  return (d_data_[offset + (index >> 5)] >> bit_offset) & 1U;
+}
+
 __device__ void BitArray::writeWord(size_t const array_index,
                                     size_t const index,
                                     uint32_t const value) noexcept {
@@ -150,6 +162,13 @@ __device__ uint32_t BitArray::word(size_t const array_index,
   assert(array_index < num_arrays_);
   assert(index < sizeInWords(array_index));
   return d_data_[d_offsets_[array_index] + index];
+}
+
+__device__ uint32_t BitArray::word(size_t const array_index, size_t const index,
+                                   size_t const offset) const noexcept {
+  assert(array_index < num_arrays_);
+  assert(index < sizeInWords(array_index));
+  return d_data_[offset + index];
 }
 
 __device__ uint64_t BitArray::twoWords(size_t const array_index,

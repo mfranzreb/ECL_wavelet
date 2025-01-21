@@ -225,7 +225,7 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
  * \param num_indices Number of indices.
  * \param results Array to store the accessed symbols.
  */
-template <typename T, bool ShmemCounts, int ThreadsPerQuery>
+template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets>
 __global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
                              size_t const num_indices, T* results,
                              size_t const alphabet_size,
@@ -445,8 +445,8 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
     std::vector<size_t> const& indices) {
   // launch kernel with 1 warp per index
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(
-      cudaFuncGetAttributes(&funcAttrib, accessKernel<T, true, NumThreads>));
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                  accessKernel<T, true, NumThreads, true>));
 
   auto maxThreadsPerBlockAccess =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
@@ -458,21 +458,40 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
 
   size_t const counts_size = sizeof(size_t) * alphabet_size_;
 
+  size_t const offsets_size = sizeof(size_t) * num_levels_;
+
   struct cudaDeviceProp prop = getDeviceProperties();
-  gpuErrchk(cudaFuncSetAttribute(accessKernel<T, true, NumThreads>,
+  gpuErrchk(cudaFuncSetAttribute(accessKernel<T, true, NumThreads, true>,
+                                 cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                 prop.sharedMemPerBlockOptin));
+  gpuErrchk(cudaFuncSetAttribute(accessKernel<T, false, NumThreads, true>,
                                  cudaFuncAttributeMaxDynamicSharedMemorySize,
                                  prop.sharedMemPerBlockOptin));
 
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
 
-  bool const use_shmem = counts_size * kMinBPM <= max_shmem_per_SM;
+  bool const offsets_shmem = offsets_size * kMinBPM <= max_shmem_per_SM;
 
   auto min_block_size = kMinTPB;
-  if (use_shmem) {
+  if (offsets_shmem) {
     for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
          block_size /= 2) {
       auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
-      if (counts_size * blocks_per_sm > max_shmem_per_SM) {
+      if (offsets_size * blocks_per_sm > max_shmem_per_SM) {
+        min_block_size = 2 * block_size;
+        break;
+      }
+    }
+  }
+
+  bool const counts_shmem =
+      (counts_size + offsets_size) * kMinBPM <= max_shmem_per_SM;
+
+  if (counts_shmem) {
+    for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
+         block_size /= 2) {
+      auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
+      if ((counts_size + offsets_size) * blocks_per_sm > max_shmem_per_SM) {
         min_block_size = 2 * block_size;
         break;
       }
@@ -510,15 +529,23 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
                        cudaMemcpyHostToDevice));
 
   uint32_t const num_groups = (num_blocks * threads_per_block) / NumThreads;
-  if (use_shmem) {
-    accessKernel<T, true, NumThreads>
-        <<<num_blocks, threads_per_block, counts_size>>>(
-            *this, d_indices, num_indices, d_results, alphabet_size_,
-            num_groups, num_levels_);
+  if (offsets_shmem) {
+    if (counts_shmem) {
+      accessKernel<T, true, NumThreads, true>
+          <<<num_blocks, threads_per_block, counts_size + offsets_size>>>(
+              *this, d_indices, num_indices, d_results, alphabet_size_,
+              num_groups, num_levels_);
+    } else {
+      accessKernel<T, false, NumThreads, true>
+          <<<num_blocks, threads_per_block, offsets_size>>>(
+              *this, d_indices, num_indices, d_results, alphabet_size_,
+              num_groups, num_levels_);
+    }
   } else {
-    accessKernel<T, false, NumThreads><<<num_blocks, threads_per_block>>>(
-        *this, d_indices, num_indices, d_results, alphabet_size_, num_groups,
-        num_levels_);
+    accessKernel<T, false, NumThreads, false>
+        <<<num_blocks, threads_per_block>>>(*this, d_indices, num_indices,
+                                            d_results, alphabet_size_,
+                                            num_groups, num_levels_);
   }
   kernelCheck();
 
@@ -1146,7 +1173,7 @@ __global__ LB(MAX_TPB,
 }
 
 // TODO: remove spillage
-template <typename T, bool ShmemCounts, int ThreadsPerQuery>
+template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets>
 __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
     WaveletTree<T> tree, size_t* const indices, size_t const num_indices,
     T* results, size_t const alphabet_size, uint32_t const num_groups,
@@ -1154,11 +1181,21 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type");
   assert(blockDim.x % WS == 0);
-  extern __shared__ size_t counts[];
+  extern __shared__ size_t shmem[];
+  size_t* counts;
+  size_t* offsets;
 
-  if constexpr (ShmemCounts) {
-    for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
-      counts[i] = tree.getCounts(i);
+  if constexpr (ShmemOffsets) {
+    offsets = shmem;
+    for (uint32_t i = threadIdx.x; i < num_levels; i += blockDim.x) {
+      offsets[i] = tree.rank_select_.bit_array_.getOffset(i);
+    }
+
+    if constexpr (ShmemCounts) {
+      counts = shmem + num_levels;
+      for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
+        counts[i] = tree.getCounts(i);
+      }
     }
     __syncthreads();
   }
@@ -1180,16 +1217,24 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
       } else {
         char_counts = tree.getCounts(char_start);
       }
+      size_t offset;
+      if constexpr (ShmemOffsets) {
+        offset = offsets[l];
+      } else {
+        offset = tree.rank_select_.bit_array_.getOffset(l);
+      }
       if (char_end - char_start < 3) {
-        if (char_end - char_start > 1 and tree.rank_select_.bit_array_.access(
-                                              l, char_counts + index) == true) {
+        if (char_end - char_start > 1 and
+            tree.rank_select_.bit_array_.access(l, char_counts + index,
+                                                offset) == true) {
           char_start++;
         }
         break;
       }
-      start = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts);
-      pos = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts + index);
-      if (tree.rank_select_.bit_array_.access(l, char_counts + index) ==
+      start = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts, offset);
+      pos = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts + index,
+                                                     offset);
+      if (tree.rank_select_.bit_array_.access(l, char_counts + index, offset) ==
           false) {
         index = pos - start;
         char_end = char_start + getPrevPowTwo<size_t>(char_end - char_start);
@@ -1243,8 +1288,11 @@ __global__ LB(MAX_TPB,
       } else {
         char_counts = tree.getCounts(char_start);
       }
-      start = tree.rank_select_.rank0<WS>(l, char_counts);
-      pos = tree.rank_select_.rank0<WS>(l, char_counts + query.index_);
+      start = tree.rank_select_.rank0<WS>(
+          l, char_counts, tree.rank_select_.bit_array_.getOffset(l));
+      pos = tree.rank_select_.rank0<WS>(
+          l, char_counts + query.index_,
+          tree.rank_select_.bit_array_.getOffset(l));
       char_split = char_start + getPrevPowTwo(char_end - char_start);
       if (query.symbol_ < char_split) {
         query.index_ = pos - start;
@@ -1308,12 +1356,16 @@ __global__ void selectKernel(WaveletTree<T> tree,
 
         char_start = getPrevCharStart(char_start, is_rightmost_child,
                                       alphabet_size, l, code.len_);
-        start = tree.rank_select_.rank1<WS>(l, tree.getCounts(char_start));
+        start = tree.rank_select_.rank1<WS>(
+            l, tree.getCounts(char_start),
+            tree.rank_select_.bit_array_.getOffset(l));
         query.index_ = tree.rank_select_.select<1>(l, start + query.index_,
                                                    local_t_id, WS) +
                        1;
       } else {
-        start = tree.rank_select_.rank0<WS>(l, tree.getCounts(char_start));
+        start = tree.rank_select_.rank0<WS>(
+            l, tree.getCounts(char_start),
+            tree.rank_select_.bit_array_.getOffset(l));
         query.index_ = tree.rank_select_.select<0>(l, start + query.index_,
                                                    local_t_id, WS) +
                        1;

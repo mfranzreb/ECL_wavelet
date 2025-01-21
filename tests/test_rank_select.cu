@@ -54,14 +54,16 @@ template <int NumThreads>
 __global__ void rank0Kernel(RankSelect rank_select, uint32_t array_index,
                             size_t index, size_t *output) {
   assert(blockDim.x == NumThreads);
-  *output = rank_select.rank0<NumThreads>(array_index, index);
+  *output = rank_select.rank0<NumThreads>(
+      array_index, index, rank_select.bit_array_.getOffset(array_index));
 }
 
 template <int NumThreads>
 __global__ void rank1Kernel(RankSelect rank_select, uint32_t array_index,
                             size_t index, size_t *output) {
   assert(blockDim.x == NumThreads);
-  *output = rank_select.rank1<NumThreads>(array_index, index);
+  *output = rank_select.rank1<NumThreads>(
+      array_index, index, rank_select.bit_array_.getOffset(array_index));
 }
 
 __global__ void select0Kernel(RankSelect rank_select, uint32_t array_index,
@@ -532,13 +534,14 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
 
   for (uint32_t i = 0; i < num_arrays; ++i) {
     helpers.emplace_back(sizes[i]);
-    size_t num_words = (bit_array.sizeHost(i) + 31) / 32;
+    size_t num_words = (bit_array.sizeHost(i) + WS - 1) / WS;
     std::vector<uint32_t> words(num_words, word);
     uint32_t *d_words_arr;
     gpuErrchk(cudaMalloc(&d_words_arr, num_words * sizeof(uint32_t)));
     gpuErrchk(cudaMemcpy(d_words_arr, words.data(),
                          num_words * sizeof(uint32_t), cudaMemcpyHostToDevice));
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, kMaxTPB);
+    auto [blocks, threads] =
+        getLaunchConfig((num_words + WS - 1) / WS, 256, kMaxTPB);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {

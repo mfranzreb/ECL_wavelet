@@ -65,6 +65,10 @@ class BitArray {
   __device__ [[nodiscard]] bool access(size_t const array_index,
                                        size_t const index) const noexcept;
 
+  __device__ [[nodiscard]] bool access(size_t const array_index,
+                                       size_t const index,
+                                       size_t const offset) const noexcept;
+
   /*!
    * \brief Access operator to write to a whole word of the bit array.
    * \param array_index Index of the bit array to be written to.
@@ -109,6 +113,10 @@ class BitArray {
    */
   __device__ [[nodiscard]] uint32_t word(size_t const array_index,
                                          size_t const index) const noexcept;
+
+  __device__ [[nodiscard]] uint32_t word(size_t const array_index,
+                                         size_t const index,
+                                         size_t const offset) const noexcept;
 
   /*!
    * \brief Direct access to two words of the raw data of the bit

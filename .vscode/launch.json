@@ -253,6 +253,40 @@
         }
       ],
       "preLaunchTask": "build kernel tuner"
+    },
+    {
+      "name": "Debug access profile CUDA",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/benchmark/ecl_access_profile",
+      "args": ["10000 10 500"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build access profile"
+    },
+    {
+      "name": "Debug access profile",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/benchmark/ecl_access_profile",
+      "args": ["10000", "4", "5000"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build access profile"
     }
   ]
 }

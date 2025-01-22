@@ -494,8 +494,9 @@ TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
 
-    // Create 100 random access queries
-    std::vector<size_t> indices(100);
+    size_t num_indices =
+        i % 5 == 0 ? std::min(30 * alphabet_size, 100'000UL) : 100;
+    std::vector<size_t> indices(num_indices);
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<size_t> dis(0, data_size - 1);

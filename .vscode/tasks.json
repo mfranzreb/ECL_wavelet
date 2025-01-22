@@ -58,6 +58,14 @@
       "problemMatcher": []
     },
     {
+      "label": "build access profile",
+      "type": "shell",
+      "command": "cmake",
+      "dependsOn": ["CMake Configure", "Build target access profile"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
       "label": "build kernel tuner",
       "type": "shell",
       "command": "cmake",
@@ -159,6 +167,16 @@
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "./build", "--target", "ecl_WT_hist_benchmarks"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Build target access profile",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "./build", "--target", "ecl_access_profile"],
       "group": {
         "kind": "build",
         "isDefault": true

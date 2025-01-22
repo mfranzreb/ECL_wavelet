@@ -54,16 +54,18 @@ template <int NumThreads>
 __global__ void rank0Kernel(RankSelect rank_select, uint32_t array_index,
                             size_t index, size_t *output) {
   assert(blockDim.x == NumThreads);
-  *output = rank_select.rank0<NumThreads>(
+  auto result = rank_select.rank0<NumThreads>(
       array_index, index, rank_select.bit_array_.getOffset(array_index));
+  *output = result.rank;
 }
 
 template <int NumThreads>
 __global__ void rank1Kernel(RankSelect rank_select, uint32_t array_index,
                             size_t index, size_t *output) {
   assert(blockDim.x == NumThreads);
-  *output = rank_select.rank1<NumThreads>(
+  auto result = rank_select.rank1<NumThreads>(
       array_index, index, rank_select.bit_array_.getOffset(array_index));
+  *output = result.rank;
 }
 
 __global__ void select0Kernel(RankSelect rank_select, uint32_t array_index,

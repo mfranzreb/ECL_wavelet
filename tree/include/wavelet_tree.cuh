@@ -1229,12 +1229,15 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
         }
         break;
       }
-      start = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts, offset);
-      pos = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts + index,
-                                                     offset);
+      auto result =
+          tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts, offset);
+      start = result.rank;
+      result = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts + index,
+                                                        offset);
+      pos = result.rank;
+      bool bit_at_index = result.bit;
       T const diff = getPrevPowTwo<T>(char_end - char_start + 1);
-      if (tree.rank_select_.bit_array_.access(l, char_counts + index, offset) ==
-          false) {
+      if (bit_at_index == false) {
         index = pos - start;
         char_end = char_start + (diff - 1);
       } else {
@@ -1287,11 +1290,13 @@ __global__ LB(MAX_TPB,
       } else {
         char_counts = tree.getCounts(char_start);
       }
-      start = tree.rank_select_.rank0<WS>(
+      auto result = tree.rank_select_.rank0<WS>(
           l, char_counts, tree.rank_select_.bit_array_.getOffset(l));
-      pos = tree.rank_select_.rank0<WS>(
+      start = result.rank;
+      result = tree.rank_select_.rank0<WS>(
           l, char_counts + query.index_,
           tree.rank_select_.bit_array_.getOffset(l));
+      pos = result.rank;
       char_split = char_start + getPrevPowTwo(char_end - char_start);
       if (query.symbol_ < char_split) {
         query.index_ = pos - start;
@@ -1355,16 +1360,18 @@ __global__ void selectKernel(WaveletTree<T> tree,
 
         char_start = getPrevCharStart(char_start, is_rightmost_child,
                                       alphabet_size, l, code.len_);
-        start = tree.rank_select_.rank1<WS>(
+        auto result = tree.rank_select_.rank1<WS>(
             l, tree.getCounts(char_start),
             tree.rank_select_.bit_array_.getOffset(l));
+        start = result.rank;
         query.index_ = tree.rank_select_.select<1>(l, start + query.index_,
                                                    local_t_id, WS) +
                        1;
       } else {
-        start = tree.rank_select_.rank0<WS>(
+        auto result = tree.rank_select_.rank0<WS>(
             l, tree.getCounts(char_start),
             tree.rank_select_.bit_array_.getOffset(l));
+        start = result.rank;
         query.index_ = tree.rank_select_.select<0>(l, start + query.index_,
                                                    local_t_id, WS) +
                        1;

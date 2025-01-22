@@ -115,7 +115,7 @@ __device__ [[nodiscard]] bool BitArray::access(
   assert(array_index < num_arrays_);
   assert(index < d_bit_sizes_[array_index]);
   // Get position in 32-bit word
-  uint8_t const offset = index & uint32_t(0b11111);
+  uint8_t const offset = index & uint8_t(0b11111);
   // Get relevant word, shift and return bit
   return (d_data_[d_offsets_[array_index] + (index >> 5)] >> offset) & 1UL;
 }
@@ -126,7 +126,7 @@ __device__ [[nodiscard]] bool BitArray::access(
   assert(array_index < num_arrays_);
   assert(index < d_bit_sizes_[array_index]);
   // Get position in 32-bit word
-  uint8_t const bit_offset = index & uint32_t(0b11111);
+  uint8_t const bit_offset = index & uint8_t(0b11111);
   // Get relevant word, shift and return bit
   return (d_data_[offset + (index >> 5)] >> bit_offset) & 1U;
 }

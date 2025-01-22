@@ -26,6 +26,11 @@ struct RankSelectConfig {
   using L2_TYPE = uint16_t;
 };  // struct RankSelectConfiguration
 
+struct RankResult {
+  size_t rank;
+  bool bit;
+};
+
 /*!
  * \brief Rank and select support for the bit array.
  */
@@ -69,10 +74,12 @@ class RankSelect {
    * [0, i).
    */
   template <int NumThreads>
-  __device__ [[nodiscard]] size_t rank0(uint32_t const array_index,
-                                        size_t const index,
-                                        size_t const offset) {
-    return index - rank1<NumThreads>(array_index, index, offset);
+  __device__ [[nodiscard]] RankResult rank0(uint32_t const array_index,
+                                            size_t const index,
+                                            size_t const offset) {
+    auto result = rank1<NumThreads>(array_index, index, offset);
+    result.rank = index - result.rank;
+    return result;
   }
 
   /*!
@@ -84,13 +91,13 @@ class RankSelect {
    * [0, i).
    */
   template <int NumThreads>
-  __device__ [[nodiscard]] size_t rank1(uint8_t const array_index,
-                                        size_t const index,
-                                        size_t const offset) {
+  __device__ [[nodiscard]] RankResult rank1(uint8_t const array_index,
+                                            size_t const index,
+                                            size_t const offset) {
     assert(array_index < bit_array_.numArrays());
     assert(index <= bit_array_.size(array_index));
     if (index == 0) {
-      return 0;
+      return RankResult{0, bit_array_.access(array_index, 0, offset)};
     }
     uint8_t t_id = 0;
     if constexpr (NumThreads > 1) {
@@ -109,11 +116,18 @@ class RankSelect {
                               l2_pos * RankSelectConfig::L2_WORD_SIZE;
     size_t const end_word = index / (sizeof(uint32_t) * 8);
 
+    uint64_t word;
+    uint8_t bit_at_index;
+    bool has_last_word = false;
+    //? Better to have inside the if?
+    uint8_t const bit_index = index % (sizeof(uint64_t) * 8);
     for (size_t i = start_word + 2 * t_id; i <= end_word; i += 2 * NumThreads) {
-      uint64_t word = bit_array_.twoWords(array_index, i, offset);
+      word = bit_array_.twoWords(array_index, i, offset);
       if (end_word == 0 or i >= end_word - 1) {
         // Only consider bits up to the index.
-        word = bit_array_.partialTwoWords(word, index % (sizeof(uint64_t) * 8));
+        bit_at_index = static_cast<uint8_t>((word >> bit_index) & 1U);
+        word = bit_array_.partialTwoWords(word, bit_index);
+        has_last_word = true;
       }
       result += __popcll(word);
     }
@@ -127,9 +141,11 @@ class RankSelect {
       result = warpSum<size_t, NumThreads>(mask, result);
       // communicate the result to all threads
       shareVar<size_t>(t_id == 0, result, mask);
+
+      shareVar<uint8_t>(has_last_word, bit_at_index, mask);
     }
 
-    return result;
+    return RankResult{result, static_cast<bool>(bit_at_index)};
   }
 
   /*!

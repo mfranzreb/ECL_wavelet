@@ -1173,6 +1173,7 @@ __global__ LB(MAX_TPB,
   }
 }
 
+//? In NCU, can I see how often a global load hits a cache?
 //? What are wavefronts, what is their relevance?
 //? use texture cache?
 // TODO: remove spillage
@@ -1207,7 +1208,6 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
 
     T char_start = 0;
     T char_end = alphabet_size - 1;
-    size_t start, pos;
     for (uint8_t l = 0; l < num_levels; ++l) {
       size_t char_counts;
       if constexpr (ShmemCounts) {
@@ -1229,13 +1229,15 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
         }
         break;
       }
+#pragma nv_diag_suppress 174
       auto result =
           tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts, offset);
-      start = result.rank;
+      size_t const start = result.rank;
       result = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts + index,
                                                         offset);
-      pos = result.rank;
-      bool bit_at_index = result.bit;
+#pragma nv_diag_default 174
+      size_t const pos = result.rank;
+      bool const bit_at_index = result.bit;
       T const diff = getPrevPowTwo<T>(char_end - char_start + 1);
       if (bit_at_index == false) {
         index = pos - start;
@@ -1290,12 +1292,14 @@ __global__ LB(MAX_TPB,
       } else {
         char_counts = tree.getCounts(char_start);
       }
+#pragma nv_diag_suppress 174
       auto result = tree.rank_select_.rank0<WS>(
           l, char_counts, tree.rank_select_.bit_array_.getOffset(l));
       start = result.rank;
       result = tree.rank_select_.rank0<WS>(
           l, char_counts + query.index_,
           tree.rank_select_.bit_array_.getOffset(l));
+#pragma nv_diag_default 174
       pos = result.rank;
       char_split = char_start + getPrevPowTwo(char_end - char_start);
       if (query.symbol_ < char_split) {

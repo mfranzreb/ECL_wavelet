@@ -10,7 +10,6 @@
 
 #define WS 32
 
-//? Ask about this
 // Define launch bounds based on compute capability
 // __CUDA_ARCH__ is not defined in host code
 #if defined(__CUDA_ARCH__)

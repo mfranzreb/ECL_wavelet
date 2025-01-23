@@ -1,5 +1,9 @@
 #pragma once
 
+#include <thrust/host_vector.h>
+#include <thrust/mr/allocator.h>
+#include <thrust/system/cuda/memory_resource.h>
+
 #include <algorithm>
 #include <bit_array.cuh>
 #include <vector>
@@ -77,7 +81,12 @@ std::vector<T> generateRandomData(std::vector<T> const& alphabet,
 void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
                         size_t& max_memory_usage);
 
-std::vector<size_t> generateRandomQueries(size_t const data_size,
-                                          size_t const num_queries);
+template <typename T>
+using PinnedVector = thrust::host_vector<
+    T, thrust::mr::stateless_resource_allocator<
+           T, thrust::system::cuda::universal_host_pinned_memory_resource>>;
+
+PinnedVector<size_t> generateRandomQueries(size_t const data_size,
+                                           size_t const num_queries);
 
 }  // namespace ecl

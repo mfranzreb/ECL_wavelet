@@ -90,9 +90,10 @@ __global__ void BAaccessKernel(BitArray bit_array, size_t array_index,
 
 template <typename T, int NumThreads>
 __host__ void compareAccessResults(WaveletTree<T>& wt,
-                                   std::vector<size_t>& indices,
+                                   PinnedVector<size_t>& indices,
                                    std::vector<T> const& data) {
-  auto const results = wt.template access<NumThreads>(indices);
+  auto const results = wt.template access<NumThreads>(
+      thrust::raw_pointer_cast(indices.data()), indices.size());
   for (size_t i = 0; i < indices.size(); ++i) {
     EXPECT_EQ(data[indices[i]], results[i]);
   }
@@ -466,7 +467,7 @@ TYPED_TEST(WaveletTreeTestFixture, access) {
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                             kGPUIndex);
 
-  std::vector<size_t> indices(data.size());
+  PinnedVector<size_t> indices(data.size());
   std::iota(indices.begin(), indices.end(), 0);
   compareAccessResults<TypeParam, 1>(wt, indices, data);
   compareAccessResults<TypeParam, 2>(wt, indices, data);
@@ -496,11 +497,7 @@ TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
 
     size_t num_indices =
         i % 5 == 0 ? std::min(30 * alphabet_size, 100'000UL) : 100;
-    std::vector<size_t> indices(num_indices);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<size_t> dis(0, data_size - 1);
-    std::generate(indices.begin(), indices.end(), [&]() { return dis(gen); });
+    auto indices = generateRandomQueries(data_size, num_indices);
 
     compareAccessResults<TypeParam, 1>(wt, indices, data);
     compareAccessResults<TypeParam, 2>(wt, indices, data);

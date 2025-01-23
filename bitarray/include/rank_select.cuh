@@ -119,7 +119,6 @@ class RankSelect {
     uint64_t word;
     uint8_t bit_at_index;
     bool has_last_word = false;
-    //? Better to have inside the if?
     uint8_t const bit_index = index % (sizeof(uint64_t) * 8);
     for (size_t i = start_word + 2 * t_id; i <= end_word; i += 2 * NumThreads) {
       word = bit_array_.twoWords(array_index, i, offset);

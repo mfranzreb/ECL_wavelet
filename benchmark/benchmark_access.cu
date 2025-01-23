@@ -31,7 +31,8 @@ static void BM_Access(benchmark::State& state) {
   auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);
 
   for (auto _ : state) {
-    auto results = wt.access(queries);
+    auto results =
+        wt.access(thrust::raw_pointer_cast(queries.data()), num_queries);
   }
 }
 

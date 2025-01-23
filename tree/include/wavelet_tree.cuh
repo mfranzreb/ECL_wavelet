@@ -92,12 +92,15 @@ class WaveletTree {
   ~WaveletTree();
 
   /*!
-   * \brief Access the symbols at the given indices in the wavelet tree.
-   * \param indices Indices of the symbols to be accessed.
+   * \brief Access the symbols at the given indices in the wavelet tree. The
+   * indices array must be allocated with pinned memory.
+   * \param indices Pointer to the indices of the symbols to be accessed.
+   * \param num_indices Number of indices.
    * \return Vector of symbols.
    */
   template <int NumThreads = 32>
-  __host__ std::vector<T> access(std::vector<size_t> const& indices);
+  __host__ std::vector<T> access(size_t const* indices,
+                                 size_t const num_indices);
 
   /*!
    * \brief Rank queries on the wavelet tree. Number of occurrences of a symbol
@@ -439,11 +442,32 @@ WaveletTree<T>::~WaveletTree() {
   }
 }
 
+// TODO: experiment with different carveouts
 template <typename T>
 template <int NumThreads>
 __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
-    std::vector<size_t> const& indices) {
-  // launch kernel with 1 warp per index
+    size_t const* indices, size_t const num_indices) {
+  // allocate space for results
+  T* d_results;
+  gpuErrchk(cudaMalloc(&d_results, num_indices * sizeof(T)));
+
+  // Divide indices into chunks
+  uint32_t const num_chunks = 10;
+  uint32_t const chunk_size = num_indices / num_chunks;
+  uint32_t const last_chunk_size = chunk_size + num_indices % num_chunks;
+
+  // Copy indices to device
+  size_t* d_indices;
+  gpuErrchk(cudaMalloc(&d_indices, num_indices * sizeof(size_t)));
+
+  cudaStream_t memcpy_stream_HtoD, memcpy_stream_DtoH;
+  gpuErrchk(cudaStreamCreate(&memcpy_stream_HtoD));
+  gpuErrchk(cudaStreamCreate(&memcpy_stream_DtoH));
+
+  // Copy first chunk
+  gpuErrchk(cudaMemcpyAsync(d_indices, indices, chunk_size * sizeof(size_t),
+                            cudaMemcpyHostToDevice, memcpy_stream_HtoD));
+
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
                                   accessKernel<T, true, NumThreads, true>));
@@ -453,8 +477,6 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
 
   maxThreadsPerBlockAccess =
       findLargestDivisor(kMaxTPB, maxThreadsPerBlockAccess);
-
-  size_t const num_indices = indices.size();
 
   size_t const counts_size = sizeof(size_t) * alphabet_size_;
 
@@ -503,7 +525,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   if (ideal_configs.ideal_TPB_accessKernel != 0) {
     size_t const num_warps =
         std::min(ideal_configs.ideal_tot_threads_accessKernel / WS,
-                 (num_indices * NumThreads) / WS);
+                 static_cast<size_t>((chunk_size * NumThreads) / WS));
     if (ideal_configs.ideal_TPB_accessKernel < min_block_size) {
       std::tie(num_blocks, threads_per_block) =
           getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockAccess);
@@ -518,42 +540,58 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
         min_block_size, maxThreadsPerBlockAccess);
   }
 
-  // allocate space for results
-  T* d_results;
-  gpuErrchk(cudaMalloc(&d_results, num_indices * sizeof(T)));
-
-  // Copy indices to device
-  size_t* d_indices;
-  gpuErrchk(cudaMalloc(&d_indices, num_indices * sizeof(size_t)));
-  gpuErrchk(cudaMemcpy(d_indices, indices.data(), num_indices * sizeof(size_t),
-                       cudaMemcpyHostToDevice));
-
   uint32_t const num_groups = (num_blocks * threads_per_block) / NumThreads;
-  if (offsets_shmem) {
-    if (counts_shmem) {
-      accessKernel<T, true, NumThreads, true>
-          <<<num_blocks, threads_per_block, counts_size + offsets_size>>>(
-              *this, d_indices, num_indices, d_results, alphabet_size_,
-              num_groups, num_levels_);
-    } else {
-      accessKernel<T, false, NumThreads, true>
-          <<<num_blocks, threads_per_block, offsets_size>>>(
-              *this, d_indices, num_indices, d_results, alphabet_size_,
-              num_groups, num_levels_);
-    }
-  } else {
-    accessKernel<T, false, NumThreads, false>
-        <<<num_blocks, threads_per_block>>>(*this, d_indices, num_indices,
-                                            d_results, alphabet_size_,
-                                            num_groups, num_levels_);
-  }
-  kernelCheck();
 
-  // copy results back to host
   std::vector<T> results(num_indices);
-  gpuErrchk(cudaMemcpy(results.data(), d_results, num_indices * sizeof(T),
-                       cudaMemcpyDeviceToHost));
+  for (uint32_t i = 1; i <= num_chunks; ++i) {
+    uint32_t const current_chunk_size =
+        (i == num_chunks) ? last_chunk_size : chunk_size;
+    kernelStreamCheck(memcpy_stream_HtoD);
+    if (offsets_shmem) {
+      if (counts_shmem) {
+        accessKernel<T, true, NumThreads, true>
+            <<<num_blocks, threads_per_block, counts_size + offsets_size>>>(
+                *this, d_indices + chunk_size * (i - 1), current_chunk_size,
+                d_results + chunk_size * (i - 1), alphabet_size_, num_groups,
+                num_levels_);
+      } else {
+        accessKernel<T, false, NumThreads, true>
+            <<<num_blocks, threads_per_block, offsets_size>>>(
+                *this, d_indices + chunk_size * (i - 1), current_chunk_size,
+                d_results + chunk_size * (i - 1), alphabet_size_, num_groups,
+                num_levels_);
+      }
+    } else {
+      accessKernel<T, false, NumThreads, false>
+          <<<num_blocks, threads_per_block>>>(
+              *this, d_indices + chunk_size * (i - 1), current_chunk_size,
+              d_results + chunk_size * (i - 1), alphabet_size_, num_groups,
+              num_levels_);
+    }
+    gpuErrchk(cudaPeekAtLastError());
+
+    if (i < num_chunks) {
+      uint32_t const next_chunk_size =
+          i == (num_chunks - 1) ? last_chunk_size : chunk_size;
+      // Copy next chunk
+      gpuErrchk(cudaMemcpyAsync(d_indices + chunk_size * i,
+                                indices + chunk_size * i,
+                                next_chunk_size * sizeof(size_t),
+                                cudaMemcpyHostToDevice, memcpy_stream_HtoD));
+    }
+
+    kernelStreamCheck(cudaStreamPerThread);
+
+    // Copy results back to host
+    gpuErrchk(cudaMemcpyAsync(results.data() + chunk_size * (i - 1),
+                              d_results + chunk_size * (i - 1),
+                              current_chunk_size * sizeof(T),
+                              cudaMemcpyDeviceToHost, memcpy_stream_DtoH));
+  }
+  // copy results back to host
   gpuErrchk(cudaFree(d_indices));
+
+  kernelStreamCheck(memcpy_stream_DtoH);
   gpuErrchk(cudaFree(d_results));
 
   if (not is_min_alphabet_) {
@@ -1075,7 +1113,6 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
   if constexpr (UseShmem) {
     __syncthreads();
     // Reduce shared histograms to first one
-    // TODO: Could maybe be improved
     for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
       size_t sum = shared_hist[i];
       for (size_t j = 1; j < hists_per_block; ++j) {
@@ -1173,9 +1210,6 @@ __global__ LB(MAX_TPB,
   }
 }
 
-//? In NCU, can I see how often a global load hits a cache?
-//? What are wavefronts, what is their relevance?
-//? use texture cache?
 // TODO: remove spillage
 template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets>
 __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(

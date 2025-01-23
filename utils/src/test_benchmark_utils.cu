@@ -1,6 +1,11 @@
+#include <thrust/host_vector.h>
+#include <thrust/mr/allocator.h>
+#include <thrust/system/cuda/memory_resource.h>
+
 #include <algorithm>
 #include <bit_array.cuh>
 #include <random>
+#include <test_benchmark_utils.cuh>
 #include <utils.cuh>
 #include <vector>
 
@@ -12,15 +17,6 @@ __global__ void writeWordsParallelKernel(BitArray bit_array, size_t array_index,
   for (uint32_t i = thread_id; i < num_words; i += num_threads) {
     bit_array.writeWord(array_index, i, words[i]);
   }
-}
-
-template <typename T>
-void generateRandomNums(std::vector<T>& nums_vec, T const min, T const max) {
-  std::random_device rd;
-  std::mt19937 gen(rd());  // Random number generator
-  std::uniform_int_distribution<T> dis(min, max);
-
-  std::generate(nums_vec.begin(), nums_vec.end(), [&]() { return dis(gen); });
 }
 
 __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels) {
@@ -86,9 +82,9 @@ void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
   max_memory_usage -= start_bytes;
 }
 
-std::vector<size_t> generateRandomQueries(size_t const data_size,
-                                          size_t const num_queries) {
-  std::vector<size_t> queries(num_queries);
+PinnedVector<size_t> generateRandomQueries(size_t const data_size,
+                                           size_t const num_queries) {
+  PinnedVector<size_t> queries(num_queries);
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<size_t> dis(0, data_size - 1);

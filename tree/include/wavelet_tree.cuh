@@ -1229,17 +1229,13 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
         }
         break;
       }
-      auto result = tree.rank_select_.rank0<ThreadsPerQuery>(
-          l, char_counts + index, offset);
+      auto result =
+          tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts, offset);
+      start = result.rank;
+      result = tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts + index,
+                                                        offset);
       pos = result.rank;
-      bool const bit_at_index = result.bit;
-      if (char_counts > 0) {
-        result =
-            tree.rank_select_.rank0<ThreadsPerQuery>(l, char_counts, offset);
-        start = result.rank;
-      } else {
-        start = 0;
-      }
+      bool bit_at_index = result.bit;
       T const diff = getPrevPowTwo<T>(char_end - char_start + 1);
       if (bit_at_index == false) {
         index = pos - start;

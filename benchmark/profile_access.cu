@@ -23,12 +23,12 @@ int main(int argc, char** argv) {
                                  0);
     cudaProfilerStart();
     auto results = wt.template access<1>(queries.data(), num_queries);
+    cudaProfilerStop();
     results = wt.template access<2>(queries.data(), num_queries);
     results = wt.template access<4>(queries.data(), num_queries);
     results = wt.template access<8>(queries.data(), num_queries);
     results = wt.template access<16>(queries.data(), num_queries);
     results = wt.template access<32>(queries.data(), num_queries);
-    cudaProfilerStop();
   } else if (alphabet_size < std::numeric_limits<uint16_t>::max()) {
     std::vector<uint16_t> alphabet;
     std::vector<uint16_t> data;
@@ -39,12 +39,12 @@ int main(int argc, char** argv) {
                                   0);
     cudaProfilerStart();
     auto results = wt.template access<1>(queries.data(), num_queries);
+    cudaProfilerStop();
     results = wt.template access<2>(queries.data(), num_queries);
     results = wt.template access<4>(queries.data(), num_queries);
     results = wt.template access<8>(queries.data(), num_queries);
     results = wt.template access<16>(queries.data(), num_queries);
     results = wt.template access<32>(queries.data(), num_queries);
-    cudaProfilerStop();
   } else {
     std::vector<uint32_t> alphabet;
     std::vector<uint32_t> data;
@@ -56,11 +56,11 @@ int main(int argc, char** argv) {
                                   0);
     cudaProfilerStart();
     auto results = wt.template access<1>(queries.data(), num_queries);
+    cudaProfilerStop();
     results = wt.template access<2>(queries.data(), num_queries);
     results = wt.template access<4>(queries.data(), num_queries);
     results = wt.template access<8>(queries.data(), num_queries);
     results = wt.template access<16>(queries.data(), num_queries);
     results = wt.template access<32>(queries.data(), num_queries);
-    cudaProfilerStop();
   }
 }

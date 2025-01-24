@@ -10,8 +10,8 @@ ncu --export "./rank_1G_150_5000" --force-overwrite --kernel-id ::rankKernel: --
 
 ncu --export "./rank_500M_20000_5000" --force-overwrite --kernel-id ::rankKernel: --section ComputeWorkloadAnalysis --section InstructionStats --section LaunchStats --section MemoryWorkloadAnalysis --section MemoryWorkloadAnalysis_Chart --section MemoryWorkloadAnalysis_Tables --section Occupancy --section SchedulerStats --section SourceCounters --section SpeedOfLight --section SpeedOfLight_RooflineChart --section WarpStateStats --import-source yes ./build/benchmark/ecl_rank_profile 500000000 20000 5000
 
-nsys --capture-range=cudaProfilerApi --output="./rank_1G_4_5000" --force-overwrite=true --trace=cuda,osrt ./build/benchmark/ecl_rank_profile 1000000000 4 5000
+nsys profile --capture-range=cudaProfilerApi --output="./rank_1G_4_5000" --force-overwrite=true --trace=cuda,osrt ./build/benchmark/ecl_rank_profile 1000000000 4 5000
 
-nsys --capture-range=cudaProfilerApi --output="./rank_1G_150_5000" --force-overwrite=true --trace=cuda,osrt ./build/benchmark/ecl_rank_profile 1000000000 150 5000
+nsys profile --capture-range=cudaProfilerApi --output="./rank_1G_150_5000" --force-overwrite=true --trace=cuda,osrt ./build/benchmark/ecl_rank_profile 1000000000 150 5000
 
-nsys --capture-range=cudaProfilerApi --output="./rank_500M_20000_5000" --force-overwrite=true --trace=cuda,osrt ./build/benchmark/ecl_rank_profile 500000000 20000 5000
+nsys profile --capture-range=cudaProfilerApi --output="./rank_500M_20000_5000" --force-overwrite=true --trace=cuda,osrt ./build/benchmark/ecl_rank_profile 500000000 20000 5000

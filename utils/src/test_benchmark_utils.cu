@@ -1,7 +1,3 @@
-#include <thrust/host_vector.h>
-#include <thrust/mr/allocator.h>
-#include <thrust/system/cuda/memory_resource.h>
-
 #include <algorithm>
 #include <bit_array.cuh>
 #include <random>
@@ -82,9 +78,9 @@ void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
   max_memory_usage -= start_bytes;
 }
 
-PinnedVector<size_t> generateRandomQueries(size_t const data_size,
-                                           size_t const num_queries) {
-  PinnedVector<size_t> queries(num_queries);
+std::vector<size_t> generateRandomQueries(size_t const data_size,
+                                          size_t const num_queries) {
+  std::vector<size_t> queries(num_queries);
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<size_t> dis(0, data_size - 1);

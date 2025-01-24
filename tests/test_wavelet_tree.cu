@@ -90,10 +90,10 @@ __global__ void BAaccessKernel(BitArray bit_array, size_t array_index,
 
 template <typename T, int NumThreads>
 __host__ void compareAccessResults(WaveletTree<T>& wt,
-                                   PinnedVector<size_t>& indices,
+                                   std::vector<size_t>& indices,
                                    std::vector<T> const& data) {
-  auto const results = wt.template access<NumThreads>(
-      thrust::raw_pointer_cast(indices.data()), indices.size());
+  auto const results =
+      wt.template access<NumThreads>(indices.data(), indices.size());
   for (size_t i = 0; i < indices.size(); ++i) {
     EXPECT_EQ(data[indices[i]], results[i]);
   }
@@ -467,7 +467,7 @@ TYPED_TEST(WaveletTreeTestFixture, access) {
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                             kGPUIndex);
 
-  PinnedVector<size_t> indices(data.size());
+  std::vector<size_t> indices(data.size());
   std::iota(indices.begin(), indices.end(), 0);
   compareAccessResults<TypeParam, 1>(wt, indices, data);
   compareAccessResults<TypeParam, 2>(wt, indices, data);

@@ -447,26 +447,60 @@ template <typename T>
 template <int NumThreads>
 __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
     size_t const* indices, size_t const num_indices) {
-  // allocate space for results
-  T* d_results;
-  gpuErrchk(cudaMalloc(&d_results, num_indices * sizeof(T)));
+  assert(num_indices > 0);
 
-  // Divide indices into chunks
-  uint32_t const num_chunks = 10;
+  // TODO: find good heuristic
+  //  Divide indices into chunks
+  uint32_t const num_chunks = num_indices < 10 ? 1 : 10;
   uint32_t const chunk_size = num_indices / num_chunks;
   uint32_t const last_chunk_size = chunk_size + num_indices % num_chunks;
 
-  // Copy indices to device
+  std::atomic<uint32_t> processed_chunks(0);
+  std::atomic_bool results_alloced(false);
+  std::vector<T> results;
+  T* d_results;
+
+  std::thread t_DtoH(
+      [&](std::atomic<uint32_t>& processed_chunks,
+          std::atomic_bool& results_alloced) {
+        // allocate space for results
+        gpuErrchk(cudaMalloc(&d_results, num_indices * sizeof(T)));
+        results_alloced = true;
+
+        results.resize(num_indices);
+
+        for (uint32_t i = 0; i < num_chunks; ++i) {
+          uint32_t const current_chunk_size =
+              i == (num_chunks - 1) ? last_chunk_size : chunk_size;
+          while (processed_chunks <= i) {
+            std::this_thread::yield();
+          }
+          gpuErrchk(cudaMemcpy(
+              (T*)(results.data() + chunk_size * i), d_results + chunk_size * i,
+              current_chunk_size * sizeof(T), cudaMemcpyDeviceToHost));
+        }
+        gpuErrchk(cudaFree(d_results));
+      },
+      std::ref(processed_chunks), std::ref(results_alloced));
+
+  std::atomic<uint32_t> copied_chunks(0);
   size_t* d_indices;
-  gpuErrchk(cudaMalloc(&d_indices, num_indices * sizeof(size_t)));
 
-  cudaStream_t memcpy_stream_HtoD, memcpy_stream_DtoH;
-  gpuErrchk(cudaStreamCreate(&memcpy_stream_HtoD));
-  gpuErrchk(cudaStreamCreate(&memcpy_stream_DtoH));
+  std::thread t_HtoD(
+      [&](std::atomic<uint32_t>& copied_chunks) {
+        gpuErrchk(cudaMalloc(&d_indices, num_indices * sizeof(size_t)));
+        for (uint32_t i = 0; i < num_chunks; ++i) {
+          uint32_t const current_chunk_size =
+              i == (num_chunks - 1) ? last_chunk_size : chunk_size;
 
-  // Copy first chunk
-  gpuErrchk(cudaMemcpyAsync(d_indices, indices, chunk_size * sizeof(size_t),
-                            cudaMemcpyHostToDevice, memcpy_stream_HtoD));
+          gpuErrchk(cudaMemcpy(
+              d_indices + chunk_size * i, indices + chunk_size * i,
+              current_chunk_size * sizeof(size_t), cudaMemcpyHostToDevice));
+
+          copied_chunks++;
+        }
+      },
+      std::ref(copied_chunks));
 
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
@@ -536,29 +570,34 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   } else {
     // Make the minimum block size a multiple of WS
     std::tie(num_blocks, threads_per_block) = getLaunchConfig(
-        (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount) / WS,
+        std::min((chunk_size * NumThreads + WS - 1) / WS,
+                 static_cast<uint32_t>((prop.maxThreadsPerMultiProcessor *
+                                        prop.multiProcessorCount) /
+                                       WS)),
         min_block_size, maxThreadsPerBlockAccess);
   }
 
   uint32_t const num_groups = (num_blocks * threads_per_block) / NumThreads;
 
-  std::vector<T> results(num_indices);
-  for (uint32_t i = 1; i <= num_chunks; ++i) {
+  for (uint32_t i = 0; i < num_chunks; ++i) {
     uint32_t const current_chunk_size =
-        (i == num_chunks) ? last_chunk_size : chunk_size;
-    kernelStreamCheck(memcpy_stream_HtoD);
+        (i == (num_chunks - 1)) ? last_chunk_size : chunk_size;
+
+    while (copied_chunks <= i or (not results_alloced)) {
+      std::this_thread::yield();
+    }
     if (offsets_shmem) {
       if (counts_shmem) {
         accessKernel<T, true, NumThreads, true>
             <<<num_blocks, threads_per_block, counts_size + offsets_size>>>(
-                *this, d_indices + chunk_size * (i - 1), current_chunk_size,
-                d_results + chunk_size * (i - 1), alphabet_size_, num_groups,
+                *this, d_indices + chunk_size * i, current_chunk_size,
+                d_results + chunk_size * i, alphabet_size_, num_groups,
                 num_levels_);
       } else {
         accessKernel<T, false, NumThreads, true>
             <<<num_blocks, threads_per_block, offsets_size>>>(
-                *this, d_indices + chunk_size * (i - 1), current_chunk_size,
-                d_results + chunk_size * (i - 1), alphabet_size_, num_groups,
+                *this, d_indices + chunk_size * i, current_chunk_size,
+                d_results + chunk_size * i, alphabet_size_, num_groups,
                 num_levels_);
       }
     } else {
@@ -568,31 +607,13 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
               d_results + chunk_size * (i - 1), alphabet_size_, num_groups,
               num_levels_);
     }
-    gpuErrchk(cudaPeekAtLastError());
-
-    if (i < num_chunks) {
-      uint32_t const next_chunk_size =
-          i == (num_chunks - 1) ? last_chunk_size : chunk_size;
-      // Copy next chunk
-      gpuErrchk(cudaMemcpyAsync(d_indices + chunk_size * i,
-                                indices + chunk_size * i,
-                                next_chunk_size * sizeof(size_t),
-                                cudaMemcpyHostToDevice, memcpy_stream_HtoD));
-    }
-
-    kernelStreamCheck(cudaStreamPerThread);
-
-    // Copy results back to host
-    gpuErrchk(cudaMemcpyAsync(results.data() + chunk_size * (i - 1),
-                              d_results + chunk_size * (i - 1),
-                              current_chunk_size * sizeof(T),
-                              cudaMemcpyDeviceToHost, memcpy_stream_DtoH));
+    kernelStreamCheck(0);
+    processed_chunks++;
   }
   // copy results back to host
   gpuErrchk(cudaFree(d_indices));
-
-  kernelStreamCheck(memcpy_stream_DtoH);
-  gpuErrchk(cudaFree(d_results));
+  t_DtoH.join();
+  t_HtoD.join();
 
   if (not is_min_alphabet_) {
 #pragma omp parallel for

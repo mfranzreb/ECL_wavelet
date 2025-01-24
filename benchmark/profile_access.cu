@@ -22,18 +22,12 @@ int main(int argc, char** argv) {
     ecl::WaveletTree<uint8_t> wt(data.data(), data_size, std::move(alphabet),
                                  0);
     cudaProfilerStart();
-    auto results = wt.template access<1>(
-        thrust::raw_pointer_cast(queries.data()), num_queries);
-    results = wt.template access<2>(thrust::raw_pointer_cast(queries.data()),
-                                    num_queries);
-    results = wt.template access<4>(thrust::raw_pointer_cast(queries.data()),
-                                    num_queries);
-    results = wt.template access<8>(thrust::raw_pointer_cast(queries.data()),
-                                    num_queries);
-    results = wt.template access<16>(thrust::raw_pointer_cast(queries.data()),
-                                     num_queries);
-    results = wt.template access<32>(thrust::raw_pointer_cast(queries.data()),
-                                     num_queries);
+    auto results = wt.template access<1>(queries.data(), num_queries);
+    results = wt.template access<2>(queries.data(), num_queries);
+    results = wt.template access<4>(queries.data(), num_queries);
+    results = wt.template access<8>(queries.data(), num_queries);
+    results = wt.template access<16>(queries.data(), num_queries);
+    results = wt.template access<32>(queries.data(), num_queries);
     cudaProfilerStop();
   } else if (alphabet_size < std::numeric_limits<uint16_t>::max()) {
     std::vector<uint16_t> alphabet;
@@ -44,18 +38,12 @@ int main(int argc, char** argv) {
     ecl::WaveletTree<uint16_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
     cudaProfilerStart();
-    auto results = wt.template access<1>(
-        thrust::raw_pointer_cast(queries.data()), num_queries);
-    results = wt.template access<2>(thrust::raw_pointer_cast(queries.data()),
-                                    num_queries);
-    results = wt.template access<4>(thrust::raw_pointer_cast(queries.data()),
-                                    num_queries);
-    results = wt.template access<8>(thrust::raw_pointer_cast(queries.data()),
-                                    num_queries);
-    results = wt.template access<16>(thrust::raw_pointer_cast(queries.data()),
-                                     num_queries);
-    results = wt.template access<32>(thrust::raw_pointer_cast(queries.data()),
-                                     num_queries);
+    auto results = wt.template access<1>(queries.data(), num_queries);
+    results = wt.template access<2>(queries.data(), num_queries);
+    results = wt.template access<4>(queries.data(), num_queries);
+    results = wt.template access<8>(queries.data(), num_queries);
+    results = wt.template access<16>(queries.data(), num_queries);
+    results = wt.template access<32>(queries.data(), num_queries);
     cudaProfilerStop();
   } else {
     std::vector<uint32_t> alphabet;
@@ -67,18 +55,12 @@ int main(int argc, char** argv) {
     ecl::WaveletTree<uint32_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
     cudaProfilerStart();
-    auto results = wt.template access<1>(
-        thrust::raw_pointer_cast(queries.data()), num_queries);
-    results = wt.template access<2>(thrust::raw_pointer_cast(queries.data()),
-                                    num_queries);
-    results = wt.template access<4>(thrust::raw_pointer_cast(queries.data()),
-                                    num_queries);
-    results = wt.template access<8>(thrust::raw_pointer_cast(queries.data()),
-                                    num_queries);
-    results = wt.template access<16>(thrust::raw_pointer_cast(queries.data()),
-                                     num_queries);
-    results = wt.template access<32>(thrust::raw_pointer_cast(queries.data()),
-                                     num_queries);
+    auto results = wt.template access<1>(queries.data(), num_queries);
+    results = wt.template access<2>(queries.data(), num_queries);
+    results = wt.template access<4>(queries.data(), num_queries);
+    results = wt.template access<8>(queries.data(), num_queries);
+    results = wt.template access<16>(queries.data(), num_queries);
+    results = wt.template access<32>(queries.data(), num_queries);
     cudaProfilerStop();
   }
 }

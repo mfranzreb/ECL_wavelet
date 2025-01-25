@@ -452,8 +452,8 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   // TODO: find good heuristic
   //  Divide indices into chunks
   uint32_t const num_chunks = num_indices < 10 ? 1 : 10;
-  uint32_t const chunk_size = num_indices / num_chunks;
-  uint32_t const last_chunk_size = chunk_size + num_indices % num_chunks;
+  size_t const chunk_size = num_indices / num_chunks;
+  size_t const last_chunk_size = chunk_size + num_indices % num_chunks;
 
   std::atomic<uint32_t> processed_chunks(0);
   std::atomic_bool results_alloced(false);
@@ -476,7 +476,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
             std::this_thread::yield();
           }
           gpuErrchk(cudaMemcpy(
-              (T*)(results.data() + chunk_size * i), d_results + chunk_size * i,
+              results.data() + chunk_size * i, d_results + chunk_size * i,
               current_chunk_size * sizeof(T), cudaMemcpyDeviceToHost));
         }
         gpuErrchk(cudaFree(d_results));
@@ -487,20 +487,26 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   size_t* d_indices;
 
   std::thread t_HtoD(
-      [&](std::atomic<uint32_t>& copied_chunks) {
-        gpuErrchk(cudaMalloc(&d_indices, num_indices * sizeof(size_t)));
+      [&](std::atomic<uint32_t>& copied_chunks,
+          std::atomic<uint32_t>& processed_chunks) {
+        gpuErrchk(cudaMalloc(&d_indices, last_chunk_size * 2 * sizeof(size_t)));
         for (uint32_t i = 0; i < num_chunks; ++i) {
           uint32_t const current_chunk_size =
               i == (num_chunks - 1) ? last_chunk_size : chunk_size;
 
+          while (copied_chunks - processed_chunks > 0) {
+            std::this_thread::yield();
+          }
           gpuErrchk(cudaMemcpy(
-              d_indices + chunk_size * i, indices + chunk_size * i,
+              d_indices + last_chunk_size * (i % 2), indices + chunk_size * i,
               current_chunk_size * sizeof(size_t), cudaMemcpyHostToDevice));
+
+          kernelStreamCheck(cudaStreamPerThread);
 
           copied_chunks++;
         }
       },
-      std::ref(copied_chunks));
+      std::ref(copied_chunks), std::ref(processed_chunks));
 
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
@@ -571,9 +577,9 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
     // Make the minimum block size a multiple of WS
     std::tie(num_blocks, threads_per_block) = getLaunchConfig(
         std::min((chunk_size * NumThreads + WS - 1) / WS,
-                 static_cast<uint32_t>((prop.maxThreadsPerMultiProcessor *
-                                        prop.multiProcessorCount) /
-                                       WS)),
+                 static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
+                                      prop.multiProcessorCount) /
+                                     WS)),
         min_block_size, maxThreadsPerBlockAccess);
   }
 
@@ -590,24 +596,24 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
       if (counts_shmem) {
         accessKernel<T, true, NumThreads, true>
             <<<num_blocks, threads_per_block, counts_size + offsets_size>>>(
-                *this, d_indices + chunk_size * i, current_chunk_size,
-                d_results + chunk_size * i, alphabet_size_, num_groups,
-                num_levels_);
+                *this, d_indices + last_chunk_size * (i % 2),
+                current_chunk_size, d_results + chunk_size * i, alphabet_size_,
+                num_groups, num_levels_);
       } else {
         accessKernel<T, false, NumThreads, true>
             <<<num_blocks, threads_per_block, offsets_size>>>(
-                *this, d_indices + chunk_size * i, current_chunk_size,
-                d_results + chunk_size * i, alphabet_size_, num_groups,
-                num_levels_);
+                *this, d_indices + last_chunk_size * (i % 2),
+                current_chunk_size, d_results + chunk_size * i, alphabet_size_,
+                num_groups, num_levels_);
       }
     } else {
       accessKernel<T, false, NumThreads, false>
           <<<num_blocks, threads_per_block>>>(
-              *this, d_indices + chunk_size * (i - 1), current_chunk_size,
-              d_results + chunk_size * (i - 1), alphabet_size_, num_groups,
+              *this, d_indices + last_chunk_size * (i % 2), current_chunk_size,
+              d_results + chunk_size * i, alphabet_size_, num_groups,
               num_levels_);
     }
-    kernelStreamCheck(0);
+    kernelStreamCheck(cudaStreamPerThread);
     processed_chunks++;
   }
   // copy results back to host

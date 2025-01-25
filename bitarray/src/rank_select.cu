@@ -151,7 +151,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
 
       calculateL2EntriesKernel<kItemsPerThread>
           <<<1, kBlockSize>>>(*this, i, num_l2_blocks);
-      kernelStreamCheck(0);
+      kernelStreamCheck(cudaStreamPerThread);
     } else {
       uint16_t const num_last_l2_blocks =
           (bit_array_.sizeHost(i) % RankSelectConfig::L1_BIT_SIZE +
@@ -178,7 +178,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
       // calculate L2 entries for all L1 blocks
       calculateL2EntriesKernel<kItemsPerThread>
           <<<num_l1_blocks, kBlockSize>>>(*this, i, num_last_l2_blocks);
-      kernelStreamCheck(0);
+      kernelStreamCheck(cudaStreamPerThread);
 
       RankSelectConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
 

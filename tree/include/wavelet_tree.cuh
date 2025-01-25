@@ -455,58 +455,104 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   size_t const chunk_size = num_indices / num_chunks;
   size_t const last_chunk_size = chunk_size + num_indices % num_chunks;
 
-  std::atomic<uint32_t> processed_chunks(0);
-  std::atomic_bool results_alloced(false);
+  std::atomic<uint32_t> processed_chunks_recorded(0);
+  std::atomic_bool results_alloc_recorded(false);
   std::vector<T> results;
   T* d_results;
 
+  std::vector<cudaEvent_t> kernel_events;
+  for (uint32_t i = 0; i < num_chunks; ++i) {
+    cudaEvent_t event;
+    gpuErrchk(cudaEventCreate(&event));
+    kernel_events.push_back(event);
+  }
+
+  cudaStream_t results_stream;
+  gpuErrchk(cudaStreamCreate(&results_stream));
+
+  cudaEvent_t results_event;
+  gpuErrchk(cudaEventCreate(&results_event));
+
   std::thread t_DtoH(
-      [&](std::atomic<uint32_t>& processed_chunks,
-          std::atomic_bool& results_alloced) {
+      [&](std::atomic<uint32_t>& processed_chunks_recorded,
+          std::atomic_bool& results_alloc_recorded) {
         // allocate space for results
-        gpuErrchk(cudaMalloc(&d_results, num_indices * sizeof(T)));
-        results_alloced = true;
+        gpuErrchk(cudaMallocAsync(&d_results, num_indices * sizeof(T),
+                                  results_stream));
+
+        gpuErrchk(cudaEventRecord(results_event, results_stream));
+        results_alloc_recorded = true;
 
         results.resize(num_indices);
 
         for (uint32_t i = 0; i < num_chunks; ++i) {
           uint32_t const current_chunk_size =
               i == (num_chunks - 1) ? last_chunk_size : chunk_size;
-          while (processed_chunks <= i) {
+          while (processed_chunks_recorded <= i) {
             std::this_thread::yield();
           }
-          gpuErrchk(cudaMemcpy(
-              results.data() + chunk_size * i, d_results + chunk_size * i,
-              current_chunk_size * sizeof(T), cudaMemcpyDeviceToHost));
+
+          gpuErrchk(cudaStreamWaitEvent(results_stream, kernel_events[i], 0));
+
+          gpuErrchk(cudaMemcpyAsync(results.data() + chunk_size * i,
+                                    d_results + chunk_size * i,
+                                    current_chunk_size * sizeof(T),
+                                    cudaMemcpyDeviceToHost, results_stream));
         }
         gpuErrchk(cudaFree(d_results));
       },
-      std::ref(processed_chunks), std::ref(results_alloced));
+      std::ref(processed_chunks_recorded), std::ref(results_alloc_recorded));
 
-  std::atomic<uint32_t> copied_chunks(0);
+  std::atomic<uint32_t> copied_chunks_recorded(0);
   size_t* d_indices;
 
+  // Create one event per chunk
+  std::vector<cudaEvent_t> copy_events;
+  for (uint32_t i = 0; i < num_chunks; ++i) {
+    cudaEvent_t event;
+    gpuErrchk(cudaEventCreate(&event));
+    copy_events.push_back(event);
+  }
+
+  uint8_t constexpr kNumBuffers = 2;
+
+  cudaStream_t copy_stream, kernel_stream;
+  gpuErrchk(cudaStreamCreate(&copy_stream));
+  gpuErrchk(cudaStreamCreate(&kernel_stream));
+
   std::thread t_HtoD(
-      [&](std::atomic<uint32_t>& copied_chunks,
-          std::atomic<uint32_t>& processed_chunks) {
-        gpuErrchk(cudaMalloc(&d_indices, last_chunk_size * 2 * sizeof(size_t)));
+      [&](std::atomic<uint32_t>& copied_chunks_recorded,
+          std::atomic<uint32_t>& processed_chunks_recorded) {
+        gpuErrchk(cudaMallocAsync(
+            &d_indices, last_chunk_size * kNumBuffers * sizeof(size_t),
+            copy_stream));
         for (uint32_t i = 0; i < num_chunks; ++i) {
           uint32_t const current_chunk_size =
               i == (num_chunks - 1) ? last_chunk_size : chunk_size;
 
-          while (copied_chunks - processed_chunks > 1) {
-            std::this_thread::yield();
+          if (i >= kNumBuffers) {
+            while (copied_chunks_recorded - processed_chunks_recorded > 1) {
+              std::this_thread::yield();
+            }
+            gpuErrchk(cudaStreamWaitEvent(copy_stream,
+                                          kernel_events[i - kNumBuffers], 0));
           }
-          gpuErrchk(cudaMemcpy(
-              d_indices + last_chunk_size * (i % 2), indices + chunk_size * i,
-              current_chunk_size * sizeof(size_t), cudaMemcpyHostToDevice));
 
-          kernelStreamCheck(cudaStreamPerThread);
+          gpuErrchk(cudaMemcpyAsync(
+              d_indices + last_chunk_size * (i % kNumBuffers),
+              indices + chunk_size * i, current_chunk_size * sizeof(size_t),
+              cudaMemcpyHostToDevice, copy_stream));
 
-          copied_chunks++;
+          gpuErrchk(cudaEventRecord(copy_events[i], copy_stream));
+          copied_chunks_recorded++;
         }
+        while (copied_chunks_recorded > processed_chunks_recorded) {
+          std::this_thread::yield();
+        }
+        gpuErrchk(cudaStreamWaitEvent(copy_stream, kernel_events.back(), 0));
+        gpuErrchk(cudaFree(d_indices));
       },
-      std::ref(copied_chunks), std::ref(processed_chunks));
+      std::ref(copied_chunks_recorded), std::ref(processed_chunks_recorded));
 
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
@@ -585,41 +631,56 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
 
   uint32_t const num_groups = (num_blocks * threads_per_block) / NumThreads;
 
+  while (not results_alloc_recorded) {
+    std::this_thread::yield();
+  }
+  gpuErrchk(cudaStreamWaitEvent(kernel_stream, results_event, 0));
   for (uint32_t i = 0; i < num_chunks; ++i) {
     uint32_t const current_chunk_size =
         (i == (num_chunks - 1)) ? last_chunk_size : chunk_size;
 
-    while (copied_chunks <= i or (not results_alloced)) {
+    while (copied_chunks_recorded <= i) {
       std::this_thread::yield();
     }
+    gpuErrchk(cudaStreamWaitEvent(kernel_stream, copy_events[i], 0));
     if (offsets_shmem) {
       if (counts_shmem) {
         accessKernel<T, true, NumThreads, true>
-            <<<num_blocks, threads_per_block, counts_size + offsets_size>>>(
-                *this, d_indices + last_chunk_size * (i % 2),
-                current_chunk_size, d_results + chunk_size * i, alphabet_size_,
-                num_groups, num_levels_);
+            <<<num_blocks, threads_per_block, counts_size + offsets_size,
+               kernel_stream>>>(*this,
+                                d_indices + last_chunk_size * (i % kNumBuffers),
+                                current_chunk_size, d_results + chunk_size * i,
+                                alphabet_size_, num_groups, num_levels_);
       } else {
         accessKernel<T, false, NumThreads, true>
-            <<<num_blocks, threads_per_block, offsets_size>>>(
-                *this, d_indices + last_chunk_size * (i % 2),
+            <<<num_blocks, threads_per_block, offsets_size, kernel_stream>>>(
+                *this, d_indices + last_chunk_size * (i % kNumBuffers),
                 current_chunk_size, d_results + chunk_size * i, alphabet_size_,
                 num_groups, num_levels_);
       }
     } else {
       accessKernel<T, false, NumThreads, false>
-          <<<num_blocks, threads_per_block>>>(
-              *this, d_indices + last_chunk_size * (i % 2), current_chunk_size,
-              d_results + chunk_size * i, alphabet_size_, num_groups,
-              num_levels_);
+          <<<num_blocks, threads_per_block, 0, kernel_stream>>>(
+              *this, d_indices + last_chunk_size * (i % kNumBuffers),
+              current_chunk_size, d_results + chunk_size * i, alphabet_size_,
+              num_groups, num_levels_);
     }
-    kernelStreamCheck(cudaStreamPerThread);
-    processed_chunks++;
+    gpuErrchk(cudaEventRecord(kernel_events[i], kernel_stream));
+    processed_chunks_recorded++;
   }
-  // copy results back to host
-  gpuErrchk(cudaFree(d_indices));
   t_DtoH.join();
   t_HtoD.join();
+
+  kernelCheck();
+
+  gpuErrchk(cudaStreamDestroy(copy_stream));
+  gpuErrchk(cudaStreamDestroy(kernel_stream));
+  gpuErrchk(cudaStreamDestroy(results_stream));
+  gpuErrchk(cudaEventDestroy(results_event));
+  for (uint32_t i = 0; i < num_chunks; ++i) {
+    gpuErrchk(cudaEventDestroy(kernel_events[i]));
+    gpuErrchk(cudaEventDestroy(copy_events[i]));
+  }
 
   if (not is_min_alphabet_) {
 #pragma omp parallel for

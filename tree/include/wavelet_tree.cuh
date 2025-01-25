@@ -494,7 +494,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
           uint32_t const current_chunk_size =
               i == (num_chunks - 1) ? last_chunk_size : chunk_size;
 
-          while (copied_chunks - processed_chunks > 0) {
+          while (copied_chunks - processed_chunks > 1) {
             std::this_thread::yield();
           }
           gpuErrchk(cudaMemcpy(

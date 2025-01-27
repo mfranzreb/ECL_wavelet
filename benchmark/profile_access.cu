@@ -54,8 +54,10 @@ int main(int argc, char** argv) {
 
     ecl::WaveletTree<uint32_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
-    cudaProfilerStart();
+    // Warmup
     auto results = wt.template access<1>(queries.data(), num_queries);
+    cudaProfilerStart();
+    results = wt.template access<1>(queries.data(), num_queries);
     cudaProfilerStop();
     results = wt.template access<2>(queries.data(), num_queries);
     results = wt.template access<4>(queries.data(), num_queries);

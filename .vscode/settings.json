@@ -94,6 +94,11 @@
     "valarray": "cpp",
     "hash_map": "cpp",
     "__config": "cpp",
-    "__nullptr": "cpp"
+    "__nullptr": "cpp",
+    "__locale": "cpp",
+    "__bit_reference": "cpp",
+    "__hash_table": "cpp",
+    "__string": "cpp",
+    "__tree": "cpp"
   }
 }

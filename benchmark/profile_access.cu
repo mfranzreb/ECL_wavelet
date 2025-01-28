@@ -10,6 +10,7 @@ int main(int argc, char** argv) {
   auto const data_size = std::stoul(argv[1]);
   auto const alphabet_size = std::stoul(argv[2]);
   auto const num_queries = std::stoul(argv[3]);
+  bool const use_profiler_api = argc > 4 ? std::stoi(argv[4]) : false;
 
   auto queries = ecl::generateRandomQueries(data_size, num_queries);
 
@@ -21,9 +22,9 @@ int main(int argc, char** argv) {
     data = ecl::generateRandomData<uint8_t>(alphabet, data_size);
     ecl::WaveletTree<uint8_t> wt(data.data(), data_size, std::move(alphabet),
                                  0);
-    cudaProfilerStart();
+    if (use_profiler_api) cudaProfilerStart();
     auto results = wt.template access<1>(queries.data(), num_queries);
-    cudaProfilerStop();
+    if (use_profiler_api) cudaProfilerStop();
     results = wt.template access<2>(queries.data(), num_queries);
     results = wt.template access<4>(queries.data(), num_queries);
     results = wt.template access<8>(queries.data(), num_queries);
@@ -37,9 +38,9 @@ int main(int argc, char** argv) {
     data = ecl::generateRandomData<uint16_t>(alphabet, data_size);
     ecl::WaveletTree<uint16_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
-    cudaProfilerStart();
+    if (use_profiler_api) cudaProfilerStart();
     auto results = wt.template access<1>(queries.data(), num_queries);
-    cudaProfilerStop();
+    if (use_profiler_api) cudaProfilerStop();
     results = wt.template access<2>(queries.data(), num_queries);
     results = wt.template access<4>(queries.data(), num_queries);
     results = wt.template access<8>(queries.data(), num_queries);
@@ -56,9 +57,9 @@ int main(int argc, char** argv) {
                                   0);
     // Warmup
     auto results = wt.template access<1>(queries.data(), num_queries);
-    cudaProfilerStart();
+    if (use_profiler_api) cudaProfilerStart();
     results = wt.template access<1>(queries.data(), num_queries);
-    cudaProfilerStop();
+    if (use_profiler_api) cudaProfilerStop();
     results = wt.template access<2>(queries.data(), num_queries);
     results = wt.template access<4>(queries.data(), num_queries);
     results = wt.template access<8>(queries.data(), num_queries);

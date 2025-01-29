@@ -108,7 +108,7 @@ class WaveletTree {
    * \return Vector of symbols.
    */
   template <int NumThreads = 32>
-  __host__ std::vector<T> access(size_t* indices, size_t const num_indices);
+  __host__ std::span<T> access(size_t* indices, size_t const num_indices);
 
   /*!
    * \brief Rank queries on the wavelet tree. Number of occurrences of a symbol
@@ -196,6 +196,8 @@ class WaveletTree {
                             minimal*/
   T codes_start_;        /*!< Minimal alphabet symbol where the codes start*/
   bool is_copy_;         /*!< Flag to signal whether current object is a copy*/
+  T* access_pinned_mem_pool_;
+  static size_t access_mem_pool_size_;
 };
 
 /*!
@@ -271,6 +273,9 @@ __global__ void selectKernel(WaveletTree<T> tree,
  * Implementation
  ****************************************************************************************/
 typedef unsigned long long int cu_size_t;
+
+template <typename T>
+size_t WaveletTree<T>::access_mem_pool_size_ = 10'000'000;
 
 template <typename T>
 __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
@@ -428,6 +433,11 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   // build rank and select structures from bit-vectors
   rank_select_ = RankSelect(std::move(bit_array), GPU_index);
+
+  //? WHat size?
+  gpuErrchk(cudaHostAlloc(&access_pinned_mem_pool_,
+                          access_mem_pool_size_ * sizeof(T),
+                          cudaHostAllocPortable));
 }
 
 template <typename T>
@@ -441,6 +451,7 @@ __host__ WaveletTree<T>::WaveletTree(WaveletTree const& other)
       d_counts_(other.d_counts_),
       is_min_alphabet_(other.is_min_alphabet_),
       codes_start_(other.codes_start_),
+      access_pinned_mem_pool_(other.access_pinned_mem_pool_),
       is_copy_(true) {}
 
 template <typename T>
@@ -448,6 +459,7 @@ WaveletTree<T>::~WaveletTree() {
   if (not is_copy_) {
     gpuErrchk(cudaFree(d_codes_));
     gpuErrchk(cudaFree(d_counts_));
+    gpuErrchk(cudaFreeHost(access_pinned_mem_pool_));
   }
 }
 
@@ -468,9 +480,8 @@ __host__ [[nodiscard]] GraphContents createAccessGraph(
   uint8_t placeholder_host = 0;
 
   std::vector<cudaGraphNode_t> copy_indices_nodes(num_chunks);
-  gpuErrchk(cudaGraphAddMemcpyNode1D(&copy_indices_nodes[0], graph, nullptr, 0,
-                                     placeholder_alloc, &placeholder_host, 1,
-                                     cudaMemcpyHostToDevice));
+  std::vector<cudaGraphNode_t> kernel_nodes(num_chunks);
+  std::vector<cudaGraphNode_t> copy_results_nodes(num_chunks);
 
   cudaKernelNodeParams placeholder_params{.func = (void*)emptyKernel,
                                           .gridDim = dim3(1, 1, 1),
@@ -479,16 +490,7 @@ __host__ [[nodiscard]] GraphContents createAccessGraph(
                                           .kernelParams = nullptr,
                                           .extra = nullptr};
 
-  std::vector<cudaGraphNode_t> kernel_nodes(num_chunks);
-  gpuErrchk(cudaGraphAddKernelNode(
-      &kernel_nodes[0], graph, &copy_indices_nodes[0], 1, &placeholder_params));
-
-  std::vector<cudaGraphNode_t> copy_results_nodes(num_chunks);
-  gpuErrchk(cudaGraphAddMemcpyNode1D(
-      &copy_results_nodes[0], graph, &kernel_nodes[0], 1, &placeholder_host,
-      placeholder_alloc, 1, cudaMemcpyDeviceToHost));
-
-  for (uint16_t i = 1; i < num_chunks; ++i) {
+  for (uint16_t i = 0; i < num_chunks; ++i) {
     gpuErrchk(cudaGraphAddMemcpyNode1D(&copy_indices_nodes[i], graph, nullptr,
                                        0, placeholder_alloc, &placeholder_host,
                                        1, cudaMemcpyHostToDevice));
@@ -504,8 +506,10 @@ __host__ [[nodiscard]] GraphContents createAccessGraph(
                                      &copy_indices_nodes[i], 1,
                                      &placeholder_params));
     // In order to make kernel executions serial
-    gpuErrchk(cudaGraphAddDependencies(graph, &kernel_nodes[i - 1],
-                                       &kernel_nodes[i], 1));
+    if (i > 0) {
+      gpuErrchk(cudaGraphAddDependencies(graph, &kernel_nodes[i - 1],
+                                         &kernel_nodes[i], 1));
+    }
 
     gpuErrchk(cudaGraphAddMemcpyNode1D(
         &copy_results_nodes[i], graph, &kernel_nodes[i], 1, &placeholder_host,
@@ -523,9 +527,30 @@ __host__ [[nodiscard]] GraphContents createAccessGraph(
 // TODO: experiment with different carveouts
 template <typename T>
 template <int NumThreads>
-__host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
+__host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
     size_t* indices, size_t const num_indices) {
   assert(num_indices > 0);
+
+  // CHeck if indices ptr points to pinned memory
+  cudaPointerAttributes attr;
+  gpuErrchk(cudaPointerGetAttributes(&attr, indices));
+  bool const is_pinned_mem = attr.type == cudaMemoryTypeHost;
+
+  std::thread cpu_mem_thread([&]() {
+    if (not is_pinned_mem) {
+      gpuErrchk(cudaHostRegister(indices, num_indices * sizeof(size_t),
+                                 cudaHostRegisterPortable));
+    }
+  });
+
+  // should rarely happen
+  if (num_indices > access_mem_pool_size_) {
+    gpuErrchk(cudaFreeHost(access_pinned_mem_pool_));
+    access_mem_pool_size_ = num_indices;
+    gpuErrchk(cudaHostAlloc(&access_pinned_mem_pool_,
+                            access_mem_pool_size_ * sizeof(T),
+                            cudaHostAllocPortable));
+  }
 
   // TODO: find good heuristic
   //  Divide indices into chunks
@@ -544,7 +569,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
     gpuErrchk(cudaMalloc(&d_results, num_indices * sizeof(T)));
   });
 
-  std::vector<T> results(num_indices);
+  T* results = access_pinned_mem_pool_;
 
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
@@ -661,6 +686,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
 
   // Allocations must be done before setting parameters
   gpu_alloc_thread.join();
+  cpu_mem_thread.join();
   for (uint16_t i = 0; i < num_chunks; ++i) {
     auto const current_chunk_size =
         i == num_chunks - 1 ? last_chunk_size : chunk_size;
@@ -692,7 +718,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
 
     gpuErrchk(cudaGraphExecMemcpyNodeSetParams1D(
         graph_contents.graph_exec, graph_contents.copy_results_nodes[i],
-        results.data() + i * chunk_size, current_d_results,
+        results + i * chunk_size, current_d_results,
         current_chunk_size * sizeof(T), cudaMemcpyDeviceToHost));
   }
   gpuErrchk(cudaGraphLaunch(graph_contents.graph_exec, 0));
@@ -701,6 +727,9 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
   std::thread end_thread([&]() {
     gpuErrchk(cudaFree(d_indices));
     gpuErrchk(cudaFree(d_results));
+    if (not is_pinned_mem) {
+      gpuErrchk(cudaHostUnregister(indices));
+    }
   });
 
   if (not is_min_alphabet_) {
@@ -710,7 +739,7 @@ __host__ [[nodiscard]] std::vector<T> WaveletTree<T>::access(
     }
   }
   end_thread.join();
-  return results;
+  return std::span<T>(results, num_indices);
 }
 
 template <typename T>

@@ -96,8 +96,8 @@
       "name": "Debug plot",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/benchmark/plot_hist_comp.py",
-      "args": ["benchmark/results/bm_hist_computation.json", "."],
+      "program": "${workspaceFolder}/benchmark/plot_access_bm.py",
+      "args": ["benchmark/results/bm_access.json", "."],
       "console": "integratedTerminal"
     },
     {
@@ -287,6 +287,29 @@
         }
       ],
       "preLaunchTask": "build access profile"
+    },
+    {
+      "name": "Debug sdsl",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/example",
+      "args": ["1000000", "4", "5000"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        }
+      ]
     }
   ]
 }

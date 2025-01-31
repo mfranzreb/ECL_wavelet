@@ -31,7 +31,7 @@ static void BM_Access(benchmark::State& state) {
   auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);
 
   for (auto _ : state) {
-    auto results = wt.access(queries.data(), num_queries);
+    auto results = wt.template access<1>(queries.data(), num_queries);
   }
 }
 
@@ -138,6 +138,8 @@ static void BM_NVBIO(benchmark::State& state) {
   }
 }
 
+// SDSL sometimes returns wrong result, "construct_im" ffunction does not work
+// properly.
 template <typename T>
 static void BM_SDSL(benchmark::State& state) {
   auto const data_size = state.range(0);
@@ -159,16 +161,37 @@ static void BM_SDSL(benchmark::State& state) {
                   data.size() * sizeof(T));
   data_file.close();
 
-  sdsl::wt_blcd<> wt;
-  sdsl::construct(wt, "data_file", sizeof(T));
-  // delete file
-  std::remove("data_file");
+  std::vector<T> results_sdsl(num_queries);
+  if constexpr (sizeof(T) == 1) {
+    sdsl::wt_pc<sdsl::balanced_shape, sdsl::bit_vector, sdsl::rank_support_v5<>>
+        wt;
+    sdsl::construct(wt, "data_file", sizeof(T));
 
-  std::vector<size_t> results_sdsl(num_queries);
-  for (auto _ : state) {
+    // delete file
+    std::remove("data_file");
+
+    for (auto _ : state) {
 #pragma omp parallel for
-    for (size_t i = 0; i < num_queries; ++i) {
-      results_sdsl[i] = wt[i];
+      for (size_t i = 0; i < num_queries; ++i) {
+        results_sdsl[i] = wt[queries[i]];
+      }
+    }
+  } else {
+    sdsl::wt_pc<sdsl::balanced_shape, sdsl::bit_vector, sdsl::rank_support_v5<>,
+                sdsl::wt_pc<sdsl::balanced_shape>::select_1_type,
+                sdsl::wt_pc<sdsl::balanced_shape>::select_0_type,
+                sdsl::int_tree<>>
+        wt;
+    sdsl::construct(wt, "data_file", sizeof(T));
+
+    // delete file
+    std::remove("data_file");
+
+    for (auto _ : state) {
+#pragma omp parallel for
+      for (size_t i = 0; i < num_queries; ++i) {
+        results_sdsl[i] = wt[queries[i]];
+      }
     }
   }
 }

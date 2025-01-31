@@ -22,41 +22,49 @@ def plot_access_bm(bm, save_path):
     n_query_sizes = len(bm["param.num_queries"].unique())
     colors = plt.cm.rainbow([i / n_query_sizes for i in range(n_query_sizes)])
     for i, (name, group) in enumerate(sdsl_bm.groupby("param.data_size")):
-        ax = axs[i // 2, i % 2]
+        if n_rows == 1:
+            ax = axs[i % 2]
+        else:
+            ax = axs[i // 2, i % 2]
         # group by "param-num_queries"
-        for i, (name2, group2) in enumerate(group.groupby("param.num_queries")):
+        for j, (name2, group2) in enumerate(group.groupby("param.num_queries")):
             ax.plot(
                 group2["param.alphabet_size"],
                 group2["real_time"],
-                label=name2,
+                label="sdsl " + str(name2),
                 linestyle="--",
-                color=colors[i],
+                marker="o",
+                color=colors[j],
             )
 
         ax.set_title(f"Data size: {name}")
         ax.set_xlabel("Alphabet size")
         ax.set_ylabel("Time (ms)")
-        if i == 0:
-            ax.legend()
 
     for i, (name, group) in enumerate(own_bm.groupby("param.data_size")):
-        ax = axs[i // 2, i % 2]
+        if n_rows == 1:
+            ax = axs[i % 2]
+        else:
+            ax = axs[i // 2, i % 2]
         # group by "param-num_queries"
-        for i, (name2, group2) in enumerate(group.groupby("param.num_queries")):
+        for j, (name2, group2) in enumerate(group.groupby("param.num_queries")):
             ax.plot(
                 group2["param.alphabet_size"],
                 group2["real_time"],
-                label=name2,
+                label="own " + str(name2),
                 linestyle="-",
-                color=colors[i],
+                marker="o",
+                color=colors[j],
             )
+        if i == 0:
+            ax.legend(loc="upper left", bbox_to_anchor=(-0.3, 1.4))
 
         ax.set_title(f"Data size: {name}")
         ax.set_xlabel("Alphabet size")
         ax.set_ylabel("Time (ms)")
+        ax.set_yscale("log")
 
     fig.suptitle("Benchmark Access")
-    plt.tight_layout()
     plt.savefig(
         os.path.join(save_path, "bm_access.png"),
         dpi=300,

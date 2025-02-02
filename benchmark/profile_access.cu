@@ -4,6 +4,7 @@
 #include <wavelet_tree.cuh>
 
 #include "test_benchmark_utils.cuh"
+#include "utils.cuh"
 
 int main(int argc, char** argv) {
   // size is first command line argument
@@ -22,9 +23,12 @@ int main(int argc, char** argv) {
     data = ecl::generateRandomData<uint8_t>(alphabet, data_size);
     ecl::WaveletTree<uint8_t> wt(data.data(), data_size, std::move(alphabet),
                                  0);
-    if (use_profiler_api) cudaProfilerStart();
     auto results = wt.template access<1>(queries.data(), num_queries);
-    if (use_profiler_api) cudaProfilerStop();
+    if (use_profiler_api) {
+      cudaProfilerStart();
+      results = wt.template access<1>(queries.data(), num_queries);
+      cudaProfilerStop();
+    }
     results = wt.template access<2>(queries.data(), num_queries);
     results = wt.template access<4>(queries.data(), num_queries);
     results = wt.template access<8>(queries.data(), num_queries);
@@ -38,32 +42,17 @@ int main(int argc, char** argv) {
     data = ecl::generateRandomData<uint16_t>(alphabet, data_size);
     ecl::WaveletTree<uint16_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
-    if (use_profiler_api) cudaProfilerStart();
     auto results = wt.template access<1>(queries.data(), num_queries);
-    if (use_profiler_api) cudaProfilerStop();
-    results = wt.template access<2>(queries.data(), num_queries);
-    results = wt.template access<4>(queries.data(), num_queries);
-    results = wt.template access<8>(queries.data(), num_queries);
-    results = wt.template access<16>(queries.data(), num_queries);
-    results = wt.template access<32>(queries.data(), num_queries);
-  } else {
-    std::vector<uint32_t> alphabet;
-    std::vector<uint32_t> data;
-    alphabet = std::vector<uint32_t>(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
-    data = ecl::generateRandomData<uint32_t>(alphabet, data_size);
-
-    ecl::WaveletTree<uint32_t> wt(data.data(), data_size, std::move(alphabet),
-                                  0);
-    // Warmup
-    auto results = wt.template access<1>(queries.data(), num_queries);
-    if (use_profiler_api) cudaProfilerStart();
-    results = wt.template access<1>(queries.data(), num_queries);
-    if (use_profiler_api) cudaProfilerStop();
+    if (use_profiler_api) {
+      cudaProfilerStart();
+      results = wt.template access<1>(queries.data(), num_queries);
+      cudaProfilerStop();
+    }
     results = wt.template access<2>(queries.data(), num_queries);
     results = wt.template access<4>(queries.data(), num_queries);
     results = wt.template access<8>(queries.data(), num_queries);
     results = wt.template access<16>(queries.data(), num_queries);
     results = wt.template access<32>(queries.data(), num_queries);
   }
+  return 0;
 }

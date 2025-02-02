@@ -43,8 +43,10 @@ inline uint32_t kMinBPM = 0;
 constexpr uint8_t kBankSizeBytes = 4;
 constexpr uint8_t kBanksPerLine = 32;
 
-#define gpuErrchk(ans) \
-  { gpuAssert((ans), __FILE__, __LINE__); }
+#define gpuErrchk(ans)                    \
+  {                                       \
+    gpuAssert((ans), __FILE__, __LINE__); \
+  }
 __host__ inline void gpuAssert(cudaError_t code, const char *file, int line,
                                bool abort = true) {
   if (code != cudaSuccess) {
@@ -156,7 +158,9 @@ __host__ __device__ T powTwo(T n) {
 __host__ void checkWarpSize(uint8_t const GPU_index);
 
 #define gpuErrchkInternal(ans, file, line) \
-  { gpuAssert((ans), file, line); }
+  {                                        \
+    gpuAssert((ans), file, line);          \
+  }
 
 #define kernelCheck() kernelCheckFunc(__FILE__, __LINE__)
 __host__ inline void kernelCheckFunc(const char *file, int line) {
@@ -203,6 +207,7 @@ __device__ T ceilLog2(T n) {
   }
 }
 
+// TODO. return should be 8bit
 template <typename T>
 __host__ T ceilLog2Host(T n) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,

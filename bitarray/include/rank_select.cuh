@@ -253,15 +253,11 @@ class RankSelect {
 
   template <typename T, int NumThreads>
   __device__ T warpSum(uint32_t const mask, T val) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-    //? do all threads get the result?
-    val = __reduce_add_sync(mask, val);
-#else
+#pragma unroll
     for (int offset = NumThreads / 2; offset > 0; offset /= 2) {
       val += __shfl_down_sync(mask, val, offset);
     }
     return val;
-#endif
   }
 
  private:
@@ -279,12 +275,9 @@ class RankSelect {
     static_assert(
         std::is_integral<T>::value or std::is_floating_point<T>::value,
         "T must be an integral or floating-point type.");
-    // TODO: remove syncwarps?
-    __syncwarp(mask);
     uint32_t src_thread = __ballot_sync(mask, condition);
     // Get the value from the first thread that fulfills the condition
     src_thread = __ffs(src_thread) - 1;
-    __syncwarp(mask);
     var = __shfl_sync(mask, var, src_thread);
   }
 

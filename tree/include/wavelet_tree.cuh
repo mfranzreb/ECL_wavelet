@@ -17,6 +17,7 @@
 
 // TODO: add restricts
 namespace ecl {
+__device__ size_t access_counter = 0;
 struct GraphContents {
   cudaGraphExec_t graph_exec;
   std::vector<cudaGraphNode_t> copy_indices_nodes;
@@ -243,7 +244,8 @@ __global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
                              size_t const num_indices, T* results,
                              size_t const alphabet_size,
                              uint32_t const num_groups,
-                             uint8_t const num_levels);
+                             uint8_t const num_levels,
+                             size_t const counter_start);
 
 /*!
  * \brief Kernel for computing rank queries on the wavelet tree.
@@ -567,6 +569,8 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
         cudaMalloc(&d_indices, last_chunk_size * num_buffers * sizeof(size_t)));
 
     gpuErrchk(cudaMalloc(&d_results, num_indices * sizeof(T)));
+    size_t const tmp = 0;
+    gpuErrchk(cudaMemcpyToSymbol(access_counter, &tmp, sizeof(size_t)));
   });
 
   T* results = access_pinned_mem_pool_;
@@ -657,9 +661,9 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   }
 
   // Change parameters of graph
-  void* kernel_params_base[7] = {
-      this,        nullptr, 0, nullptr, &alphabet_size_, (void*)&num_groups,
-      &num_levels_};
+  void* kernel_params_base[8] = {
+      this,         nullptr, 0, nullptr, &alphabet_size_, (void*)&num_groups,
+      &num_levels_, 0};
 
   auto kernel_node_params_base =
       cudaKernelNodeParams{.func = nullptr,
@@ -700,7 +704,9 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
     auto kernel_node_params = kernel_node_params_base;
     T* current_d_results = d_results + i * chunk_size;
 
-    void* kernel_params[7] = {kernel_params_base[0],
+    size_t current_d_indices_offset = i * chunk_size;
+
+    void* kernel_params[8] = {kernel_params_base[0],
                               &current_d_indices,
                               current_chunk_size == last_chunk_size
                                   ? (size_t*)&last_chunk_size
@@ -708,7 +714,8 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
                               &current_d_results,
                               kernel_params_base[4],
                               kernel_params_base[5],
-                              kernel_params_base[6]};
+                              kernel_params_base[6],
+                              &current_d_indices_offset};
 
     kernel_node_params.kernelParams = kernel_params;
 
@@ -1353,7 +1360,7 @@ template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets>
 __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
     WaveletTree<T> tree, size_t* const indices, size_t const num_indices,
     T* results, size_t const alphabet_size, uint32_t const num_groups,
-    uint8_t const num_levels) {
+    uint8_t const num_levels, size_t const counter_start) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type");
   assert(blockDim.x % WS == 0);
@@ -1372,10 +1379,23 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
     __syncthreads();
   }
 
-  uint32_t const global_group_id =
-      (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerQuery;
   uint8_t const local_t_id = threadIdx.x % ThreadsPerQuery;
-  for (uint32_t i = global_group_id; i < num_indices; i += num_groups) {
+  while (access_counter < num_indices + counter_start) {
+    size_t i;
+    if (local_t_id == 0) {
+      i = atomicAdd((cu_size_t*)&access_counter, size_t(1)) - counter_start;
+    }
+    if constexpr (ThreadsPerQuery > 1) {
+      uint32_t mask = ~0;
+      if constexpr (ThreadsPerQuery < WS) {
+        mask = ((1 << ThreadsPerQuery) - 1)
+               << (ThreadsPerQuery * ((threadIdx.x % WS) / ThreadsPerQuery));
+      }
+      shareVar<size_t>(local_t_id == 0, i, mask);
+    }
+    if (i >= num_indices) {
+      break;
+    }
     size_t index = indices[i];
 
     T char_start = 0;
@@ -1422,6 +1442,10 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
     if (local_t_id == 0) {
       results[i] = char_start;
     }
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    atomicMin((cu_size_t*)&access_counter, num_indices + counter_start);
   }
 }
 

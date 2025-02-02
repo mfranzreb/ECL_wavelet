@@ -262,26 +262,6 @@ class RankSelect {
 
  private:
   /*!
-   * \brief Helper function to share a variable between all threads in a warp.
-   * \tparam T Type of the variable to be shared. Must be an integral or
-   * floating point type.
-   * \param condition Condition to be met for sharing the
-   * variable. Only one thread should fulfill it.
-   * \param var Variable to be shared.
-   * \param mask Mask representing the threads that should share the variable.
-   */
-  template <typename T>
-  __device__ void shareVar(bool condition, T& var, uint32_t const mask) {
-    static_assert(
-        std::is_integral<T>::value or std::is_floating_point<T>::value,
-        "T must be an integral or floating-point type.");
-    uint32_t src_thread = __ballot_sync(mask, condition);
-    // Get the value from the first thread that fulfills the condition
-    src_thread = __ffs(src_thread) - 1;
-    var = __shfl_sync(mask, var, src_thread);
-  }
-
-  /*!
    * \brief Get the position of the n-th 0 or 1 bit in a word, starting from the
    * least significant bit.
    * \tparam Value 0 for zeros, 1 for ones.

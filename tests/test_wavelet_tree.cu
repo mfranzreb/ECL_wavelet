@@ -102,30 +102,394 @@ __host__ void compareAccessResults(WaveletTree<T>& wt,
 template <typename T, int NumThreads>
 __host__ void compareRankResults(WaveletTree<T>& wt,
                                  std::vector<RankSelectQuery<T>> const& queries,
-                                 std::vector<T> const& data) {
+                                 std::vector<size_t> const& results_should) {
   auto queries_copy = queries;
   auto const results =
       wt.template rank<NumThreads>(queries_copy.data(), queries_copy.size());
   for (size_t i = 0; i < queries.size(); ++i) {
-    if (std::count(data.begin(), data.begin() + queries[i].index_,
-                   queries[i].symbol_) != results[i]) {
-      std::cout << "i: " << i << " index: " << queries[i].index_
-                << " symbol: " << queries[i].symbol_ << " count: "
-                << std::count(data.begin(), data.begin() + queries[i].index_,
-                              queries[i].symbol_)
-                << " result: " << results[i] << std::endl;
-    }
-    queries_copy = queries;
-    auto const results2 =
-        wt.template rank<NumThreads>(queries_copy.data(), queries_copy.size());
+    EXPECT_EQ(results_should[i], results[i]);
   }
 }
 
-using MyTypes = testing::Types<uint32_t, uint64_t>;
+using MyTypes = testing::Types<uint8_t, uint16_t, uint32_t, uint64_t>;
 TYPED_TEST_SUITE(WaveletTreeTestFixture, MyTypes);
 
+TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
+  std::vector<TypeParam> data{1, 2, 3, 4, 5, 6, 7, 8, 9};
+  {
+    std::vector<TypeParam> alphabet{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                              kGPUIndex);
+  }
+  {
+    data = std::vector<TypeParam>{0, 1, 2, 3};
+    std::vector<TypeParam> alphabet{0, 1, 2, 3};
+
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                              kGPUIndex);
+  }
+}
+
+TYPED_TEST(WaveletTreeTestFixture, createMinimalCodes) {
+  // Check that for powers of two, the vector is empty
+  for (size_t i = 4; i < 8 * sizeof(TypeParam); i *= 2) {
+    std::vector<TypeParam> alphabet(i);
+    std::iota(alphabet.begin(), alphabet.end(), 0);
+    auto codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
+    EXPECT_TRUE(codes.empty());
+  }
+
+  size_t alphabet_size = 72;
+  std::vector<TypeParam> alphabet(alphabet_size);
+  std::iota(alphabet.begin(), alphabet.end(), 0);
+  auto codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
+  auto code_value = 64UL;
+  for (int i = 64; i <= 71; ++i) {
+    EXPECT_EQ(codes[i - 64].code_, code_value);
+    EXPECT_EQ(codes[i - 64].len_, 4);
+    code_value += 8;
+  }
+
+  alphabet_size = 63;
+  alphabet.resize(alphabet_size);
+  std::iota(alphabet.begin(), alphabet.end(), 0);
+  codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
+  EXPECT_EQ(codes[0].code_, 62);
+  EXPECT_EQ(codes[0].len_, 5);
+
+  alphabet_size = 75;
+  alphabet.resize(alphabet_size);
+  std::iota(alphabet.begin(), alphabet.end(), 0);
+  codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
+  code_value = 64UL;
+  for (int i = 64; i < 72; ++i) {
+    EXPECT_EQ(codes[i - 64].code_, code_value);
+    EXPECT_EQ(codes[i - 64].len_, 5);
+    code_value += 4;
+  }
+  EXPECT_EQ(codes[72 - 64].code_, 96);
+  EXPECT_EQ(codes[72 - 64].len_, 4);
+  EXPECT_EQ(codes[73 - 64].code_, 104);
+  EXPECT_EQ(codes[73 - 64].len_, 4);
+  EXPECT_EQ(codes[74 - 64].code_, 112);
+  EXPECT_EQ(codes[74 - 64].len_, 3);
+}
+
+TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogram) {
+  std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  auto const alphabet_size = alphabet.size();
+
+  std::vector<TypeParam> data(1000);
+  for (size_t i = 0; i < data.size(); ++i) {
+    data[i] = i % alphabet_size;
+  }
+
+  // allocate memory for arguments of kernel
+  TypeParam* d_alphabet;
+  TypeParam* d_data;
+  size_t* d_histogram;
+  gpuErrchk(cudaMalloc(&d_alphabet, sizeof(TypeParam) * alphabet_size));
+  gpuErrchk(cudaMemcpy(d_alphabet, alphabet.data(),
+                       sizeof(TypeParam) * alphabet_size,
+                       cudaMemcpyHostToDevice));
+  gpuErrchk(cudaMalloc(&d_data, sizeof(TypeParam) * data.size()));
+  gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data.size(),
+                       cudaMemcpyHostToDevice));
+  gpuErrchk(cudaMalloc(&d_histogram, sizeof(size_t) * alphabet_size));
+  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
+
+  auto alphabet_copy = alphabet;
+  // Create the wavelet tree
+  WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet_copy),
+                            kGPUIndex);
+  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
+      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size, 0);
+  kernelCheck();
+
+  // Pass the histogram to the host
+  std::vector<size_t> h_histogram(alphabet_size);
+  gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
+                       sizeof(size_t) * alphabet_size, cudaMemcpyDeviceToHost));
+
+  auto hist_should = calculateHistogram(data, alphabet);
+  for (size_t i = 0; i < alphabet_size; ++i) {
+    EXPECT_EQ(hist_should[i], h_histogram[i]);
+  }
+
+  data = std::vector<TypeParam>(1000, 0);
+  gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data.size(),
+                       cudaMemcpyHostToDevice));
+
+  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
+  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
+      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size, 0);
+  kernelCheck();
+
+  gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
+                       sizeof(size_t) * alphabet_size, cudaMemcpyDeviceToHost));
+
+  hist_should = calculateHistogram(data, alphabet);
+  for (size_t i = 0; i < alphabet_size; ++i) {
+    EXPECT_EQ(hist_should[i], h_histogram[i]);
+  }
+
+  for (size_t i = 0; i < data.size(); ++i) {
+    if (i < alphabet_size) {
+      data[i] = i;
+    } else {
+      data[i] = alphabet_size - 1;
+    }
+  }
+
+  gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data.size(),
+                       cudaMemcpyHostToDevice));
+
+  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
+  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
+      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size, 0);
+  kernelCheck();
+
+  gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
+                       sizeof(size_t) * alphabet_size, cudaMemcpyDeviceToHost));
+
+  hist_should = calculateHistogram(data, alphabet);
+  for (size_t i = 0; i < alphabet_size; ++i) {
+    EXPECT_EQ(hist_should[i], h_histogram[i]);
+  }
+
+  // Case where last two symbols have different counts
+  data = std::vector<TypeParam>(1000, 0);
+  for (size_t i = 0; i < 5; ++i) {
+    data[i] = 9;
+  }
+  for (size_t i = 5; i < 15; ++i) {
+    data[i] = 8;
+  }
+  for (size_t i = 15; i < data.size(); ++i) {
+    data[i] = i % 8;
+  }
+
+  gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data.size(),
+                       cudaMemcpyHostToDevice));
+
+  gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
+  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
+      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size, 0);
+  kernelCheck();
+
+  gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
+                       sizeof(size_t) * alphabet_size, cudaMemcpyDeviceToHost));
+
+  hist_should = calculateHistogram(data, alphabet);
+  for (size_t i = 0; i < alphabet_size; ++i) {
+    EXPECT_EQ(hist_should[i], h_histogram[i]);
+  }
+
+  // Free memory
+  gpuErrchk(cudaFree(d_alphabet));
+  gpuErrchk(cudaFree(d_data));
+  gpuErrchk(cudaFree(d_histogram));
+}
+
+TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogramRandom) {
+  size_t const data_size = 10000;
+  TypeParam* d_data;
+  gpuErrchk(cudaMalloc(&d_data, sizeof(TypeParam) * data_size));
+  for (int i = 0; i < 100; i++) {
+    // Random alphabet size between 3 and data_size
+    size_t alphabet_size =
+        3 +
+        (rand() %
+         (std::min(static_cast<size_t>(std::numeric_limits<TypeParam>::max()),
+                   data_size) -
+          3));
+
+    std::unordered_map<TypeParam, size_t> hist_should;
+    auto [alphabet, data] = generateRandomAlphabetDataAndHist<TypeParam>(
+        alphabet_size, data_size, hist_should);
+
+    alphabet_size = alphabet.size();
+
+    // allocate memory for arguments of kernel
+    TypeParam* d_alphabet;
+    size_t* d_histogram;
+    gpuErrchk(cudaMalloc(&d_alphabet, sizeof(TypeParam) * alphabet_size));
+    gpuErrchk(cudaMemcpy(d_alphabet, alphabet.data(),
+                         sizeof(TypeParam) * alphabet_size,
+                         cudaMemcpyHostToDevice));
+
+    gpuErrchk(cudaMalloc(&d_histogram, sizeof(size_t) * alphabet_size));
+    gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
+
+    gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data_size,
+                         cudaMemcpyHostToDevice));
+
+    // Create the wavelet tree
+    auto alphabet_copy = alphabet;
+    WaveletTreeTest<TypeParam> wt(data.data(), data_size,
+                                  std::move(alphabet_copy), kGPUIndex);
+
+    wt.computeGlobalHistogram(isPowTwo<TypeParam>(alphabet_size), data_size,
+                              d_data, d_alphabet, d_histogram);
+
+    // Pass the histogram to the host
+    std::vector<size_t> h_histogram(alphabet_size);
+    gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
+                         sizeof(size_t) * alphabet_size,
+                         cudaMemcpyDeviceToHost));
+
+    for (size_t i = 0; i < alphabet_size; ++i) {
+      EXPECT_EQ(hist_should[alphabet[i]], h_histogram[i]);
+    }
+    gpuErrchk(cudaFree(d_alphabet));
+    gpuErrchk(cudaFree(d_histogram));
+  }
+
+  // Free memory
+  gpuErrchk(cudaFree(d_data));
+}
+
+TYPED_TEST(WaveletTreeTestFixture, structure) {
+  std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  std::vector<TypeParam> data(100);
+  for (size_t i = 0; i < data.size(); ++i) {
+    data[i] = i % alphabet.size();
+  }
+  {
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                              kGPUIndex);
+
+    // First level
+    for (size_t i = 0; i < data.size(); ++i) {
+      // 0 to 7 is 0, 8 and 9 is 1
+      BAaccessKernel<TypeParam>
+          <<<1, 1>>>(wt.rank_select_.bit_array_, 0, i, this->result);
+      kernelCheck();
+      if (i % 10 < 8) {
+        EXPECT_EQ(*this->result, 0);
+      } else {
+        EXPECT_EQ(*this->result, 1);
+      }
+    }
+
+    // Second level
+    for (size_t i = 0; i < 80; ++i) {
+      // 4 0s and then 4 1s
+      BAaccessKernel<TypeParam>
+          <<<1, 1>>>(wt.rank_select_.bit_array_, 1, i, this->result);
+      kernelCheck();
+      if (i % 8 < 4) {
+        EXPECT_EQ(*this->result, 0);
+      } else {
+        EXPECT_EQ(*this->result, 1);
+      }
+    }
+    for (size_t i = 80; i < 100; ++i) {
+      // 0101...
+      BAaccessKernel<TypeParam>
+          <<<1, 1>>>(wt.rank_select_.bit_array_, 1, i, this->result);
+      kernelCheck();
+      if (i % 2 == 0) {
+        EXPECT_EQ(*this->result, 0);
+      } else {
+        EXPECT_EQ(*this->result, 1);
+      }
+    }
+
+    // Third level
+    for (size_t i = 0; i < 80; ++i) {
+      // 2 0s and then 2 1s
+      BAaccessKernel<TypeParam>
+          <<<1, 1>>>(wt.rank_select_.bit_array_, 2, i, this->result);
+      kernelCheck();
+      if (i % 4 < 2) {
+        EXPECT_EQ(*this->result, 0);
+      } else {
+        EXPECT_EQ(*this->result, 1);
+      }
+    }
+
+    // Fourth level
+    for (size_t i = 0; i < 80; ++i) {
+      // 0101...
+      BAaccessKernel<TypeParam>
+          <<<1, 1>>>(wt.rank_select_.bit_array_, 3, i, this->result);
+      kernelCheck();
+      if (i % 2 == 0) {
+        EXPECT_EQ(*this->result, 0);
+      } else {
+        EXPECT_EQ(*this->result, 1);
+      }
+    }
+  }
+
+  std::vector<TypeParam> alphabet2{0, 1, 2, 3, 4};
+  data = {4, 1, 1, 2, 1, 1, 3, 4, 4, 0, 0, 2, 3, 2, 4, 2, 4, 1, 3, 2};
+  WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet2),
+                            kGPUIndex);
+
+  // First level
+  // 10000001100000101000
+  for (size_t i = 0; i < data.size(); ++i) {
+    BAaccessKernel<TypeParam>
+        <<<1, 1>>>(wt.rank_select_.bit_array_, 0, i, this->result);
+    kernelCheck();
+    if (i == 0 or i == 7 or i == 8 or i == 14 or i == 16) {
+      EXPECT_EQ(*this->result, 1);
+    } else {
+      EXPECT_EQ(*this->result, 0);
+    }
+  }
+
+  // Second level
+  // 001001001111011
+  for (size_t i = 0; i < data.size() - 5; ++i) {
+    BAaccessKernel<TypeParam>
+        <<<1, 1>>>(wt.rank_select_.bit_array_, 1, i, this->result);
+    kernelCheck();
+    if (i == 2 or i == 5 or i == 8 or i == 9 or i == 10 or i == 11 or i == 13 or
+        i == 14) {
+      EXPECT_EQ(*this->result, 1);
+    } else {
+      EXPECT_EQ(*this->result, 0);
+    }
+  }
+
+  // Third level
+  // 111100101010010
+  for (size_t i = 0; i < data.size() - 5; ++i) {
+    BAaccessKernel<TypeParam>
+        <<<1, 1>>>(wt.rank_select_.bit_array_, 2, i, this->result);
+    kernelCheck();
+    if (i == 0 or i == 1 or i == 2 or i == 3 or i == 6 or i == 8 or i == 10 or
+        i == 13) {
+      EXPECT_EQ(*this->result, 1);
+    } else {
+      EXPECT_EQ(*this->result, 0);
+    }
+  }
+}
+
+TYPED_TEST(WaveletTreeTestFixture, access) {
+  std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  std::vector<TypeParam> data(100);
+  for (size_t i = 0; i < data.size(); ++i) {
+    data[i] = i % alphabet.size();
+  }
+  WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                            kGPUIndex);
+
+  std::vector<size_t> indices(data.size());
+  std::iota(indices.begin(), indices.end(), 0);
+  compareAccessResults<TypeParam, 1>(wt, indices, data);
+  compareAccessResults<TypeParam, 2>(wt, indices, data);
+  compareAccessResults<TypeParam, 4>(wt, indices, data);
+  compareAccessResults<TypeParam, 8>(wt, indices, data);
+  compareAccessResults<TypeParam, 16>(wt, indices, data);
+  compareAccessResults<TypeParam, 32>(wt, indices, data);
+}
+
 TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
-  return;
   for (int i = 0; i < 10; i++) {
     // Random data size between 1000 and 1'000'000
     size_t data_size = 1000 + (rand() % 1'000'000);
@@ -169,12 +533,17 @@ TYPED_TEST(WaveletTreeTestFixture, rank) {
   for (size_t i = 0; i < data.size(); ++i) {
     queries.push_back({i, data[i]});
   }
-  compareRankResults<TypeParam, 1>(wt, queries, data);
-  compareRankResults<TypeParam, 2>(wt, queries, data);
-  compareRankResults<TypeParam, 4>(wt, queries, data);
-  compareRankResults<TypeParam, 8>(wt, queries, data);
-  compareRankResults<TypeParam, 16>(wt, queries, data);
-  compareRankResults<TypeParam, 32>(wt, queries, data);
+  std::vector<size_t> results_should(queries.size());
+  for (size_t i = 0; i < queries.size(); ++i) {
+    results_should[i] = std::count(
+        data.begin(), data.begin() + queries[i].index_, queries[i].symbol_);
+  }
+  compareRankResults<TypeParam, 1>(wt, queries, results_should);
+  compareRankResults<TypeParam, 2>(wt, queries, results_should);
+  compareRankResults<TypeParam, 4>(wt, queries, results_should);
+  compareRankResults<TypeParam, 8>(wt, queries, results_should);
+  compareRankResults<TypeParam, 16>(wt, queries, results_should);
+  compareRankResults<TypeParam, 32>(wt, queries, results_should);
 }
 
 TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
@@ -202,12 +571,17 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
     auto queries = generateRandomRSQueries<TypeParam>(data_size, num_queries,
                                                       alphabet_copy);
 
-    compareRankResults<TypeParam, 1>(wt, queries, data);
-    compareRankResults<TypeParam, 2>(wt, queries, data);
-    compareRankResults<TypeParam, 4>(wt, queries, data);
-    compareRankResults<TypeParam, 8>(wt, queries, data);
-    compareRankResults<TypeParam, 16>(wt, queries, data);
-    compareRankResults<TypeParam, 32>(wt, queries, data);
+    std::vector<size_t> results_should(queries.size());
+    for (size_t j = 0; j < queries.size(); ++j) {
+      results_should[j] = std::count(
+          data.begin(), data.begin() + queries[j].index_, queries[j].symbol_);
+    }
+    compareRankResults<TypeParam, 1>(wt, queries, results_should);
+    compareRankResults<TypeParam, 2>(wt, queries, results_should);
+    compareRankResults<TypeParam, 4>(wt, queries, results_should);
+    compareRankResults<TypeParam, 8>(wt, queries, results_should);
+    compareRankResults<TypeParam, 16>(wt, queries, results_should);
+    compareRankResults<TypeParam, 32>(wt, queries, results_should);
   }
 }
 

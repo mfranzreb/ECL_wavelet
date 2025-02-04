@@ -78,7 +78,22 @@ std::vector<T> generateRandomData(std::vector<T> const& alphabet,
 void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
                         size_t& max_memory_usage);
 
-std::vector<size_t> generateRandomQueries(size_t const data_size,
-                                          size_t const num_queries);
+std::vector<size_t> generateRandomAccessQueries(size_t const data_size,
+                                                size_t const num_queries);
+
+template <typename T>
+std::vector<RankSelectQuery<T>> generateRandomRSQueries(
+    size_t const data_size, size_t const num_queries,
+    std::vector<T> const& alphabet) {
+  std::vector<RankSelectQuery<T>> queries(num_queries);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<size_t> dis(0, data_size - 1);
+  std::uniform_int_distribution<T> dis2(0, alphabet.size() - 1);
+  std::generate(queries.begin(), queries.end(), [&]() {
+    return RankSelectQuery<T>(dis(gen), alphabet[dis2(gen)]);
+  });
+  return queries;
+}
 
 }  // namespace ecl

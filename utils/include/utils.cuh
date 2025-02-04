@@ -277,4 +277,10 @@ __device__ void shareVar(bool condition, T &var, uint32_t const mask) {
   var = __shfl_sync(mask, var, src_thread);
 }
 
+template <typename T>
+struct RankSelectQuery {
+  size_t index_;
+  T symbol_;
+};
+
 }  // namespace ecl

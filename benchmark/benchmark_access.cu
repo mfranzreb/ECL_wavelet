@@ -26,7 +26,7 @@ static void BM_Access(benchmark::State& state) {
   state.counters["param.alphabet_size"] = alphabet_size;
   state.counters["param.num_queries"] = num_queries;
 
-  auto queries = generateRandomQueries(data_size, num_queries);
+  auto queries = generateRandomAccessQueries(data_size, num_queries);
 
   auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);
 
@@ -85,7 +85,7 @@ static void BM_NVBIO(benchmark::State& state) {
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;
 
-  auto queries = generateRandomQueries(data_size, num_queries);
+  auto queries = generateRandomAccessQueries(data_size, num_queries);
 
   if (alphabet_size == 4) {
     auto d_data = getNVbioArgs<nvbio::DNA>(data_size);
@@ -150,7 +150,7 @@ static void BM_SDSL(benchmark::State& state) {
   state.counters["param.alphabet_size"] = alphabet_size;
   state.counters["param.num_queries"] = num_queries;
 
-  auto queries = generateRandomQueries(data_size, num_queries);
+  auto queries = generateRandomAccessQueries(data_size, num_queries);
 
   auto [alphabet, data] =
       generateRandomAlphabetAndData<T>(alphabet_size, data_size, true);

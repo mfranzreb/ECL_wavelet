@@ -78,8 +78,8 @@ void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
   max_memory_usage -= start_bytes;
 }
 
-std::vector<size_t> generateRandomQueries(size_t const data_size,
-                                          size_t const num_queries) {
+std::vector<size_t> generateRandomAccessQueries(size_t const data_size,
+                                                size_t const num_queries) {
   std::vector<size_t> queries(num_queries);
   std::random_device rd;
   std::mt19937 gen(rd());

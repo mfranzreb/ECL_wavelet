@@ -5,72 +5,50 @@
 
 #include "test_benchmark_utils.cuh"
 
+template <typename T>
+void profileRank(size_t const data_size, size_t const alphabet_size,
+                 size_t const num_queries, bool const use_profiler_api) {
+  std::vector<T> alphabet;
+  std::vector<T> data;
+  alphabet = std::vector<T>(alphabet_size);
+  std::iota(alphabet.begin(), alphabet.end(), 0);
+  data = ecl::generateRandomData<T>(alphabet, data_size);
+  auto const queries =
+      ecl::generateRandomRSQueries<T>(data_size, num_queries, alphabet);
+  ecl::WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), 0);
+
+  auto queries_copy = queries;
+  auto results = wt.template rank<1>(queries_copy.data(), num_queries);
+  queries_copy = queries;
+  if (use_profiler_api) {
+    cudaProfilerStart();
+    results = wt.template rank<1>(queries_copy.data(), num_queries);
+    cudaProfilerStop();
+    queries_copy = queries;
+  }
+  results = wt.template rank<2>(queries_copy.data(), num_queries);
+  queries_copy = queries;
+  results = wt.template rank<4>(queries_copy.data(), num_queries);
+  queries_copy = queries;
+  results = wt.template rank<8>(queries_copy.data(), num_queries);
+  queries_copy = queries;
+  results = wt.template rank<16>(queries_copy.data(), num_queries);
+  queries_copy = queries;
+  results = wt.template rank<32>(queries_copy.data(), num_queries);
+}
+
 int main(int argc, char** argv) {
   // size is first command line argument
   auto const data_size = std::stoul(argv[1]);
   auto const alphabet_size = std::stoul(argv[2]);
   auto const num_queries = std::stoul(argv[3]);
+  bool const use_profiler_api = argc > 4 ? std::stoi(argv[4]) : false;
 
   if (alphabet_size < std::numeric_limits<uint8_t>::max()) {
-    std::vector<uint8_t> alphabet;
-    std::vector<uint8_t> data;
-    alphabet = std::vector<uint8_t>(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
-    data = ecl::generateRandomData<uint8_t>(alphabet, data_size);
-    ecl::WaveletTree<uint8_t> wt(data.data(), data_size, std::move(alphabet),
-                                 0);
-
-    std::vector<ecl::RankSelectQuery<uint8_t>> queries(num_queries);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<size_t> dis(0, data_size - 1);
-    std::uniform_int_distribution<uint8_t> dis2(0, alphabet_size - 1);
-    std::generate(queries.begin(), queries.end(), [&]() {
-      return ecl::RankSelectQuery<uint8_t>(dis(gen), dis2(gen));
-    });
-    cudaProfilerStart();
-    auto results = wt.rank(queries);
-    cudaProfilerStop();
+    profileRank<uint8_t>(data_size, alphabet_size, num_queries,
+                         use_profiler_api);
   } else if (alphabet_size < std::numeric_limits<uint16_t>::max()) {
-    std::vector<uint16_t> alphabet;
-    std::vector<uint16_t> data;
-    alphabet = std::vector<uint16_t>(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
-    data = ecl::generateRandomData<uint16_t>(alphabet, data_size);
-    ecl::WaveletTree<uint16_t> wt(data.data(), data_size, std::move(alphabet),
-                                  0);
-
-    std::vector<ecl::RankSelectQuery<uint16_t>> queries(num_queries);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<size_t> dis(0, data_size - 1);
-    std::uniform_int_distribution<uint16_t> dis2(0, alphabet_size - 1);
-    std::generate(queries.begin(), queries.end(), [&]() {
-      return ecl::RankSelectQuery<uint16_t>(dis(gen), dis2(gen));
-    });
-    cudaProfilerStart();
-    auto results = wt.rank(queries);
-    cudaProfilerStop();
-  } else {
-    std::vector<uint32_t> alphabet;
-    std::vector<uint32_t> data;
-    alphabet = std::vector<uint32_t>(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
-    data = ecl::generateRandomData<uint32_t>(alphabet, data_size);
-
-    ecl::WaveletTree<uint32_t> wt(data.data(), data_size, std::move(alphabet),
-                                  0);
-
-    std::vector<ecl::RankSelectQuery<uint32_t>> queries(num_queries);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<size_t> dis(0, data_size - 1);
-    std::uniform_int_distribution<uint32_t> dis2(0, alphabet_size - 1);
-    std::generate(queries.begin(), queries.end(), [&]() {
-      return ecl::RankSelectQuery<uint32_t>(dis(gen), dis2(gen));
-    });
-    cudaProfilerStart();
-    auto results = wt.rank(queries);
-    cudaProfilerStop();
+    profileRank<uint16_t>(data_size, alphabet_size, num_queries,
+                          use_profiler_api);
   }
 }

@@ -13,21 +13,6 @@
 namespace ecl {
 
 template <typename T>
-std::vector<RankSelectQuery<T>> generateRandomQueries(
-    size_t const data_size, size_t const num_queries,
-    std::vector<T> const& alphabet) {
-  std::vector<RankSelectQuery<T>> queries(num_queries);
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> dis(0, data_size - 1);
-  std::uniform_int_distribution<T> dis2(0, alphabet.size() - 1);
-  std::generate(queries.begin(), queries.end(), [&]() {
-    return RankSelectQuery<T>(dis(gen), alphabet[dis2(gen)]);
-  });
-  return queries;
-}
-
-template <typename T>
 static void BM_Rank(benchmark::State& state) {
   auto const data_size = state.range(0);
   auto const alphabet_size = state.range(1);
@@ -41,12 +26,16 @@ static void BM_Rank(benchmark::State& state) {
   state.counters["param.alphabet_size"] = alphabet_size;
   state.counters["param.num_queries"] = num_queries;
 
-  auto queries = generateRandomQueries<T>(data_size, num_queries, alphabet);
+  auto const queries =
+      generateRandomRSQueries<T>(data_size, num_queries, alphabet);
 
   auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);
 
   for (auto _ : state) {
-    auto results = wt.rank(queries);
+    state.PauseTiming();
+    auto queries_copy = queries;
+    state.ResumeTiming();
+    auto results = wt.template rank<1>(queries_copy.data(), num_queries);
   }
 }
 
@@ -109,7 +98,7 @@ static void BM_NVBIO(benchmark::State& state) {
     auto const wt_view = nvbio::plain_view(
         (const nvbio::WaveletTreeStorage<nvbio::device_tag>&)wt);
     auto queries =
-        generateRandomQueries<uint8_t>(data_size, num_queries, alphabet);
+        generateRandomRSQueries<uint8_t>(data_size, num_queries, alphabet);
     for (auto _ : state) {
 #pragma omp parallel for
       for (auto const& query : queries) {
@@ -123,7 +112,7 @@ static void BM_NVBIO(benchmark::State& state) {
     auto const wt_view = nvbio::plain_view(
         (const nvbio::WaveletTreeStorage<nvbio::device_tag>&)wt);
     auto queries =
-        generateRandomQueries<uint8_t>(data_size, num_queries, alphabet);
+        generateRandomRSQueries<uint8_t>(data_size, num_queries, alphabet);
     for (auto _ : state) {
 #pragma omp parallel for
       for (auto const& query : queries) {
@@ -137,7 +126,7 @@ static void BM_NVBIO(benchmark::State& state) {
     auto const wt_view = nvbio::plain_view(
         (const nvbio::WaveletTreeStorage<nvbio::device_tag>&)wt);
     auto queries =
-        generateRandomQueries<uint8_t>(data_size, num_queries, alphabet);
+        generateRandomRSQueries<uint8_t>(data_size, num_queries, alphabet);
     for (auto _ : state) {
 #pragma omp parallel for
       for (auto const& query : queries) {
@@ -152,7 +141,7 @@ static void BM_NVBIO(benchmark::State& state) {
     auto const wt_view = nvbio::plain_view(
         (const nvbio::WaveletTreeStorage<nvbio::device_tag>&)wt);
     auto queries =
-        generateRandomQueries<uint8_t>(data_size, num_queries, alphabet);
+        generateRandomRSQueries<uint8_t>(data_size, num_queries, alphabet);
     for (auto _ : state) {
 #pragma omp parallel for
       for (auto const& query : queries) {
@@ -175,23 +164,44 @@ static void BM_SDSL(benchmark::State& state) {
   auto [alphabet, data] =
       generateRandomAlphabetAndData<T>(alphabet_size, data_size, true);
 
-  auto queries = generateRandomQueries<T>(data_size, num_queries, alphabet);
+  auto queries = generateRandomRSQueries<T>(data_size, num_queries, alphabet);
   // write data to file
   std::ofstream data_file("data_file");
   data_file.write(reinterpret_cast<const char*>(data.data()),
                   data.size() * sizeof(T));
   data_file.close();
 
-  sdsl::wt_blcd<> wt;
-  sdsl::construct(wt, "data_file", sizeof(T));
-  // delete file
-  std::remove("data_file");
-
   std::vector<size_t> results_sdsl(num_queries);
-  for (auto _ : state) {
+  if constexpr (sizeof(T) == 1) {
+    sdsl::wt_pc<sdsl::balanced_shape, sdsl::bit_vector, sdsl::rank_support_v5<>>
+        wt;
+    sdsl::construct(wt, "data_file", sizeof(T));
+
+    // delete file
+    std::remove("data_file");
+
+    for (auto _ : state) {
 #pragma omp parallel for
-    for (size_t i = 0; i < num_queries; ++i) {
-      results_sdsl[i] = wt.rank(queries[i].index_, queries[i].symbol_);
+      for (size_t i = 0; i < num_queries; ++i) {
+        results_sdsl[i] = wt.rank(queries[i].index_, queries[i].symbol_);
+      }
+    }
+  } else {
+    sdsl::wt_pc<sdsl::balanced_shape, sdsl::bit_vector, sdsl::rank_support_v5<>,
+                sdsl::wt_pc<sdsl::balanced_shape>::select_1_type,
+                sdsl::wt_pc<sdsl::balanced_shape>::select_0_type,
+                sdsl::int_tree<>>
+        wt;
+    sdsl::construct(wt, "data_file", sizeof(T));
+
+    // delete file
+    std::remove("data_file");
+
+    for (auto _ : state) {
+#pragma omp parallel for
+      for (size_t i = 0; i < num_queries; ++i) {
+        results_sdsl[i] = wt.rank(queries[i].index_, queries[i].symbol_);
+      }
     }
   }
 }

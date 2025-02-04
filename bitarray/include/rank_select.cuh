@@ -73,31 +73,18 @@ class RankSelect {
    * \return Number of zeros (rank) before position \c index, i.e. in the slice
    * [0, i).
    */
-  template <int NumThreads>
-  __device__ [[nodiscard]] RankResult rank0(uint32_t const array_index,
-                                            size_t const index,
-                                            size_t const offset) {
-    auto result = rank1<NumThreads>(array_index, index, offset);
-    result.rank = index - result.rank;
-    return result;
-  }
-
-  /*!
-   * \brief Computes rank of ones.
-   * \tparam NumThreads Number of threads accessing the function.
-   * \param array_index Index of the bit array to be used.
-   * \param index Index the rank of zeros is computed for.
-   * \return Numbers of ones (rank) before position \c index, i.e. in the slice
-   * [0, i).
-   */
-  template <int NumThreads>
-  __device__ [[nodiscard]] RankResult rank1(uint8_t const array_index,
-                                            size_t const index,
-                                            size_t const offset) {
+  template <int NumThreads, bool GetBit, int Value>
+  __device__ [[nodiscard]] auto rank(uint8_t const array_index,
+                                     size_t const index, size_t const offset) {
+    static_assert(Value == 0 or Value == 1, "Value must be 0 or 1.");
     assert(array_index < bit_array_.numArrays());
     assert(index <= bit_array_.size(array_index));
     if (index == 0) {
-      return RankResult{0, bit_array_.access(array_index, 0, offset)};
+      if constexpr (GetBit) {
+        return RankResult{0, bit_array_.access(array_index, 0, offset)};
+      } else {
+        return size_t(0);
+      }
     }
     uint8_t t_id = 0;
     if constexpr (NumThreads > 1) {
@@ -124,9 +111,11 @@ class RankSelect {
       word = bit_array_.twoWords(array_index, i, offset);
       if (end_word == 0 or i >= end_word - 1) {
         // Only consider bits up to the index.
-        bit_at_index = static_cast<uint8_t>((word >> bit_index) & 1U);
+        if constexpr (GetBit) {
+          bit_at_index = static_cast<uint8_t>((word >> bit_index) & 1U);
+          has_last_word = true;
+        }
         word = bit_array_.partialTwoWords(word, bit_index);
-        has_last_word = true;
       }
       result += __popcll(word);
     }
@@ -141,10 +130,19 @@ class RankSelect {
       // communicate the result to all threads
       shareVar<size_t>(t_id == 0, result, mask);
 
-      shareVar<uint8_t>(has_last_word, bit_at_index, mask);
+      if constexpr (GetBit) {
+        shareVar<uint8_t>(has_last_word, bit_at_index, mask);
+      }
     }
 
-    return RankResult{result, static_cast<bool>(bit_at_index)};
+    if constexpr (Value == 0) {
+      result = index - result;
+    }
+    if constexpr (GetBit) {
+      return RankResult{result, static_cast<bool>(bit_at_index)};
+    } else {
+      return result;
+    }
   }
 
   /*!

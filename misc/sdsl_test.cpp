@@ -55,12 +55,12 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
 
 int main(int argc, char *argv[]) {
   size_t data_size = std::stoull(argv[1]);
-    uint8_t alphabet_size = std::stoull(argv[2]);
+    size_t alphabet_size = std::stoull(argv[2]);
     size_t num_queries = std::stoull(argv[3]);
 
     auto queries = generateRandomQueries(data_size, num_queries);
 
-    using T = uint8_t;
+    using T = uint16_t;
 
     auto [alphabet, data] =
       generateRandomAlphabetAndData<T>(alphabet_size, data_size, true);

@@ -14,6 +14,7 @@ void profileAccess(size_t const data_size, size_t const alphabet_size,
   alphabet = std::vector<T>(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0);
   data = ecl::generateRandomData<T>(alphabet, data_size);
+  auto queries = ecl::generateRandomAccessQueries(data_size, num_queries);
   ecl::WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), 0);
   auto results = wt.template access<1>(queries.data(), num_queries);
   if (use_profiler_api) {

@@ -17,6 +17,7 @@ static void BM_Rank(benchmark::State& state) {
   auto const data_size = state.range(0);
   auto const alphabet_size = state.range(1);
   auto const num_queries = state.range(2);
+  bool const pin_memory = state.range(3);
 
   auto alphabet = std::vector<T>(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0);
@@ -25,17 +26,25 @@ static void BM_Rank(benchmark::State& state) {
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;
   state.counters["param.num_queries"] = num_queries;
+  state.counters["param.pin_memory"] = pin_memory;
 
-  auto const queries =
-      generateRandomRSQueries<T>(data_size, num_queries, alphabet);
+  auto queries = generateRandomRSQueries<T>(data_size, num_queries, alphabet);
+  if (pin_memory) {
+    gpuErrchk(cudaHostRegister(queries.data(), num_queries * sizeof(size_t),
+                               cudaHostAllocPortable));
+  }
 
   auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);
 
+  auto const queries_copy = queries;
   for (auto _ : state) {
+    auto results = wt.template rank<1>(queries.data(), num_queries);
     state.PauseTiming();
-    auto queries_copy = queries;
+    std::copy(queries_copy.begin(), queries_copy.end(), queries.begin());
     state.ResumeTiming();
-    auto results = wt.template rank<1>(queries_copy.data(), num_queries);
+  }
+  if (pin_memory) {
+    gpuErrchk(cudaHostUnregister(queries.data()));
   }
 }
 
@@ -208,52 +217,51 @@ static void BM_SDSL(benchmark::State& state) {
 
 // For initializing CUDA
 BENCHMARK(BM_Rank<uint8_t>)
-    ->Args({100, 4, 1})
+    ->Args({10000, 4, 100, 0})
     ->Iterations(10)
     ->Unit(benchmark::kMillisecond);
 
 // First argument is the size of the data, second argument is the size of the
-// alphabet.
+// alphabet, third is the number of queries, last is whether to pin memory
+// before benchmark.
 BENCHMARK(BM_Rank<uint8_t>)
-    ->ArgsProduct({{200'000'000, 500'000'000, 800'000'000, 1'000'000'000,
-                    1'500'000'000, 2'000'000'000},
-                   {4, 5, 24, 64, 100, 155, 250},
-                   {100, 1'000, 5'000, 10'000, 50'000, 100'000}})
-    ->Iterations(5)
+    ->ArgsProduct({{500'000'000, 800'000'000, 1'000'000'000, 1'500'000'000,
+                    2'000'000'000},
+                   {4, 5, 24, 64, 100, 128, 155, 250},
+                   {100'000, 500'000, 1'000'000, 5'000'000, 10'000'000},
+                   {0, 1}})
+    ->Iterations(100)
     ->Unit(benchmark::kMillisecond);
 
-// BENCHMARK(BM_Rank<uint16_t>)
-//     ->ArgsProduct({{200'000'000, 500'000'000, 800'000'000, 1'000'000'000,
-//                     1'200'000'000},
-//                    {500, 1'000, 2'000, 4'000, 8'000, 16'000, 32'000,
-//                    64'000},
-//{100, 1'000, 5'000, 10'000, 50'000, 100'000}})
-//     ->Iterations(5)
-//     ->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_Rank<uint16_t>)
+    ->ArgsProduct({{500'000'000, 800'000'000, 1'000'000'000, 1'200'000'000},
+                   {500, 1'000, 2'000, 4'000, 8'000, 16'000, 32'000, 64'000},
+                   {100'000, 500'000, 1'000'000, 5'000'000, 10'000'000},
+                   {0, 1}})
+    ->Iterations(100)
+    ->Unit(benchmark::kMillisecond);
 
 BENCHMARK(BM_NVBIO)
-    ->ArgsProduct({{200'000'000, 500'000'000, 800'000'000, 1'000'000'000,
-                    1'500'000'000, 2'000'000'000},
-                   {4, 5, 24, 64, 100, 155, 250},
-                   {100, 1'000, 5'000, 10'000, 50'000, 100'000}})
-    ->Iterations(5)
+    ->ArgsProduct({{500'000'000, 800'000'000, 1'000'000'000, 1'500'000'000,
+                    2'000'000'000},
+                   {4, 5, 24, 64, 100, 128, 155, 250},
+                   {100'000, 500'000, 1'000'000, 5'000'000, 10'000'000}})
+    ->Iterations(100)
     ->Unit(benchmark::kMillisecond);
 
 BENCHMARK(BM_SDSL<uint8_t>)
-    ->ArgsProduct({{200'000'000, 500'000'000, 800'000'000, 1'000'000'000,
-                    1'500'000'000, 2'000'000'000},
-                   {4, 5, 24, 64, 100, 155, 250},
-                   {100, 1'000, 5'000, 10'000, 50'000, 100'000}})
-    ->Iterations(5)
+    ->ArgsProduct({{500'000'000, 800'000'000, 1'000'000'000, 1'500'000'000,
+                    2'000'000'000},
+                   {4, 5, 24, 64, 100, 128, 155, 250},
+                   {100'000, 500'000, 1'000'000, 5'000'000, 10'000'000}})
+    ->Iterations(100)
     ->Unit(benchmark::kMillisecond);
 
-// BENCHMARK(BM_SDSL<uint16_t>)
-//     ->ArgsProduct({{200'000'000, 500'000'000, 800'000'000, 1'000'000'000,
-//                     1'200'000'000},
-//                    {500, 1'000, 2'000, 4'000, 8'000, 16'000, 32'000,
-//                    64'000},
-//{100, 1'000, 5'000, 10'000, 50'000, 100'000}})
-//     ->Iterations(5)
-//     ->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_SDSL<uint16_t>)
+    ->ArgsProduct({{500'000'000, 800'000'000, 1'000'000'000, 1'200'000'000},
+                   {500, 1'000, 2'000, 4'000, 8'000, 16'000, 32'000, 64'000},
+                   {100'000, 500'000, 1'000'000, 5'000'000, 10'000'000}})
+    ->Iterations(100)
+    ->Unit(benchmark::kMillisecond);
 
 }  // namespace ecl

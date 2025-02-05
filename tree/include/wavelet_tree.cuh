@@ -261,6 +261,7 @@ __global__ void rankKernel(WaveletTree<T> tree,
                            RankSelectQuery<T>* const queries,
                            size_t const num_queries, size_t* const ranks,
                            uint32_t const num_groups,
+                           size_t const alphabet_size, uint8_t const num_levels,
                            size_t const counter_start);
 
 /*!
@@ -910,8 +911,9 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   }
 
   // Change parameters of graph
-  void* kernel_params_base[6] = {this, nullptr, 0, nullptr, (void*)&num_groups,
-                                 0};
+  void* kernel_params_base[8] = {
+      this,         nullptr, 0, nullptr, (void*)&num_groups, &alphabet_size_,
+      &num_levels_, 0};
 
   auto kernel_node_params_base =
       cudaKernelNodeParams{.func = nullptr,
@@ -956,13 +958,15 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
 
     size_t current_d_queries_offset = i * chunk_size;
 
-    void* kernel_params[6] = {kernel_params_base[0],
+    void* kernel_params[8] = {kernel_params_base[0],
                               &current_d_queries,
                               current_chunk_size == last_chunk_size
                                   ? (size_t*)&last_chunk_size
                                   : (size_t*)&chunk_size,
                               &current_d_results,
                               kernel_params_base[4],
+                              kernel_params_base[5],
+                              kernel_params_base[6],
                               &current_d_queries_offset};
 
     kernel_node_params.kernelParams = kernel_params;
@@ -1593,19 +1597,19 @@ template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets>
 __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
     WaveletTree<T> tree, RankSelectQuery<T>* const queries,
     size_t const num_queries, size_t* const ranks, uint32_t const num_groups,
+    size_t const alphabet_size, uint8_t const num_levels,
     size_t const counter_start) {
   assert(blockDim.x % WS == 0);
   extern __shared__ size_t shmem[];
 
   if constexpr (ShmemOffsets) {
-    for (uint32_t i = threadIdx.x; i < tree.getNumLevels(); i += blockDim.x) {
+    for (uint32_t i = threadIdx.x; i < num_levels; i += blockDim.x) {
       shmem[i] = tree.rank_select_.bit_array_.getOffset(i);
     }
 
     if constexpr (ShmemCounts) {
-      for (size_t i = threadIdx.x; i < tree.getAlphabetSize();
-           i += blockDim.x) {
-        shmem[tree.getNumLevels() + i] = tree.getCounts(i);
+      for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
+        shmem[num_levels + i] = tree.getCounts(i);
       }
     }
     __syncthreads();
@@ -1632,16 +1636,16 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
     RankSelectQuery<T> query = queries[i];
 
     T char_start = 0;
-    T char_end = tree.getAlphabetSize() - 1;
+    T char_end = alphabet_size - 1;
     T char_split;
     size_t start, pos;
-    for (uint8_t l = 0; l < tree.getNumLevels(); ++l) {
+    for (uint8_t l = 0; l < num_levels; ++l) {
       if (char_end - char_start == 0) {
         break;
       }
       size_t char_counts;
       if constexpr (ShmemCounts) {
-        char_counts = shmem[tree.getNumLevels() + char_start];
+        char_counts = shmem[num_levels + char_start];
       } else {
         char_counts = tree.getCounts(char_start);
       }

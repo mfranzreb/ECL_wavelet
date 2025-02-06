@@ -15,7 +15,7 @@ def plot_access_bm(bm, save_path):
 
     # 2 cols with enough rows for all data sizes
     n_data_sizes = len(bm["param.data_size"].unique())
-    n_rows = round(n_data_sizes / 2)
+    n_rows = n_data_sizes // 2 + (n_data_sizes % 2 > 0)
     fig, axs = plt.subplots(n_rows, 2, figsize=(10, 5 * n_rows))
 
     # One color for each num_queries

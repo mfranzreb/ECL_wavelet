@@ -82,7 +82,7 @@ std::vector<size_t> generateRandomAccessQueries(size_t const data_size,
                                                 size_t const num_queries);
 
 template <typename T>
-std::vector<RankSelectQuery<T>> generateRandomRSQueries(
+std::vector<RankSelectQuery<T>> generateRandomRankQueries(
     size_t const data_size, size_t const num_queries,
     std::vector<T> const& alphabet) {
   std::vector<RankSelectQuery<T>> queries(num_queries);
@@ -94,6 +94,45 @@ std::vector<RankSelectQuery<T>> generateRandomRSQueries(
     return RankSelectQuery<T>(dis(gen), alphabet[dis2(gen)]);
   });
   return queries;
+}
+
+template <typename T>
+std::vector<RankSelectQuery<T>> generateRandomSelectQueries(
+    std::unordered_map<T, size_t> const& hist, size_t const num_queries,
+    std::vector<T> const& alphabet) {
+  std::vector<RankSelectQuery<T>> queries(num_queries);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<T> dis_alphabet(0, alphabet.size() - 1);
+  std::generate(queries.begin(), queries.end(), [&]() {
+    T symbol;
+    size_t count;
+    do {
+      symbol = alphabet[dis_alphabet(gen)];
+      count = hist[symbol];
+    } while (count == 0);
+    std::uniform_int_distribution<size_t> dis_index(1, count);
+    auto index = dis_index(gen);
+
+    return RankSelectQuery<T>{index, symbol};
+  });
+  return queries;
+}
+
+template <typename T>
+std::pair<std::vector<T>, std::unordered_map<T, size_t>>
+generateRandomDataAndHist(std::vector<T> const& alphabet,
+                          size_t const data_size) {
+  std::vector<T> data(data_size);
+  std::unordered_map<T, size_t> hist;
+  std::uniform_int_distribution<size_t> dis(0, alphabet.size() - 1);
+  std::generate(data.begin(), data.end(), [&]() {
+    auto const symbol = alphabet[dis2(gen)];
+    hist[symbol]++;
+    return symbol;
+  });
+
+  return std::make_pair(data, hist);
 }
 
 }  // namespace ecl

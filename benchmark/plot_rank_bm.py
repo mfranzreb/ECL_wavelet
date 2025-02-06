@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 import argparse
 
 
-def plot_access_bm(bm, save_path):
+def plot_rank_bm(bm, save_path):
     byte_bm = bm[bm["param.alphabet_size"] <= 256]
     short_bm = bm[bm["param.alphabet_size"] > 256]
     for bm, bm_name in [(byte_bm, "byte"), (short_bm, "short")]:
@@ -100,4 +100,4 @@ if __name__ == "__main__":
 
     data = json.load(open(path))
     df = pd.DataFrame(data["benchmarks"])
-    plot_access_bm(df, save_path)
+    plot_rank_bm(df, save_path)

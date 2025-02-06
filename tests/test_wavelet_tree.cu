@@ -568,8 +568,8 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
     // Create 100 random rank queries
     size_t num_queries =
         i % 5 == 0 ? std::min(30 * alphabet_size, 100'000UL) : 100;
-    auto queries = generateRandomRSQueries<TypeParam>(data_size, num_queries,
-                                                      alphabet_copy);
+    auto queries = generateRandomRankQueries<TypeParam>(data_size, num_queries,
+                                                        alphabet_copy);
 
     std::vector<size_t> results_should(queries.size());
     for (size_t j = 0; j < queries.size(); ++j) {
@@ -634,25 +634,8 @@ TYPED_TEST(WaveletTreeTestFixture, selectRandom) {
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
 
-    // Create 100 random select queries
-    std::vector<RankSelectQuery<TypeParam>> queries(queries_per_iter);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<TypeParam> dis_alphabet(0, alphabet_size - 1);
-    std::generate(queries.begin(), queries.end(), [&]() {
-      TypeParam symbol_index;
-      TypeParam symbol;
-      size_t count;
-      do {
-        symbol_index = dis_alphabet(gen);
-        symbol = alphabet_copy[symbol_index];
-        count = hist[symbol];
-      } while (count == 0);
-      std::uniform_int_distribution<size_t> dis_index(1, count);
-      auto index = dis_index(gen);
-
-      return RankSelectQuery<TypeParam>{index, symbol};
-    });
+    auto queries = generateRandomSelectQueries<TypeParam>(
+        hist, queries_per_iter, alphabet_copy);
 
     auto queries_copy = queries;
     auto results = wt.select(queries_copy);

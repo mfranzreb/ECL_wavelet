@@ -126,8 +126,10 @@ generateRandomDataAndHist(std::vector<T> const& alphabet,
   std::vector<T> data(data_size);
   std::unordered_map<T, size_t> hist;
   std::uniform_int_distribution<size_t> dis(0, alphabet.size() - 1);
+  std::random_device rd;
+  std::mt19937 gen(rd());
   std::generate(data.begin(), data.end(), [&]() {
-    auto const symbol = alphabet[dis2(gen)];
+    auto const symbol = alphabet[dis(gen)];
     hist[symbol]++;
     return symbol;
   });

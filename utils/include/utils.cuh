@@ -189,7 +189,7 @@ __host__ __device__ bool getBit(uint8_t const i, T const c) {
 }
 
 template <typename T>
-__device__ T ceilLog2(T n) {
+__device__ uint8_t ceilLog2(T n) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type.");
   if constexpr (sizeof(T) == 8) {
@@ -207,9 +207,8 @@ __device__ T ceilLog2(T n) {
   }
 }
 
-// TODO. return should be 8bit
 template <typename T>
-__host__ T ceilLog2Host(T n) {
+__host__ uint8_t ceilLog2Host(T n) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type.");
   if constexpr (sizeof(T) == 8) {

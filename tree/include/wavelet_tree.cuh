@@ -540,7 +540,6 @@ __host__ [[nodiscard]] GraphContents createQueriesGraph(
                        copy_results_nodes};
 }
 
-// TODO: experiment with different carveouts
 template <typename T>
 template <int NumThreads>
 __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
@@ -1054,7 +1053,6 @@ __device__ WaveletTree<T>::Code WaveletTree<T>::encode(T const c) {
   return d_codes_[c - codes_start_];
 }
 
-// TODO: Could be improved
 template <typename T>
 __host__ std::vector<typename WaveletTree<T>::Code>
 WaveletTree<T>::createMinimalCodes(std::vector<T> const& alphabet) {

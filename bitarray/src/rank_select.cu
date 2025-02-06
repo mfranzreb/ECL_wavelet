@@ -115,7 +115,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   void* d_temp_storage = nullptr;
   gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
 
-  // TODO: How to go about this?
+  // TODO: How to go about this? -> Use Warpsum
   uint32_t constexpr kBlockSize = 256;
   uint32_t constexpr kItemsPerThread =
       (RankSelectConfig::NUM_L2_PER_L1 + kBlockSize - 1) / kBlockSize;

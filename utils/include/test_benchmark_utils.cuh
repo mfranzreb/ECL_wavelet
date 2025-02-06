@@ -109,7 +109,7 @@ std::vector<RankSelectQuery<T>> generateRandomSelectQueries(
     size_t count;
     do {
       symbol = alphabet[dis_alphabet(gen)];
-      count = hist[symbol];
+      count = hist.at(symbol);
     } while (count == 0);
     std::uniform_int_distribution<size_t> dis_index(1, count);
     auto index = dis_index(gen);

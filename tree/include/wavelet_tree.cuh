@@ -1520,6 +1520,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
     __syncthreads();
   }
 
+  // TODO: If only 1 TPQ, do atomic add inside of while statement.
   uint8_t const local_t_id = threadIdx.x % ThreadsPerQuery;
   while (access_counter < num_indices + counter_start) {
     size_t i;
@@ -1710,6 +1711,10 @@ __global__ void selectKernel(WaveletTree<T> tree,
 
   for (uint32_t i = global_warp_id; i < num_queries; i += num_warps) {
     RankSelectQuery<T> query = queries[i];
+    if (local_t_id == 0 and query.index_ > tree.getCounts(query.symbol_)) {
+      results[i] = tree.rank_select_.bit_array_.size(0);
+      continue;
+    }
     typename WaveletTree<T>::Code code{alphabet_num_bits, query.symbol_};
     if (query.symbol_ >= codes_start) {
       code = tree.encode(query.symbol_);

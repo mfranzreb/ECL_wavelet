@@ -270,6 +270,7 @@ template <typename T>
 __device__ void shareVar(bool condition, T &var, uint32_t const mask) {
   static_assert(std::is_integral<T>::value or std::is_floating_point<T>::value,
                 "T must be an integral or floating-point type.");
+  __syncwarp(mask);  //? Crazy behaviour on Volta
   uint32_t src_thread = __ballot_sync(mask, condition);
   // Get the value from the first thread that fulfills the condition
   src_thread = __ffs(src_thread) - 1;

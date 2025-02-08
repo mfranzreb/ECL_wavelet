@@ -296,8 +296,8 @@ class RankSelect {
                                        : RankSelectConfig::L2_WORD_SIZE;
 
     cub::WarpScan<uint16_t> warp_scan(*temp_storage);
-    uint8_t result_found = 0;
     size_t const word_start = result / (sizeof(uint32_t) * 8);
+    result = 0;  //= signalizes that nothing was found
     for (size_t current_group_word = word_start;
          current_group_word < word_start + l2_block_length;
          current_group_word += NumThreads) {
@@ -326,28 +326,28 @@ class RankSelect {
       uint16_t const vals_at_start = cum_vals - num_vals;
       if (cum_vals >= i and vals_at_start < i) {
         // Find the position of the i-th zero/one in the word
-        // TODO Do 1-indexed to distinguish from having found nothing, which is
+        // 1-indexed to distinguish from having found nothing, which is
         // 0.
         // TODO: faster implementations possible
         i -= vals_at_start;
-        result =
-            local_word * (sizeof(uint32_t) * 8) + getNBitPos<Value>(i, word);
-        result_found = 1;
+        result = local_word * (sizeof(uint32_t) * 8) +
+                 getNBitPos<Value>(i, word) + 1;
       }
       // communicate the result to all threads
-      shareVar<size_t>(result_found == 1, result, ~0);
-      if (result_found == 1) {
+      shareVar<size_t>(result != 0, result, ~0);
+      if (result != 0) {
         break;
       }
       // if no result found, update i
       i -= cum_vals;
       shareVar<size_t>(local_t_id == (NumThreads - 1), i, ~0);
     }
-    shareVar<uint8_t>(result_found == 1, result_found, ~0);
 
     // If nothing found, return the size of the array
-    if ((result_found == 0) or result > bit_array_.size(array_index)) {
+    if (result == 0 or result > bit_array_.size(array_index)) {
       result = bit_array_.size(array_index);
+    } else {
+      result--;
     }
     return result;
   }
@@ -555,6 +555,7 @@ class RankSelect {
  * \param num_last_l2_blocks Number of L2 blocks in the last L1 block.
  */
 // TODO: reoptimize and retune kernel
+// TODO: fuse bothe kernels together
 template <int ItemsPerThread>
 __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
     RankSelect rank_select, uint32_t const array_index,

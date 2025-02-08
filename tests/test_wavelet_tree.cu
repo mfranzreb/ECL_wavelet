@@ -64,6 +64,13 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetDataAndHist(
     return symbol;
   });
 
+  // Make sure that all symbols are in the hist
+  for (auto const& symbol : alphabet) {
+    if (hist.find(symbol) == hist.end()) {
+      hist[symbol] = 0;
+    }
+  }
+
   return std::make_pair(alphabet, data);
 }
 

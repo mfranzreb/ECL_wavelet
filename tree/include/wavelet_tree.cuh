@@ -165,6 +165,15 @@ class WaveletTree {
    */
   __device__ size_t getCounts(size_t i) const;
 
+  __device__ size_t getTotalAppearances(size_t i) const noexcept {
+    if (i == alphabet_size_ - 1) {
+      return rank_select_.bit_array_.size(0) -
+             getCounts(i);  // data_size - getCounts(i);
+    } else {
+      return getCounts(i + 1) - getCounts(i);
+    }
+  }
+
   /*!
    * \brief Return whether the alphabet is minimal.
    */
@@ -1716,7 +1725,8 @@ __global__ LB(MAX_TPB,
 
   for (uint32_t i = global_warp_id; i < num_queries; i += num_warps) {
     RankSelectQuery<T> query = queries[i];
-    if (local_t_id == 0 and query.index_ > tree.getCounts(query.symbol_)) {
+    if (local_t_id == 0 and
+        query.index_ > tree.getTotalAppearances(query.symbol_)) {
       results[i] = tree.rank_select_.bit_array_.size(0);
       continue;
     }

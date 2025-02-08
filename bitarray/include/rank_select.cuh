@@ -22,6 +22,9 @@ struct RankSelectConfig {
   // Number of 32-bit words covered by an L1-block.
   static constexpr size_t L1_WORD_SIZE = L1_BIT_SIZE / (sizeof(uint32_t) * 8);
 
+  // Number of 1s and 0s between each sampled position.
+  static constexpr size_t SELECT_SAMPLE_RATE = 4096;
+
   using L1_TYPE = uint64_t;
   using L2_TYPE = uint16_t;
 };  // struct RankSelectConfiguration
@@ -126,7 +129,7 @@ class RankSelect {
         mask = ((1 << NumThreads) - 1)
                << (NumThreads * ((threadIdx.x % WS) / NumThreads));
       }
-      result = warpSum<size_t, NumThreads>(mask, result);
+      result = warpReduce<size_t, NumThreads>(mask, result);
       // communicate the result to all threads
       shareVar<size_t>(t_id == 0, result, mask);
 
@@ -156,10 +159,198 @@ class RankSelect {
    * \return Position of the i-th zero/one. If i is larger than the number of
    * zeros/ones, the function returns the size of the bit array.
    */
-  template <uint32_t Value>
-  __device__ [[nodiscard]] size_t select(uint32_t const array_index, size_t i,
-                                         uint32_t const local_t_id,
-                                         uint32_t const num_threads);
+  template <uint32_t Value, uint32_t NumThreads = WS>
+  __device__ [[nodiscard]] size_t select(
+      uint32_t const array_index, size_t i,
+      cub::WarpScan<uint16_t>::TempStorage* temp_storage) {
+    static_assert(Value == 0 or Value == 1, "Value must be 0 or 1.");
+    static_assert(NumThreads <= 32);
+    assert(array_index < bit_array_.numArrays());
+    assert(i > 0);
+    if constexpr (Value == 0) {
+      if (i > (bit_array_.size(array_index) - d_total_num_ones_[array_index])) {
+        return bit_array_.size(array_index);
+      }
+    } else {
+      if (i > d_total_num_ones_[array_index]) {
+        return bit_array_.size(array_index);
+      }
+    }
+
+    uint8_t local_t_id = 0;
+    if constexpr (NumThreads > 1) {
+      local_t_id = threadIdx.x % NumThreads;
+    }
+
+    size_t const prev_sample_pos = i / RankSelectConfig::SELECT_SAMPLE_RATE;
+    size_t result = 1;  // 1 so that "curr_l2_block" is not 0 if no sample found
+    if (prev_sample_pos > 0) {
+      if constexpr (Value == 0) {
+        result = d_select_samples_0_[d_select_samples_0_offsets_[array_index] +
+                                     prev_sample_pos - 1];
+      } else {
+        result = d_select_samples_1_[d_select_samples_1_offsets_[array_index] +
+                                     prev_sample_pos - 1];
+      }
+    }
+
+    // Find next L1 block where the i-th zero/one is, starting from result
+    size_t const l1_offset = d_l1_offsets_[array_index];
+    size_t const l2_offset = d_l2_offsets_[array_index];
+    uint16_t const num_last_l2_blocks = d_num_last_l2_blocks_[array_index];
+    size_t const num_l1_blocks = d_num_l1_blocks_[array_index];
+
+    // Starting from 1 since 0-th entry always 0.
+    size_t curr_l1_block =
+        local_t_id + (result + RankSelectConfig::L1_BIT_SIZE - 1) /
+                         RankSelectConfig::L1_BIT_SIZE;
+    uint32_t active_threads = ~0;
+    active_threads =
+        __ballot_sync(active_threads, curr_l1_block < num_l1_blocks);
+    size_t current_val = 0;
+    size_t has_i_inside = 0;
+    while (curr_l1_block < num_l1_blocks) {
+      if constexpr (Value == 0) {
+        current_val = curr_l1_block * RankSelectConfig::L1_BIT_SIZE -
+                      d_l1_indices_[l1_offset + curr_l1_block];
+      } else {
+        current_val = d_l1_indices_[l1_offset + curr_l1_block];
+      }
+      has_i_inside = current_val >= i ? curr_l1_block : 0;
+      shareVar<size_t>(current_val >= i, has_i_inside, active_threads);
+      if (has_i_inside != 0) {
+        break;
+      }
+      curr_l1_block += NumThreads;
+      active_threads =
+          __ballot_sync(active_threads, curr_l1_block < num_l1_blocks);
+    }
+    shareVar<size_t>(current_val >= i, has_i_inside, ~0);
+    if (has_i_inside != 0) {
+      curr_l1_block = has_i_inside - 1;
+      result = curr_l1_block * RankSelectConfig::L1_BIT_SIZE;
+      if constexpr (Value == 0) {
+        i -= curr_l1_block * RankSelectConfig::L1_BIT_SIZE -
+             d_l1_indices_[l1_offset + curr_l1_block];
+      } else {
+        i -= d_l1_indices_[l1_offset + curr_l1_block];
+      }
+    } else {
+      result = (num_l1_blocks - 1) * RankSelectConfig::L1_BIT_SIZE;
+      if constexpr (Value == 0) {
+        i -= (num_l1_blocks - 1) * RankSelectConfig::L1_BIT_SIZE -
+             d_l1_indices_[l1_offset + num_l1_blocks - 1];
+      } else {
+        i -= d_l1_indices_[l1_offset + num_l1_blocks - 1];
+      }
+    }
+    uint16_t const l1_block_length = has_i_inside == 0
+                                         ? num_last_l2_blocks
+                                         : RankSelectConfig::NUM_L2_PER_L1;
+
+    active_threads = ~0;
+    uint16_t curr_l2_block = local_t_id + 1;
+    active_threads =
+        __ballot_sync(active_threads, curr_l2_block < l1_block_length);
+    size_t const l1_block_start = (result / RankSelectConfig::L1_BIT_SIZE) *
+                                  RankSelectConfig::NUM_L2_PER_L1;
+    while (curr_l2_block < l1_block_length) {
+      if constexpr (Value == 0) {
+        current_val = curr_l2_block * RankSelectConfig::L2_BIT_SIZE -
+                      d_l2_indices_[l2_offset + l1_block_start + curr_l2_block];
+      } else {
+        current_val = d_l2_indices_[l2_offset + l1_block_start + curr_l2_block];
+      }
+      has_i_inside = current_val >= i ? curr_l2_block : 0;
+      shareVar<size_t>(current_val >= i, has_i_inside, active_threads);
+      if (has_i_inside != 0) {
+        break;
+      }
+      curr_l2_block += NumThreads;
+      active_threads =
+          __ballot_sync(active_threads, curr_l2_block < l1_block_length);
+    }
+    shareVar<size_t>(current_val >= i, has_i_inside, ~0);
+    if (has_i_inside != 0) {
+      curr_l2_block = has_i_inside - 1;
+      result += curr_l2_block * RankSelectConfig::L2_BIT_SIZE;
+      if constexpr (Value == 0) {
+        i -= curr_l2_block * RankSelectConfig::L2_BIT_SIZE -
+             d_l2_indices_[l2_offset + l1_block_start + curr_l2_block];
+      } else {
+        i -= d_l2_indices_[l2_offset + l1_block_start + curr_l2_block];
+      }
+    } else {
+      result += (l1_block_length - 1) * RankSelectConfig::L2_BIT_SIZE;
+      if constexpr (Value == 0) {
+        i -= (l1_block_length - 1) * RankSelectConfig::L2_BIT_SIZE -
+             d_l2_indices_[l2_offset + l1_block_start + l1_block_length - 1];
+      } else {
+        i -= d_l2_indices_[l2_offset + l1_block_start + l1_block_length - 1];
+      }
+    }
+
+    size_t const l2_block_length = has_i_inside == 0
+                                       ? bit_array_.sizeInWords(array_index) -
+                                             (result / (sizeof(uint32_t) * 8))
+                                       : RankSelectConfig::L2_WORD_SIZE;
+
+    cub::WarpScan<uint16_t> warp_scan(*temp_storage);
+    uint8_t result_found = 0;
+    size_t const word_start = result / (sizeof(uint32_t) * 8);
+    for (size_t current_group_word = word_start;
+         current_group_word < word_start + l2_block_length;
+         current_group_word += NumThreads) {
+      size_t const local_word = current_group_word + local_t_id;
+      uint32_t word;
+      if constexpr (Value == 0) {
+        word = ~0;
+      } else {
+        word = 0;
+      }
+      uint16_t num_vals = 0;
+      if (local_word < word_start + l2_block_length) {
+        word = bit_array_.word(array_index, local_word);
+        if constexpr (Value == 0) {
+          num_vals = (sizeof(uint32_t) * 8) - __popc(word);
+        } else {
+          num_vals = __popc(word);
+        }
+      }
+      uint16_t cum_vals = 0;
+
+      // inclusive prefix sum
+      warp_scan.InclusiveSum(num_vals, cum_vals);
+
+      // Check if the i-th zero/one is in the current word
+      uint16_t const vals_at_start = cum_vals - num_vals;
+      if (cum_vals >= i and vals_at_start < i) {
+        // Find the position of the i-th zero/one in the word
+        // TODO Do 1-indexed to distinguish from having found nothing, which is
+        // 0.
+        // TODO: faster implementations possible
+        i -= vals_at_start;
+        result =
+            local_word * (sizeof(uint32_t) * 8) + getNBitPos<Value>(i, word);
+        result_found = 1;
+      }
+      // communicate the result to all threads
+      shareVar<size_t>(result_found == 1, result, ~0);
+      if (result_found == 1) {
+        break;
+      }
+      // if no result found, update i
+      i -= cum_vals;
+      shareVar<size_t>(local_t_id == (NumThreads - 1), i, ~0);
+    }
+    shareVar<uint8_t>(result_found == 1, result_found, ~0);
+
+    // If nothing found, return the size of the array
+    if ((result_found == 0) or result > bit_array_.size(array_index)) {
+      result = bit_array_.size(array_index);
+    }
+    return result;
+  }
 
   /*!
    * \brief Get the number of L1 blocks for a bit array.
@@ -185,6 +376,29 @@ class RankSelect {
   __device__ [[nodiscard]] size_t getNumLastL2Blocks(
       uint32_t const array_index) const;
 
+  template <uint32_t Value>
+  __device__ [[nodiscard]] size_t getTotalNumVals(
+      uint32_t const array_index) const {
+    static_assert(Value == 0 or Value == 1, "Value must be 0 or 1.");
+    if constexpr (Value == 1) {
+      return d_total_num_ones_[array_index];
+    } else {
+      return bit_array_.size(array_index) - d_total_num_ones_[array_index];
+    }
+  }
+
+  template <uint32_t Value>
+  __device__ [[nodiscard]] size_t getSelectSample(uint32_t const array_index,
+                                                  size_t const index) const {
+    if constexpr (Value == 0) {
+      return d_select_samples_0_[d_select_samples_0_offsets_[array_index] +
+                                 index];
+    } else {
+      return d_select_samples_1_[d_select_samples_1_offsets_[array_index] +
+                                 index];
+    }
+  }
+
   /*!
    * \brief Write a value to the L2 index.
    * \param array_index Index of the bit array to be used.
@@ -202,6 +416,20 @@ class RankSelect {
    */
   __device__ void writeL1Index(uint32_t const array_index, size_t const index,
                                RankSelectConfig::L1_TYPE const value) noexcept;
+
+  template <uint32_t Value>
+  __device__ void writeSelectSample(uint32_t const array_index,
+                                    size_t const index,
+                                    size_t const value) noexcept {
+    static_assert(Value == 0 or Value == 1, "Value must be 0 or 1.");
+    if constexpr (Value == 0) {
+      d_select_samples_0_[d_select_samples_0_offsets_[array_index] + index] =
+          value;
+    } else {
+      d_select_samples_1_[d_select_samples_1_offsets_[array_index] + index] =
+          value;
+    }
+  }
 
   /*!
    * \brief Get an L1 entry for a bit array.
@@ -250,7 +478,7 @@ class RankSelect {
    */
 
   template <typename T, int NumThreads>
-  __device__ T warpSum(uint32_t const mask, T val) {
+  __device__ T warpReduce(uint32_t const mask, T val) {
 #pragma unroll
     for (int offset = NumThreads / 2; offset > 0; offset /= 2) {
       val += __shfl_down_sync(mask, val, offset);
@@ -258,7 +486,6 @@ class RankSelect {
     return val;
   }
 
- private:
   /*!
    * \brief Get the position of the n-th 0 or 1 bit in a word, starting from the
    * least significant bit.
@@ -268,8 +495,29 @@ class RankSelect {
    * \return Position of the n-th bit. Starts from 0.
    */
   template <uint32_t Value>
-  __device__ [[nodiscard]] uint8_t getNBitPos(uint8_t const n, uint32_t word);
+  __device__ [[nodiscard]] uint8_t getNBitPos(uint8_t const n, uint32_t word) {
+    static_assert(Value == 0 or Value == 1,
+                  "Template parameter must be 0 or 1");
+    assert(n > 0);
+    assert(n <= (sizeof(uint32_t) * 8));
+    if constexpr (Value == 0) {
+      // Find the position of the n-th zero in the word
+      for (uint8_t i = 1; i < n; i++) {
+        word = word | (word + 1);  // set least significant 0-bit
+      }
+      return __ffs(~word) - 1;
 
+    } else {
+      // Find the position of the n-th one in the word
+      for (uint8_t i = 1; i < n; i++) {
+        word = word & (word - 1);  // clear least significant 1-bit
+      }
+      return __ffs(word) - 1;
+    }
+  }
+
+ private:
+  // TODO: num_l1_blocks and l2 blocks not necessary
   RankSelectConfig::L1_TYPE*
       d_l1_indices_; /*!< Device pointer to L1 indices for all arrays.*/
   RankSelectConfig::L2_TYPE*
@@ -287,6 +535,15 @@ class RankSelect {
                                       arrays. Not accessible from device.*/
   size_t total_num_l2_blocks_;        /*!< Total number of L2 blocks for all bit
                                          arrays.*/
+
+  size_t* d_select_samples_0_; /*!< Sampled positions for select queries.*/
+  size_t* d_select_samples_0_offsets_; /*!< Offsets where each array's select
+                                    samples start.*/
+  size_t* d_select_samples_1_; /*!< Sampled positions for select queries.*/
+  size_t* d_select_samples_1_offsets_; /*!< Offsets where each array's select
+                                    samples start.*/
+  size_t* d_total_num_ones_; /*!< Total number of ones for each array.*/
+
   bool is_copy_; /*!< Flag to signal whether current object is a
                     copy.*/
 };  // class RankSelect
@@ -338,7 +595,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
 
       // Warp reduction
       RankSelectConfig::L2_TYPE const total_ones =
-          rank_select.warpSum<RankSelectConfig::L2_TYPE, WS>(~0, num_ones);
+          rank_select.warpReduce<RankSelectConfig::L2_TYPE, WS>(~0, num_ones);
       __syncwarp();
 
       if (local_t_id == 0) {
@@ -405,7 +662,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
 
       // Warp reduction
       RankSelectConfig::L2_TYPE const total_ones =
-          rank_select.warpSum<RankSelectConfig::L2_TYPE, WS>(~0, num_ones);
+          rank_select.warpReduce<RankSelectConfig::L2_TYPE, WS>(~0, num_ones);
       __syncwarp();
       if (local_t_id == 0) {
         l2_entries[i] = total_ones;
@@ -442,4 +699,134 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
   return;
 }
 
+template <int ThreadsPerIndex>
+__global__ LB(MAX_TPB, MIN_BPM) void calculateSelectSamplesKernel(
+    RankSelect rank_select, uint32_t const array_index, size_t const num_groups,
+    size_t const total_num_l2_blocks, size_t const bit_array_size_in_words,
+    size_t* total_num_ones) {
+  assert(blockDim.x % WS == 0);
+  extern __shared__ size_t group_counter[];
+  __shared__ typename cub::WarpScan<size_t,
+                                    ThreadsPerIndex>::TempStorage
+      temp_storage[1024 / ThreadsPerIndex];  // TODO
+
+  uint8_t constexpr start_l2_block =
+      (RankSelectConfig::SELECT_SAMPLE_RATE / RankSelectConfig::L2_BIT_SIZE) -
+      1;
+
+  size_t const global_group_id =
+      (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerIndex;
+  uint16_t const local_group_id = threadIdx.x / ThreadsPerIndex;
+  uint8_t const local_t_id = threadIdx.x % ThreadsPerIndex;
+
+  for (size_t curr_l2_block = global_group_id + start_l2_block;
+       curr_l2_block < total_num_l2_blocks; curr_l2_block += num_groups) {
+    if (local_t_id == 0) {
+      group_counter[local_group_id] = rank_select.getL1Entry(
+          array_index, curr_l2_block / RankSelectConfig::NUM_L2_PER_L1);
+      group_counter[local_group_id] +=
+          rank_select.getL2Entry(array_index, curr_l2_block);
+    }
+    size_t const start_word = curr_l2_block * RankSelectConfig::L2_WORD_SIZE;
+    size_t const end_word = min(start_word + RankSelectConfig::L2_WORD_SIZE,
+                                bit_array_size_in_words);
+    cub::WarpScan<size_t, ThreadsPerIndex> warp_scan(
+        temp_storage[local_group_id]);
+    for (size_t i = start_word; i < end_word; i += ThreadsPerIndex) {
+      size_t local_i = i + local_t_id;
+      uint32_t word = 0;
+      bool const is_last_word = local_i == bit_array_size_in_words - 1;
+      uint8_t const word_size =
+          is_last_word ? (rank_select.bit_array_.size(array_index) - 1) %
+                                 (sizeof(uint32_t) * 8) +
+                             1
+                       : sizeof(uint32_t) * 8;
+      if (local_i < end_word) {
+        word = rank_select.bit_array_.word(array_index, local_i);
+        if (is_last_word) {
+          word = rank_select.bit_array_.partialWord(word, word_size);
+        }
+      }
+      size_t const num_ones = __popc(word);
+      size_t cum_ones = 0;
+      warp_scan.InclusiveSum(num_ones, cum_ones);
+      cum_ones += group_counter[local_group_id];
+      size_t const ones_at_start = cum_ones - num_ones;
+      if (cum_ones / RankSelectConfig::SELECT_SAMPLE_RATE >
+              ones_at_start / RankSelectConfig::SELECT_SAMPLE_RATE and
+          local_i < end_word) {
+        size_t const sample_pos =
+            local_i * (sizeof(uint32_t) * 8) +
+            rank_select.getNBitPos<1>(
+                (RankSelectConfig::SELECT_SAMPLE_RATE -
+                 ones_at_start % RankSelectConfig::SELECT_SAMPLE_RATE),
+                word);
+        rank_select.writeSelectSample<1>(
+            array_index, ones_at_start / RankSelectConfig::SELECT_SAMPLE_RATE,
+            sample_pos);
+      }
+      size_t const zeros_at_start =
+          local_i * (sizeof(uint32_t) * 8) - ones_at_start;
+      size_t const cum_zeros = zeros_at_start + word_size - num_ones;
+
+      if (cum_zeros / RankSelectConfig::SELECT_SAMPLE_RATE >
+              zeros_at_start / RankSelectConfig::SELECT_SAMPLE_RATE and
+          local_i < end_word) {
+        size_t const sample_pos =
+            local_i * (sizeof(uint32_t) * 8) +
+            rank_select.getNBitPos<0>(
+                (RankSelectConfig::SELECT_SAMPLE_RATE -
+                 zeros_at_start % RankSelectConfig::SELECT_SAMPLE_RATE),
+                word);
+        rank_select.writeSelectSample<0>(
+            array_index, zeros_at_start / RankSelectConfig::SELECT_SAMPLE_RATE,
+            sample_pos);
+      }
+      if (local_t_id == ThreadsPerIndex - 1) {
+        group_counter[local_group_id] = cum_ones;
+      }
+      if (is_last_word and local_i < end_word) {
+        assert(rank_select.bit_array_.size(array_index) ==
+               cum_ones + cum_zeros);
+        total_num_ones[0] = cum_ones;
+      }
+    }
+  }
+  if (total_num_l2_blocks <= start_l2_block and global_group_id == 0) {
+    // Get the number of ones in the last L2 block
+    if (local_t_id == 0) {
+      group_counter[local_group_id] =
+          rank_select.getL2Entry(array_index, total_num_l2_blocks - 1);
+    }
+    size_t const start_word =
+        (total_num_l2_blocks - 1) * RankSelectConfig::L2_WORD_SIZE;
+    size_t const end_word = min(start_word + RankSelectConfig::L2_WORD_SIZE,
+                                bit_array_size_in_words);
+    for (size_t i = start_word; i < end_word; i += ThreadsPerIndex) {
+      size_t local_i = i + local_t_id;
+      uint32_t word = 0;
+      bool const is_last_word = local_i == bit_array_size_in_words - 1;
+      uint8_t const word_size =
+          is_last_word ? (rank_select.bit_array_.size(array_index) - 1) %
+                                 (sizeof(uint32_t) * 8) +
+                             1
+                       : sizeof(uint32_t) * 8;
+      if (local_i < end_word) {
+        word = rank_select.bit_array_.word(array_index, local_i);
+        if (is_last_word) {
+          word = rank_select.bit_array_.partialWord(word, word_size);
+        }
+      }
+      size_t num_ones = __popc(word);
+      num_ones = rank_select.warpReduce<size_t, WS>(~0U, num_ones);
+      shareVar<size_t>(local_t_id == 0, num_ones, ~0U);
+      if (local_t_id == 0) {
+        group_counter[local_group_id] += num_ones;
+      }
+      if (is_last_word) {
+        total_num_ones[0] = group_counter[local_group_id];
+      }
+    }
+  }
+}
 }  // namespace ecl

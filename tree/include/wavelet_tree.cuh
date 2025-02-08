@@ -1697,10 +1697,15 @@ __device__ uint32_t getPrevCharStart(uint32_t const char_start,
 }
 
 template <typename T>
-__global__ void selectKernel(WaveletTree<T> tree,
-                             RankSelectQuery<T>* const queries,
-                             size_t const num_queries, size_t* const results) {
+__global__ LB(MAX_TPB,
+              MIN_BPM) void selectKernel(WaveletTree<T> tree,
+                                         RankSelectQuery<T>* const queries,
+                                         size_t const num_queries,
+                                         size_t* const results) {
   assert(blockDim.x % WS == 0);
+  __shared__ typename cub::WarpScan<uint16_t>::TempStorage
+      temp_storage[1024 / WS];  // TODO
+
   uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
   uint32_t const num_warps = gridDim.x * blockDim.x / WS;
   uint32_t const local_t_id = threadIdx.x % WS;
@@ -1734,16 +1739,18 @@ __global__ void selectKernel(WaveletTree<T> tree,
         start = tree.rank_select_.template rank<WS, 0, 1>(
             l, tree.getCounts(char_start),
             tree.rank_select_.bit_array_.getOffset(l));
-        query.index_ = tree.rank_select_.select<1>(l, start + query.index_,
-                                                   local_t_id, WS) +
-                       1;
+        query.index_ =
+            tree.rank_select_.select<1>(l, start + query.index_,
+                                        &temp_storage[threadIdx.x / WS]) +
+            1;
       } else {
         start = tree.rank_select_.template rank<WS, 0, 0>(
             l, tree.getCounts(char_start),
             tree.rank_select_.bit_array_.getOffset(l));
-        query.index_ = tree.rank_select_.select<0>(l, start + query.index_,
-                                                   local_t_id, WS) +
-                       1;
+        query.index_ =
+            tree.rank_select_.select<0>(l, start + query.index_,
+                                        &temp_storage[threadIdx.x / WS]) +
+            1;
       }
       if (l == (code.len_ - 1) and
           query.index_ > tree.rank_select_.bit_array_.size(l)) {

@@ -71,13 +71,15 @@ __global__ void rank1Kernel(RankSelect rank_select, uint32_t array_index,
 __global__ void select0Kernel(RankSelect rank_select, uint32_t array_index,
                               size_t index, size_t *output) {
   assert(blockDim.x == WS);
-  *output = rank_select.select<0>(array_index, index, threadIdx.x, blockDim.x);
+  __shared__ typename cub::WarpScan<uint16_t>::TempStorage temp_storage;
+  *output = rank_select.select<0>(array_index, index, &temp_storage);
 }
 
 __global__ void select1Kernel(RankSelect rank_select, uint32_t array_index,
                               size_t index, size_t *output) {
   assert(blockDim.x == WS);
-  *output = rank_select.select<1>(array_index, index, threadIdx.x, blockDim.x);
+  __shared__ typename cub::WarpScan<uint16_t>::TempStorage temp_storage;
+  *output = rank_select.select<1>(array_index, index, &temp_storage);
 }
 
 __global__ void getNumL1BlocksKernel(RankSelect rank_select,
@@ -88,6 +90,26 @@ __global__ void getNumL1BlocksKernel(RankSelect rank_select,
 __global__ void getNumL2BlocksKernel(RankSelect rank_select,
                                      uint32_t array_index, size_t *output) {
   *output = rank_select.getNumL2Blocks(array_index);
+}
+
+__global__ void getSelectSampleKernel(RankSelect rank_select,
+                                      uint32_t array_index, size_t index,
+                                      bool val, size_t *output) {
+  if (val) {
+    *output = rank_select.getSelectSample<1>(array_index, index);
+  } else {
+    *output = rank_select.getSelectSample<0>(array_index, index);
+  }
+}
+
+__global__ void getTotalNumValsKernel(RankSelect rank_select,
+                                      uint32_t array_index, size_t *output,
+                                      bool const val) {
+  if (val) {
+    *output = rank_select.getTotalNumVals<1>(array_index);
+  } else {
+    *output = rank_select.getTotalNumVals<0>(array_index);
+  }
 }
 
 class RankSelectHelper {
@@ -146,8 +168,8 @@ class RankSelectHelper {
   }
 
   void writeWord(size_t index, uint32_t value) {
-    size_t start_bit = index * 32;
-    for (size_t i = 0; i < 32; ++i) {
+    size_t start_bit = index * (sizeof(uint32_t) * 8);
+    for (size_t i = 0; i < (sizeof(uint32_t) * 8); ++i) {
       bit_vector_[start_bit + i] = (value >> i) & 1UL;
     }
   }
@@ -160,7 +182,7 @@ TEST_F(RankSelectBoolTest, RankSelectConstructor) {
   uint32_t num_arrays = 10;
   for (int i = 0; i < num_arrays; ++i) {
     size_t rand_1 = rand() % 1000;
-    size_t rand_2 = rand() % 32;
+    size_t rand_2 = rand() % (sizeof(uint32_t) * 8);
     sizes.push_back(8 * sizeof(uint32_t) * rand_1 + rand_2);
   }
   BitArray bit_array(sizes, false);
@@ -351,6 +373,38 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
   }
 }
 
+TEST_F(RankSelectBlocksTest, RankSelectSamplesContent) {
+  std::vector<size_t> BA_sizes{
+      1,
+      RankSelectConfig::SELECT_SAMPLE_RATE - 1,
+      RankSelectConfig::SELECT_SAMPLE_RATE + 1,
+      2 * RankSelectConfig::SELECT_SAMPLE_RATE - 1,
+      2 * RankSelectConfig::SELECT_SAMPLE_RATE + 1,
+      6 * RankSelectConfig::L2_BIT_SIZE + RankSelectConfig::L2_BIT_SIZE / 5};
+  for (bool const val : {true, false}) {
+    BitArray bit_array(BA_sizes, val);
+    RankSelect rank_select(std::move(bit_array), 0);
+
+    for (uint32_t i = 0; i < BA_sizes.size(); ++i) {
+      getTotalNumValsKernel<<<1, 1>>>(rank_select, i, result, val);
+      kernelCheck();
+      EXPECT_EQ(*result, rank_select.bit_array_.sizeHost(i));
+      getTotalNumValsKernel<<<1, 1>>>(rank_select, i, result, !val);
+      kernelCheck();
+      EXPECT_EQ(*result, 0);
+    }
+
+    for (uint32_t i = 0; i < BA_sizes.size(); ++i) {
+      size_t num_samples = BA_sizes[i] / RankSelectConfig::SELECT_SAMPLE_RATE;
+      for (size_t j = 1; j <= num_samples; ++j) {
+        getSelectSampleKernel<<<1, 1>>>(rank_select, i, j - 1, val, result);
+        kernelCheck();
+        EXPECT_EQ(*result, j * RankSelectConfig::SELECT_SAMPLE_RATE - 1);
+      }
+    }
+  }
+}
+
 TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
   int num_arrays = 5;
   std::vector<size_t> sizes(num_arrays);
@@ -367,18 +421,24 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
   }
   BitArray bit_array(sizes, false);
   // For each array, go through each word and set it to a random number
-  random_nums.resize((max_size + 31) / 32);
+  random_nums.resize((max_size + (sizeof(uint32_t) * 8 - 1)) /
+                     (sizeof(uint32_t) * 8));
   generateRandomNums(random_nums, 0U, std::numeric_limits<uint32_t>::max());
 
   uint32_t *d_words_arr;
-  gpuErrchk(
-      cudaMalloc(&d_words_arr, ((max_size + 31) / 32) * sizeof(uint32_t)));
-  gpuErrchk(cudaMemcpy(d_words_arr, random_nums.data(),
-                       ((max_size + 31) / 32) * sizeof(uint32_t),
-                       cudaMemcpyHostToDevice));
+  gpuErrchk(cudaMalloc(&d_words_arr, ((max_size + (sizeof(uint32_t) * 8 - 1)) /
+                                      (sizeof(uint32_t) * 8)) *
+                                         sizeof(uint32_t)));
+  gpuErrchk(cudaMemcpy(
+      d_words_arr, random_nums.data(),
+      ((max_size + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8)) *
+          sizeof(uint32_t),
+      cudaMemcpyHostToDevice));
   for (uint32_t i = 0; i < num_arrays; ++i) {
-    size_t num_words = (sizes[i] + 31) / 32;
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, kMaxTPB);
+    size_t num_words =
+        (sizes[i] + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8);
+    auto [blocks, threads] =
+        getLaunchConfig((num_words + WS - 1) / WS, 256, kMaxTPB);
     writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
                                                   num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
@@ -419,6 +479,82 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
   }
 }
 
+TEST_F(RankSelectBlocksTest, RankSelectSamplesRandom) {
+  int num_arrays = 10;
+  for (int _ = 0; _ < 10; _++) {
+    std::vector<size_t> sizes(num_arrays);
+    std::vector<RankSelectHelper> helpers;
+    // Sizes are random between 200 and 10^6
+    std::vector<uint32_t> random_nums(num_arrays);
+    generateRandomNums<uint32_t>(random_nums, 200, 1e6);
+
+    size_t max_size = 0;
+    for (int i = 0; i < num_arrays; ++i) {
+      sizes[i] = random_nums[i];
+      max_size = std::max(max_size, sizes[i]);
+      helpers.emplace_back(random_nums[i]);
+    }
+    BitArray bit_array(sizes, false);
+    // For each array, go through each word and set it to a random number
+    random_nums.resize((max_size + (sizeof(uint32_t) * 8 - 1)) /
+                       (sizeof(uint32_t) * 8));
+    generateRandomNums(random_nums, 0U, std::numeric_limits<uint32_t>::max());
+
+    uint32_t *d_words_arr;
+    gpuErrchk(cudaMalloc(
+        &d_words_arr,
+        ((max_size + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8)) *
+            sizeof(uint32_t)));
+    gpuErrchk(cudaMemcpy(
+        d_words_arr, random_nums.data(),
+        ((max_size + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8)) *
+            sizeof(uint32_t),
+        cudaMemcpyHostToDevice));
+    for (uint32_t i = 0; i < num_arrays; ++i) {
+      size_t num_words =
+          (sizes[i] + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8);
+      auto [blocks, threads] =
+          getLaunchConfig((num_words + WS - 1) / WS, 256, kMaxTPB);
+      writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
+                                                    num_words);
+      for (uint32_t j = 0; j < num_words; ++j) {
+        helpers[i].writeWord(j, random_nums[j]);
+      }
+      kernelCheck();
+    }
+    for (auto &helper : helpers) {
+      helper.buildRankIndex();
+    }
+    gpuErrchk(cudaFree(d_words_arr));
+    RankSelect rank_select(std::move(bit_array), 0);
+    for (uint32_t i = 0; i < num_arrays; ++i) {
+      auto const array_size = sizes[i];
+      size_t current_sample = 0;
+      size_t select0 = 0;
+      size_t select1 = 0;
+      while (select0 != array_size or select1 != array_size) {
+        select0 = helpers[i].select0((current_sample + 1) *
+                                     RankSelectConfig::SELECT_SAMPLE_RATE);
+        if (select0 != array_size) {
+          getSelectSampleKernel<<<1, 1>>>(rank_select, i, current_sample, false,
+                                          result);
+          kernelCheck();
+          EXPECT_EQ(*result, select0);
+        }
+        select1 = helpers[i].select1((current_sample + 1) *
+                                     RankSelectConfig::SELECT_SAMPLE_RATE);
+        if (select1 != array_size) {
+          getSelectSampleKernel<<<1, 1>>>(rank_select, i, current_sample, true,
+                                          result);
+          kernelCheck();
+          EXPECT_EQ(*result, select1);
+        }
+        current_sample++;
+      }
+    }
+  }
+}
+
 TEST_F(RankSelectBlocksTest, RankSelectOperations) {
   for (auto const &val : {true, false}) {
     BitArray bit_array(
@@ -452,7 +588,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
                 <<<1, NumThreads>>>(rank_select, i, pos, result);
             kernelCheck();
             EXPECT_EQ(*result, pos);
-            select1Kernel<<<1, 32>>>(rank_select, i, pos, result);
+            select1Kernel<<<1, WS>>>(rank_select, i, pos, result);
             kernelCheck();
             EXPECT_EQ(*result, pos - 1);
           } else {
@@ -460,7 +596,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
                 <<<1, NumThreads>>>(rank_select, i, pos, result);
             kernelCheck();
             EXPECT_EQ(*result, pos);
-            select0Kernel<<<1, 32>>>(rank_select, i, pos, result);
+            select0Kernel<<<1, WS>>>(rank_select, i, pos, result);
             kernelCheck();
             EXPECT_EQ(*result, pos - 1);
           }
@@ -473,10 +609,10 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
               <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size - 1);
-          select1Kernel<<<1, 32>>>(rank_select, i, 1, result);
+          select1Kernel<<<1, WS>>>(rank_select, i, 1, result);
           kernelCheck();
           EXPECT_EQ(*result, 0);
-          select1Kernel<<<1, 32>>>(rank_select, i, bit_size, result);
+          select1Kernel<<<1, WS>>>(rank_select, i, bit_size, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size - 1);
 
@@ -484,7 +620,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
               <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
           kernelCheck();
           EXPECT_EQ(*result, 0);
-          select0Kernel<<<1, 32>>>(rank_select, i, 1, result);
+          select0Kernel<<<1, WS>>>(rank_select, i, 1, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size);
         } else {
@@ -495,10 +631,10 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
               <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size - 1);
-          select0Kernel<<<1, 32>>>(rank_select, i, 1, result);
+          select0Kernel<<<1, WS>>>(rank_select, i, 1, result);
           kernelCheck();
           EXPECT_EQ(*result, 0);
-          select0Kernel<<<1, 32>>>(rank_select, i, bit_size, result);
+          select0Kernel<<<1, WS>>>(rank_select, i, bit_size, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size - 1);
 
@@ -506,7 +642,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
               <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
           kernelCheck();
           EXPECT_EQ(*result, 0);
-          select1Kernel<<<1, 32>>>(rank_select, i, 1, result);
+          select1Kernel<<<1, WS>>>(rank_select, i, 1, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size);
         }
@@ -572,16 +708,16 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
 
     for (auto const &pos : random_positions) {
       rank1Kernel<WS><<<1, WS>>>(rank_select, i, pos, result);
-      int8_t set_bits_in_last_word = pos % 32 - 16;
-      size_t num_words = pos / 32;
-      size_t rank1 = 32 * num_words / 2 +
+      int8_t set_bits_in_last_word = pos % (sizeof(uint32_t) * 8) - 16;
+      size_t num_words = pos / (sizeof(uint32_t) * 8);
+      size_t rank1 = (sizeof(uint32_t) * 8) * num_words / 2 +
                      (set_bits_in_last_word > 0 ? set_bits_in_last_word : 0);
       assert(rank1 == helpers[i].rank1(pos));
       kernelCheck();
       EXPECT_EQ(*result, rank1);
       if (rank1 == 0) continue;
-      select1Kernel<<<1, 32>>>(rank_select, i, rank1, result);
-      size_t select1 = 32 * (rank1 / 16) - 1;
+      select1Kernel<<<1, WS>>>(rank_select, i, rank1, result);
+      size_t select1 = (sizeof(uint32_t) * 8) * (rank1 / 16) - 1;
       if (rank1 % 16 != 0) {
         select1 += 16 + rank1 % 16;
       }
@@ -590,13 +726,14 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
       EXPECT_EQ(*result, select1);
 
       rank0Kernel<WS><<<1, WS>>>(rank_select, i, pos, result);
-      size_t rank0 = 32 * num_words / 2 + std::min(16UL, pos % 32);
+      size_t rank0 = (sizeof(uint32_t) * 8) * num_words / 2 +
+                     std::min(16UL, pos % (sizeof(uint32_t) * 8));
       assert(rank0 == helpers[i].rank0(pos));
       kernelCheck();
       EXPECT_EQ(*result, rank0);
       if (rank0 == 0) continue;
-      select0Kernel<<<1, 32>>>(rank_select, i, rank0, result);
-      size_t select0 = 32 * (rank0 / 16) - 1;
+      select0Kernel<<<1, WS>>>(rank_select, i, rank0, result);
+      size_t select0 = (sizeof(uint32_t) * 8) * (rank0 / 16) - 1;
       if (rank0 % 16 != 0) {
         select0 += std::min(16UL, rank0 % 16);
       } else {
@@ -610,84 +747,93 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
 }
 
 TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
-  int num_arrays = 5;
-  std::vector<size_t> sizes(num_arrays);
-  std::vector<RankSelectHelper> helpers;
-  // Sizes are random between 2000 and 10^6
-  std::vector<uint32_t> random_nums(num_arrays);
-  generateRandomNums<uint32_t>(random_nums, 2000, 1e6);
+  int num_arrays = 10;
+  for (int _ = 0; _ < 10; _++) {
+    std::vector<size_t> sizes(num_arrays);
+    std::vector<RankSelectHelper> helpers;
+    // Sizes are random between 2000 and 10^6
+    std::vector<uint32_t> random_nums(num_arrays);
+    generateRandomNums<uint32_t>(random_nums, 2000, 1e6);
 
-  size_t max_size = 0;
-  for (int i = 0; i < num_arrays; ++i) {
-    sizes[i] = random_nums[i];
-    max_size = std::max(max_size, sizes[i]);
-    helpers.emplace_back(random_nums[i]);
-  }
-  BitArray bit_array(sizes, false);
-  // For each array, go through each word and set it to a random number
-  random_nums.resize((max_size + 31) / 32);
-  generateRandomNums(random_nums, 0U, std::numeric_limits<uint32_t>::max());
-
-  uint32_t *d_words_arr;
-  gpuErrchk(
-      cudaMalloc(&d_words_arr, ((max_size + 31) / 32) * sizeof(uint32_t)));
-  gpuErrchk(cudaMemcpy(d_words_arr, random_nums.data(),
-                       ((max_size + 31) / 32) * sizeof(uint32_t),
-                       cudaMemcpyHostToDevice));
-  for (uint32_t i = 0; i < num_arrays; ++i) {
-    size_t num_words = (sizes[i] + 31) / 32;
-    auto [blocks, threads] = getLaunchConfig(num_words / 32, 256, kMaxTPB);
-    writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
-                                                  num_words);
-    for (uint32_t j = 0; j < num_words; ++j) {
-      helpers[i].writeWord(j, random_nums[j]);
+    size_t max_size = 0;
+    for (int i = 0; i < num_arrays; ++i) {
+      sizes[i] = random_nums[i];
+      max_size = std::max(max_size, sizes[i]);
+      helpers.emplace_back(random_nums[i]);
     }
-    kernelCheck();
-  }
-  for (auto &helper : helpers) {
-    helper.buildRankIndex();
-  }
-  gpuErrchk(cudaFree(d_words_arr));
+    BitArray bit_array(sizes, false);
+    // For each array, go through each word and set it to a random number
+    random_nums.resize((max_size + (sizeof(uint32_t) * 8 - 1)) /
+                       (sizeof(uint32_t) * 8));
+    generateRandomNums(random_nums, 0U, std::numeric_limits<uint32_t>::max());
 
-  // perform rank and select queries on 100 random places in each array
-  uint32_t num_queries = 500;
-  RankSelect rank_select(std::move(bit_array), 0);
-  for (uint32_t i = 0; i < num_arrays; ++i) {
-    auto tests = [&]<int NumThreads>() {
-      for (uint32_t j = 0; j < num_queries; ++j) {
-        uint32_t index = random_nums[j] % sizes[i];
-        rank0Kernel<NumThreads>
-            <<<1, NumThreads>>>(rank_select, i, index, result);
-        auto rank0 = helpers[i].rank0(index);
-        kernelCheck();
-        EXPECT_EQ(*result, rank0);
-        rank1Kernel<NumThreads>
-            <<<1, NumThreads>>>(rank_select, i, index, result);
-        auto rank1 = helpers[i].rank1(index);
-        kernelCheck();
-        EXPECT_EQ(*result, rank1);
-        if (rank0 == 0 or rank1 == 0) continue;
-        if (*result != rank1) {
+    uint32_t *d_words_arr;
+    gpuErrchk(cudaMalloc(
+        &d_words_arr,
+        ((max_size + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8)) *
+            sizeof(uint32_t)));
+    gpuErrchk(cudaMemcpy(
+        d_words_arr, random_nums.data(),
+        ((max_size + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8)) *
+            sizeof(uint32_t),
+        cudaMemcpyHostToDevice));
+    for (uint32_t i = 0; i < num_arrays; ++i) {
+      size_t num_words =
+          (sizes[i] + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8);
+      auto [blocks, threads] =
+          getLaunchConfig((num_words + WS - 1) / WS, 256, kMaxTPB);
+      writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
+                                                    num_words);
+      for (uint32_t j = 0; j < num_words; ++j) {
+        helpers[i].writeWord(j, random_nums[j]);
+      }
+      kernelCheck();
+    }
+    for (auto &helper : helpers) {
+      helper.buildRankIndex();
+    }
+    gpuErrchk(cudaFree(d_words_arr));
+
+    // perform rank and select queries on 500 random places in each array
+    uint32_t num_queries = 500;
+    RankSelect rank_select(std::move(bit_array), 0);
+    for (uint32_t i = 0; i < num_arrays; ++i) {
+      auto tests = [&]<int NumThreads>() {
+        for (uint32_t j = 0; j < num_queries; ++j) {
+          uint32_t index = random_nums[j] % sizes[i];
+          rank0Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, index, result);
+          auto rank0 = helpers[i].rank0(index);
+          kernelCheck();
+          EXPECT_EQ(*result, rank0);
           rank1Kernel<NumThreads>
               <<<1, NumThreads>>>(rank_select, i, index, result);
+          auto rank1 = helpers[i].rank1(index);
           kernelCheck();
+          EXPECT_EQ(*result, rank1);
+          if (rank0 == 0 or rank1 == 0) continue;
+          if (*result != rank1) {
+            rank1Kernel<NumThreads>
+                <<<1, NumThreads>>>(rank_select, i, index, result);
+            kernelCheck();
+          }
+          select1Kernel<<<1, WS>>>(rank_select, i, rank1, result);
+          auto select1 = helpers[i].select1(rank1);
+          kernelCheck();
+          EXPECT_EQ(*result, select1);
+          select0Kernel<<<1, WS>>>(rank_select, i, rank0, result);
+          auto select0 = helpers[i].select0(rank0);
+          kernelCheck();
+          EXPECT_EQ(*result, select0);
         }
-        select1Kernel<<<1, 32>>>(rank_select, i, rank1, result);
-        auto select1 = helpers[i].select1(rank1);
-        kernelCheck();
-        EXPECT_EQ(*result, select1);
-        select0Kernel<<<1, 32>>>(rank_select, i, rank0, result);
-        auto select0 = helpers[i].select0(rank0);
-        kernelCheck();
-        EXPECT_EQ(*result, select0);
-      }
-    };
-    tests.operator()<32>();
-    tests.operator()<16>();
-    tests.operator()<8>();
-    tests.operator()<4>();
-    tests.operator()<2>();
-    tests.operator()<1>();
+      };
+      tests.operator()<32>();
+      tests.operator()<16>();
+      tests.operator()<8>();
+      tests.operator()<4>();
+      tests.operator()<2>();
+      tests.operator()<1>();
+    }
   }
 }
 

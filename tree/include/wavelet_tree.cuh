@@ -1013,8 +1013,12 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
   maxThreadsPerBlock = findLargestDivisor(kMaxTPB, maxThreadsPerBlock);
   // launch kernel with 1 warp per index
   size_t const num_queries = queries.size();
-  auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_queries, kMinTPB, maxThreadsPerBlock);
+
+  auto prop = getDeviceProperties();
+  auto [num_blocks, threads_per_block] = getLaunchConfig(
+      (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount + WS - 1) /
+          WS,
+      kMinTPB, maxThreadsPerBlock);
 
   // allocate space for results
   size_t* d_results;

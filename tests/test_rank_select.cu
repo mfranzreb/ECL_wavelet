@@ -72,14 +72,18 @@ __global__ void select0Kernel(RankSelect rank_select, uint32_t array_index,
                               size_t index, size_t *output) {
   assert(blockDim.x == WS);
   __shared__ typename cub::WarpScan<uint16_t>::TempStorage temp_storage;
-  *output = rank_select.select<0>(array_index, index, &temp_storage);
+  *output = rank_select.select<0>(array_index, index,
+                                  rank_select.bit_array_.getOffset(array_index),
+                                  &temp_storage);
 }
 
 __global__ void select1Kernel(RankSelect rank_select, uint32_t array_index,
                               size_t index, size_t *output) {
   assert(blockDim.x == WS);
   __shared__ typename cub::WarpScan<uint16_t>::TempStorage temp_storage;
-  *output = rank_select.select<1>(array_index, index, &temp_storage);
+  *output = rank_select.select<1>(array_index, index,
+                                  rank_select.bit_array_.getOffset(array_index),
+                                  &temp_storage);
 }
 
 __global__ void getNumL1BlocksKernel(RankSelect rank_select,

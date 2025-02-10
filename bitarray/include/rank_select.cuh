@@ -161,7 +161,7 @@ class RankSelect {
    */
   template <uint32_t Value, uint32_t NumThreads = WS>
   __device__ [[nodiscard]] size_t select(
-      uint32_t const array_index, size_t i,
+      uint32_t const array_index, size_t i, size_t const BA_offset,
       cub::WarpScan<uint16_t>::TempStorage* temp_storage) {
     static_assert(Value == 0 or Value == 1, "Value must be 0 or 1.");
     static_assert(NumThreads <= 32);
@@ -194,7 +194,8 @@ class RankSelect {
       }
     }
 
-    // Find next L1 block where the i-th zero/one is, starting from result
+    // TODO: reduce register usage here
+    //  Find next L1 block where the i-th zero/one is, starting from result
     size_t const l1_offset = d_l1_offsets_[array_index];
     size_t const l2_offset = d_l2_offsets_[array_index];
     uint16_t const num_last_l2_blocks = d_num_last_l2_blocks_[array_index];
@@ -290,14 +291,14 @@ class RankSelect {
       }
     }
 
-    size_t const l2_block_length = has_i_inside == 0
-                                       ? bit_array_.sizeInWords(array_index) -
-                                             (result / (sizeof(uint32_t) * 8))
-                                       : RankSelectConfig::L2_WORD_SIZE;
+    uint16_t const l2_block_length = has_i_inside == 0
+                                         ? bit_array_.sizeInWords(array_index) -
+                                               (result / (sizeof(uint32_t) * 8))
+                                         : RankSelectConfig::L2_WORD_SIZE;
 
     cub::WarpScan<uint16_t> warp_scan(*temp_storage);
     size_t const word_start = result / (sizeof(uint32_t) * 8);
-    result = 0;  //= signalizes that nothing was found
+    result = 0;  // 0 signalizes that nothing was found
     for (size_t current_group_word = word_start;
          current_group_word < word_start + l2_block_length;
          current_group_word += NumThreads) {
@@ -310,7 +311,7 @@ class RankSelect {
       }
       uint16_t num_vals = 0;
       if (local_word < word_start + l2_block_length) {
-        word = bit_array_.word(array_index, local_word);
+        word = bit_array_.word(array_index, local_word, BA_offset);
         if constexpr (Value == 0) {
           num_vals = (sizeof(uint32_t) * 8) - __popc(word);
         } else {

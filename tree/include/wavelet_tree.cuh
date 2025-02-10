@@ -283,7 +283,11 @@ __global__ void rankKernel(WaveletTree<T> tree,
 template <typename T>
 __global__ void selectKernel(WaveletTree<T> tree,
                              RankSelectQuery<T>* const queries,
-                             size_t const num_queries, size_t* const ranks);
+                             size_t const num_queries, size_t* const results,
+                             size_t const num_groups,
+                             size_t const alphabet_size,
+                             uint8_t const alphabet_num_bits,
+                             T const codes_start, bool const is_pow_two);
 
 /****************************************************************************************
  * Implementation
@@ -1045,8 +1049,10 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
                        num_queries * sizeof(RankSelectQuery<T>),
                        cudaMemcpyHostToDevice));
 
-  selectKernel<T><<<num_blocks, threads_per_block>>>(*this, d_queries,
-                                                     num_queries, d_results);
+  selectKernel<T><<<num_blocks, threads_per_block>>>(
+      *this, d_queries, num_queries, d_results,
+      num_blocks * threads_per_block / WS, alphabet_size_, num_levels_,
+      codes_start_, isPowTwo<size_t>(alphabet_size_));
   kernelCheck();
 
   // copy results back to host
@@ -1692,42 +1698,42 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
   }
 }
 
-__device__ uint32_t getPrevCharStart(uint32_t const char_start,
-                                     bool const is_rightmost_child,
-                                     uint32_t const alphabet_size,
-                                     uint32_t const level,
-                                     uint8_t const code_len) {
-  if (is_rightmost_child) {
-    uint32_t new_start = 0;
-    // TODO: look if lookup table is faster
-    for (uint32_t l = 0; l < level; l++) {
-      new_start += getPrevPowTwo(alphabet_size - new_start);
-    }
-    return new_start;
+template <typename T, bool IsPowTwo>
+__device__ T getPrevCharStart(T const char_start, bool const is_rightmost_child,
+                              size_t const alphabet_size, uint8_t const level,
+                              uint8_t const num_levels,
+                              uint8_t const code_len) {
+  if constexpr (IsPowTwo) {
+    T const node_lens = 1ULL << (num_levels - level);
+    return char_start - node_lens;
   } else {
-    return char_start - powTwo<uint32_t>(code_len - 1 - level);
+    if (is_rightmost_child) {
+      uint32_t new_start = 0;
+      // TODO: look if lookup table is faster
+      for (uint32_t l = 0; l < level; l++) {
+        new_start += getPrevPowTwo(alphabet_size - new_start);
+      }
+      return new_start;
+    } else {
+      return char_start - powTwo<uint32_t>(code_len - 1 - level);
+    }
   }
 }
 
 template <typename T>
-__global__ LB(MAX_TPB,
-              MIN_BPM) void selectKernel(WaveletTree<T> tree,
-                                         RankSelectQuery<T>* const queries,
-                                         size_t const num_queries,
-                                         size_t* const results) {
+__global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
+    WaveletTree<T> tree, RankSelectQuery<T>* const queries,
+    size_t const num_queries, size_t* const results, size_t const num_groups,
+    size_t const alphabet_size, uint8_t const alphabet_num_bits,
+    T const codes_start, bool const is_pow_two) {
   assert(blockDim.x % WS == 0);
   __shared__ typename cub::WarpScan<uint16_t>::TempStorage
       temp_storage[1024 / WS];  // TODO
 
-  uint32_t const global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
-  uint32_t const num_warps = gridDim.x * blockDim.x / WS;
-  uint32_t const local_t_id = threadIdx.x % WS;
+  size_t const global_group_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
+  uint8_t const local_t_id = threadIdx.x % WS;
 
-  uint32_t const alphabet_size = tree.getAlphabetSize();
-  uint8_t const alphabet_num_bits = ceilLog2<uint32_t>(alphabet_size);
-  auto const codes_start = tree.getCodesStart();
-
-  for (uint32_t i = global_warp_id; i < num_queries; i += num_warps) {
+  for (size_t i = global_group_id; i < num_queries; i += num_groups) {
     RankSelectQuery<T> query = queries[i];
     if (local_t_id == 0 and
         query.index_ > tree.getTotalAppearances(query.symbol_)) {
@@ -1739,30 +1745,34 @@ __global__ LB(MAX_TPB,
       code = tree.encode(query.symbol_);
     }
 
-    uint32_t char_start = query.symbol_;
+    T char_start = query.symbol_;
     size_t start;
-    for (int32_t l = code.len_ - 1; l >= 0; --l) {
+    for (int16_t l = code.len_ - 1; l >= 0; --l) {
       // If it's a right child
+      size_t const offset = tree.rank_select_.bit_array_.getOffset(l);
       if (getBit<T>(alphabet_num_bits - 1 - l, code.code_) == true) {
-        // Is rightmost child if bit-prefix of the code is all 1s
-        bool is_rightmost_child =
-            __popc(code.code_ >> (alphabet_num_bits - l)) == l;
+        if (is_pow_two) {
+          char_start = getPrevCharStart<T, true>(
+              char_start, true, alphabet_size, l, alphabet_num_bits, code.len_);
+        } else {  // Is rightmost child if bit-prefix of the code is all 1s
+          bool is_rightmost_child =
+              __popc(code.code_ >> (alphabet_num_bits - l)) == l;
 
-        char_start = getPrevCharStart(char_start, is_rightmost_child,
-                                      alphabet_size, l, code.len_);
+          char_start = getPrevCharStart<T, false>(
+              char_start, is_rightmost_child, alphabet_size, l,
+              alphabet_num_bits, code.len_);
+        }
         start = tree.rank_select_.template rank<WS, 0, 1>(
-            l, tree.getCounts(char_start),
-            tree.rank_select_.bit_array_.getOffset(l));
+            l, tree.getCounts(char_start), offset);
         query.index_ =
-            tree.rank_select_.select<1>(l, start + query.index_,
+            tree.rank_select_.select<1>(l, start + query.index_, offset,
                                         &temp_storage[threadIdx.x / WS]) +
             1;
       } else {
         start = tree.rank_select_.template rank<WS, 0, 0>(
-            l, tree.getCounts(char_start),
-            tree.rank_select_.bit_array_.getOffset(l));
+            l, tree.getCounts(char_start), offset);
         query.index_ =
-            tree.rank_select_.select<0>(l, start + query.index_,
+            tree.rank_select_.select<0>(l, start + query.index_, offset,
                                         &temp_storage[threadIdx.x / WS]) +
             1;
       }

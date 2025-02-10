@@ -272,6 +272,7 @@ __device__ void shareVar(bool condition, T &var, uint32_t const mask) {
                 "T must be an integral or floating-point type.");
   __syncwarp(mask);  //? Crazy behaviour on Volta
   uint32_t src_thread = __ballot_sync(mask, condition);
+  if (src_thread == 0) return;
   // Get the value from the first thread that fulfills the condition
   src_thread = __ffs(src_thread) - 1;
   var = __shfl_sync(mask, var, src_thread);

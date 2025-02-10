@@ -24,9 +24,8 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   // Compute the number of L1 blocks.
   num_l1_blocks_.resize(num_arrays);
   for (size_t i = 0; i < num_arrays; ++i) {
-    num_l1_blocks_[i] =
-        (bit_array_.sizeHost(i) + RankSelectConfig::L1_BIT_SIZE - 1) /
-        RankSelectConfig::L1_BIT_SIZE;
+    num_l1_blocks_[i] = (bit_array_.sizeHost(i) + RSConfig::L1_BIT_SIZE - 1) /
+                        RSConfig::L1_BIT_SIZE;
   }
   // transfer to device
   gpuErrchk(
@@ -41,10 +40,10 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   // Allocate memory for the L1 index.
   // For convenience, right now first entry is for the first block, which is
   // always 0.
-  gpuErrchk(cudaMalloc(&d_l1_indices_,
-                       total_l1_blocks * sizeof(RankSelectConfig::L1_TYPE)));
+  gpuErrchk(
+      cudaMalloc(&d_l1_indices_, total_l1_blocks * sizeof(RSConfig::L1_TYPE)));
   gpuErrchk(cudaMemset(d_l1_indices_, 0,
-                       total_l1_blocks * sizeof(RankSelectConfig::L1_TYPE)));
+                       total_l1_blocks * sizeof(RSConfig::L1_TYPE)));
 
   std::vector<size_t> l1_offsets(num_l1_blocks_.size());
 
@@ -58,10 +57,9 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   // Get how many l2 blocks each last L1 block has
   std::vector<uint16_t> num_last_l2_blocks(num_arrays);
   for (size_t i = 0; i < num_arrays; ++i) {
-    num_last_l2_blocks[i] =
-        (bit_array_.sizeHost(i) % RankSelectConfig::L1_BIT_SIZE +
-         RankSelectConfig::L2_BIT_SIZE - 1) /
-        RankSelectConfig::L2_BIT_SIZE;
+    num_last_l2_blocks[i] = (bit_array_.sizeHost(i) % RSConfig::L1_BIT_SIZE +
+                             RSConfig::L2_BIT_SIZE - 1) /
+                            RSConfig::L2_BIT_SIZE;
   }
   // transfer to device
   gpuErrchk(cudaMalloc(&d_num_last_l2_blocks_,
@@ -73,7 +71,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   std::vector<size_t> num_l2_blocks_per_arr(num_arrays);
   for (size_t i = 0; i < num_arrays; ++i) {
     num_l2_blocks_per_arr[i] =
-        (num_l1_blocks_[i] - 1) * RankSelectConfig::NUM_L2_PER_L1 +
+        (num_l1_blocks_[i] - 1) * RSConfig::NUM_L2_PER_L1 +
         num_last_l2_blocks[i];
   }
 
@@ -85,11 +83,10 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   // Allocate memory for the L2 index.
   // For convenience, right now first entry is for the first block, which is
   // always 0.
-  gpuErrchk(cudaMalloc(&d_l2_indices_, total_num_l2_blocks_ *
-                                           sizeof(RankSelectConfig::L2_TYPE)));
-  gpuErrchk(
-      cudaMemset(d_l2_indices_, 0,
-                 total_num_l2_blocks_ * sizeof(RankSelectConfig::L2_TYPE)));
+  gpuErrchk(cudaMalloc(&d_l2_indices_,
+                       total_num_l2_blocks_ * sizeof(RSConfig::L2_TYPE)));
+  gpuErrchk(cudaMemset(d_l2_indices_, 0,
+                       total_num_l2_blocks_ * sizeof(RSConfig::L2_TYPE)));
 
   std::exclusive_scan(num_l2_blocks_per_arr.begin(),
                       num_l2_blocks_per_arr.end(),
@@ -106,7 +103,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   size_t temp_storage_bytes = 0;
   for (uint32_t i = 0; i < num_arrays; i++) {
     auto const num_l1_blocks = num_l1_blocks_[i];
-    RankSelectConfig::L1_TYPE* d_data = getL1EntryPointer(i, 0);
+    RSConfig::L1_TYPE* d_data = getL1EntryPointer(i, 0);
     size_t prev_storage_bytes = temp_storage_bytes;
     gpuErrchk(cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, d_data,
                                             num_l1_blocks));
@@ -118,7 +115,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   // TODO: How to go about this? -> Use Warpsum
   uint32_t constexpr kBlockSize = 256;
   uint32_t constexpr kItemsPerThread =
-      (RankSelectConfig::NUM_L2_PER_L1 + kBlockSize - 1) / kBlockSize;
+      (RSConfig::NUM_L2_PER_L1 + kBlockSize - 1) / kBlockSize;
   // Choose maximum possible items per thread
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
@@ -154,9 +151,9 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
       kernelStreamCheck(cudaStreamPerThread);
     } else {
       uint16_t const num_last_l2_blocks =
-          (bit_array_.sizeHost(i) % RankSelectConfig::L1_BIT_SIZE +
-           RankSelectConfig::L2_BIT_SIZE - 1) /
-          RankSelectConfig::L2_BIT_SIZE;
+          (bit_array_.sizeHost(i) % RSConfig::L1_BIT_SIZE +
+           RSConfig::L2_BIT_SIZE - 1) /
+          RSConfig::L2_BIT_SIZE;
 
       // Get minimal block size that still fully loads GPU
       auto const min_threads = static_cast<size_t>(
@@ -180,7 +177,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
           <<<num_l1_blocks, kBlockSize>>>(*this, i, num_last_l2_blocks);
       kernelStreamCheck(cudaStreamPerThread);
 
-      RankSelectConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
+      RSConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
 
 #pragma omp critical
       {  // Run inclusive prefix sum
@@ -195,26 +192,24 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   std::vector<size_t> num_zeros_samples_per_array(num_arrays);
   for (uint8_t i = 0; i < num_arrays; i++) {
     size_t last_l1_index;
-    RankSelectConfig::L2_TYPE last_l2_index;
+    RSConfig::L2_TYPE last_l2_index;
     size_t const remaining_bits =
-        bit_array_.sizeHost(i) % RankSelectConfig::L2_BIT_SIZE;
+        bit_array_.sizeHost(i) % RSConfig::L2_BIT_SIZE;
     gpuErrchk(cudaMemcpy(&last_l1_index,
                          d_l1_indices_ + l1_offsets[i] + num_l1_blocks_[i] - 1,
                          sizeof(size_t), cudaMemcpyDeviceToHost));
-    gpuErrchk(cudaMemcpy(
-        &last_l2_index,
-        d_l2_indices_ + num_l2_blocks_per_arr[i] +
-            (bit_array_.sizeHost(i) + RankSelectConfig::L2_BIT_SIZE - 1) /
-                RankSelectConfig::L2_BIT_SIZE -
-            1,
-        sizeof(RankSelectConfig::L2_TYPE), cudaMemcpyDeviceToHost));
+    gpuErrchk(
+        cudaMemcpy(&last_l2_index,
+                   d_l2_indices_ + num_l2_blocks_per_arr[i] +
+                       (bit_array_.sizeHost(i) + RSConfig::L2_BIT_SIZE - 1) /
+                           RSConfig::L2_BIT_SIZE -
+                       1,
+                   sizeof(RSConfig::L2_TYPE), cudaMemcpyDeviceToHost));
     size_t const num_ones = last_l1_index + last_l2_index + remaining_bits;
     size_t const num_zeros =
         bit_array_.sizeHost(i) - last_l1_index - last_l2_index;
-    num_ones_samples_per_array[i] =
-        num_ones / RankSelectConfig::SELECT_SAMPLE_RATE;
-    num_zeros_samples_per_array[i] =
-        num_zeros / RankSelectConfig::SELECT_SAMPLE_RATE;
+    num_ones_samples_per_array[i] = num_ones / RSConfig::SELECT_SAMPLE_RATE;
+    num_zeros_samples_per_array[i] = num_zeros / RSConfig::SELECT_SAMPLE_RATE;
   }
   size_t const total_ones_samples = std::accumulate(
       num_ones_samples_per_array.begin(), num_ones_samples_per_array.end(), 0);
@@ -247,8 +242,8 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   // #pragma omp parallel for num_threads(num_arrays)
   for (uint8_t i = 0; i < num_arrays; i++) {
     size_t const total_l2_blocks =
-        (bit_array_.sizeHost(i) + RankSelectConfig::L2_BIT_SIZE - 1) /
-        RankSelectConfig::L2_BIT_SIZE;
+        (bit_array_.sizeHost(i) + RSConfig::L2_BIT_SIZE - 1) /
+        RSConfig::L2_BIT_SIZE;
     auto const num_blocks = (total_l2_blocks + WS - 1) / WS;
     calculateSelectSamplesKernel<WS>
         <<<num_blocks, kMaxTPB, sizeof(size_t) * kMaxTPB / WS>>>(
@@ -349,7 +344,7 @@ __device__ [[nodiscard]] size_t RankSelect::getNumLastL2Blocks(
 
 __device__ void RankSelect::writeL2Index(
     uint32_t const array_index, size_t const index,
-    RankSelectConfig::L2_TYPE const value) noexcept {
+    RSConfig::L2_TYPE const value) noexcept {
   assert(array_index < bit_array_.numArrays());
   assert(index < getNumL2Blocks(array_index));
   d_l2_indices_[d_l2_offsets_[array_index] + index] = value;
@@ -357,20 +352,20 @@ __device__ void RankSelect::writeL2Index(
 
 __device__ void RankSelect::writeL1Index(
     uint32_t const array_index, size_t const index,
-    RankSelectConfig::L1_TYPE const value) noexcept {
+    RSConfig::L1_TYPE const value) noexcept {
   assert(array_index < bit_array_.numArrays());
   assert(index < d_num_l1_blocks_[array_index]);
   d_l1_indices_[d_l1_offsets_[array_index] + index] = value;
 }
 
-__device__ [[nodiscard]] RankSelectConfig::L1_TYPE RankSelect::getL1Entry(
+__device__ [[nodiscard]] RSConfig::L1_TYPE RankSelect::getL1Entry(
     uint32_t const array_index, size_t const index) const {
   assert(array_index < bit_array_.numArrays());
   assert(index < d_num_l1_blocks_[array_index]);
   return d_l1_indices_[d_l1_offsets_[array_index] + index];
 }
 
-__host__ [[nodiscard]] RankSelectConfig::L1_TYPE* RankSelect::getL1EntryPointer(
+__host__ [[nodiscard]] RSConfig::L1_TYPE* RankSelect::getL1EntryPointer(
     uint32_t const array_index, size_t const index) const {
   assert(array_index < bit_array_.numArrays());
   assert(index < num_l1_blocks_[array_index]);

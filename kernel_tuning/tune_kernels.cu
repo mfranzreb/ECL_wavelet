@@ -219,14 +219,14 @@ void tune_calculateL2EntriesKernel(std::string out_file,
   size_t const ba_size = prop.totalGlobalMem / 10;
   BitArray bit_array({ba_size});
   RankSelect rs(std::move(bit_array), GPU_index);
-  size_t const num_blocks = (ba_size + RankSelectConfig::L1_BIT_SIZE - 1) /
-                            RankSelectConfig::L1_BIT_SIZE;
+  size_t const num_blocks =
+      (ba_size + RSConfig::L1_BIT_SIZE - 1) / RSConfig::L1_BIT_SIZE;
   for (uint32_t block_size : block_sizes) {
     uint8_t const num_iters = 5;
     uint8_t const num_last_l2_blocks =
-        (rs.bit_array_.sizeHost(0) % RankSelectConfig::L1_BIT_SIZE +
-         RankSelectConfig::L2_BIT_SIZE - 1) /
-        RankSelectConfig::L2_BIT_SIZE;
+        (rs.bit_array_.sizeHost(0) % RSConfig::L1_BIT_SIZE +
+         RSConfig::L2_BIT_SIZE - 1) /
+        RSConfig::L2_BIT_SIZE;
     auto start = std::chrono::high_resolution_clock::now();
     for (uint8_t i = 0; i < num_iters; ++i) {
       calculateL2EntriesKernel<<<num_blocks, block_size>>>(rs, 0,

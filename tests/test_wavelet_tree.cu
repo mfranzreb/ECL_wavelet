@@ -118,6 +118,17 @@ __host__ void compareRankResults(WaveletTree<T>& wt,
   }
 }
 
+template <typename T, int NumThreads>
+__host__ void compareSelectResults(
+    WaveletTree<T>& wt, std::vector<RankSelectQuery<T>> const& queries,
+    std::vector<size_t> const& results_should) {
+  auto queries_copy = queries;
+  auto const results = wt.template select<NumThreads>(queries_copy);
+  for (size_t i = 0; i < queries.size(); ++i) {
+    EXPECT_EQ(results_should[i], results[i]);
+  }
+}
+
 using MyTypes = testing::Types<uint8_t, uint16_t, uint32_t, uint64_t>;
 TYPED_TEST_SUITE(WaveletTreeTestFixture, MyTypes);
 
@@ -605,15 +616,19 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
   for (size_t i = 0; i < data.size(); ++i) {
     queries.push_back({i / 10 + 1, data[i]});
   }
-  auto results = wt.select(queries);
-  for (size_t i = 0; i < data.size(); ++i) {
-    EXPECT_EQ(i, results[i]);
-  }
+  std::vector<size_t> results_should(queries.size());
+  std::iota(results_should.begin(), results_should.end(), 0);
+  compareSelectResults<TypeParam, 1>(wt, queries, results_should);
+  compareSelectResults<TypeParam, 2>(wt, queries, results_should);
+  compareSelectResults<TypeParam, 4>(wt, queries, results_should);
+  compareSelectResults<TypeParam, 8>(wt, queries, results_should);
+  compareSelectResults<TypeParam, 16>(wt, queries, results_should);
+  compareSelectResults<TypeParam, 32>(wt, queries, results_should);
 
   // Check that if there is no n-th occurrence of a symbol, the result is the
   // size of the data
   queries = std::vector<RankSelectQuery<TypeParam>>{{11, 0}};
-  results = wt.select(queries);
+  auto results = wt.select(queries);
   EXPECT_EQ(data.size(), results[0]);
 }
 
@@ -641,21 +656,26 @@ TYPED_TEST(WaveletTreeTestFixture, selectRandom) {
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
 
-    auto queries = generateRandomSelectQueries<TypeParam>(
+    auto const queries = generateRandomSelectQueries<TypeParam>(
         hist, queries_per_iter, alphabet_copy);
 
-    auto queries_copy = queries;
-    auto results = wt.select(queries_copy);
+    std::vector<size_t> results_should(queries.size());
+#pragma omp parallel for
     for (size_t j = 0; j < queries.size(); ++j) {
       size_t counts = 0;
-      EXPECT_EQ(std::find_if(data.begin(), data.end(),
-                             [&](TypeParam c) {
-                               return c == queries[j].symbol_ and
-                                      ++counts == queries[j].index_;
-                             }) -
-                    data.begin(),
-                results[j]);
+      results_should[j] = std::find_if(data.begin(), data.end(),
+                                       [&](TypeParam c) {
+                                         return c == queries[j].symbol_ and
+                                                ++counts == queries[j].index_;
+                                       }) -
+                          data.begin();
     }
+    compareSelectResults<TypeParam, 1>(wt, queries, results_should);
+    compareSelectResults<TypeParam, 2>(wt, queries, results_should);
+    compareSelectResults<TypeParam, 4>(wt, queries, results_should);
+    compareSelectResults<TypeParam, 8>(wt, queries, results_should);
+    compareSelectResults<TypeParam, 16>(wt, queries, results_should);
+    compareSelectResults<TypeParam, 32>(wt, queries, results_should);
   }
 }
 

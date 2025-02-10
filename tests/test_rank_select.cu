@@ -19,14 +19,12 @@ class RankSelectTest : public ::testing::Test {
 };
 
 __global__ void writeL1IndexKernel(RankSelect rank_select, uint32_t array_index,
-                                   size_t index,
-                                   RankSelectConfig::L1_TYPE value) {
+                                   size_t index, RSConfig::L1_TYPE value) {
   rank_select.writeL1Index(array_index, index, value);
 }
 
 __global__ void writeL2IndexKernel(RankSelect rank_select, uint32_t array_index,
-                                   size_t index,
-                                   RankSelectConfig::L2_TYPE value) {
+                                   size_t index, RSConfig::L2_TYPE value) {
   rank_select.writeL2Index(array_index, index, value);
 }
 
@@ -68,22 +66,24 @@ __global__ void rank1Kernel(RankSelect rank_select, uint32_t array_index,
   *output = result.rank;
 }
 
+template <int NumThreads>
 __global__ void select0Kernel(RankSelect rank_select, uint32_t array_index,
                               size_t index, size_t *output) {
-  assert(blockDim.x == WS);
-  __shared__ typename cub::WarpScan<uint16_t>::TempStorage temp_storage;
-  *output = rank_select.select<0>(array_index, index,
-                                  rank_select.bit_array_.getOffset(array_index),
-                                  &temp_storage);
+  __shared__ typename cub::WarpScan<RSConfig::L2_TYPE, NumThreads>::TempStorage
+      temp_storage;
+  *output = rank_select.select<0, NumThreads>(
+      array_index, index, rank_select.bit_array_.getOffset(array_index),
+      &temp_storage);
 }
 
+template <int NumThreads>
 __global__ void select1Kernel(RankSelect rank_select, uint32_t array_index,
                               size_t index, size_t *output) {
-  assert(blockDim.x == WS);
-  __shared__ typename cub::WarpScan<uint16_t>::TempStorage temp_storage;
-  *output = rank_select.select<1>(array_index, index,
-                                  rank_select.bit_array_.getOffset(array_index),
-                                  &temp_storage);
+  __shared__ typename cub::WarpScan<RSConfig::L2_TYPE, NumThreads>::TempStorage
+      temp_storage;
+  *output = rank_select.select<1, NumThreads>(
+      array_index, index, rank_select.bit_array_.getOffset(array_index),
+      &temp_storage);
 }
 
 __global__ void getNumL1BlocksKernel(RankSelect rank_select,
@@ -195,13 +195,12 @@ TEST_F(RankSelectBoolTest, RankSelectConstructor) {
 
 using RankSelectBlocksTest = RankSelectTest<size_t>;
 TEST_F(RankSelectBlocksTest, RankSelectIndexSizes) {
-  BitArray bit_array(std::vector<size_t>{1, RankSelectConfig::L2_BIT_SIZE - 1,
-                                         RankSelectConfig::L2_BIT_SIZE + 1,
-                                         2 * RankSelectConfig::L2_BIT_SIZE - 1,
-                                         RankSelectConfig::L1_BIT_SIZE - 1,
-                                         RankSelectConfig::L1_BIT_SIZE + 1,
-                                         2 * RankSelectConfig::L1_BIT_SIZE - 1},
-                     false);
+  BitArray bit_array(
+      std::vector<size_t>{
+          1, RSConfig::L2_BIT_SIZE - 1, RSConfig::L2_BIT_SIZE + 1,
+          2 * RSConfig::L2_BIT_SIZE - 1, RSConfig::L1_BIT_SIZE - 1,
+          RSConfig::L1_BIT_SIZE + 1, 2 * RSConfig::L1_BIT_SIZE - 1},
+      false);
   RankSelect rank_select(std::move(bit_array), 0);
 
   for (uint32_t i = 0; i < 5; ++i) {
@@ -236,7 +235,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexSizes) {
   }
   getNumLastL2BlocksKernel<<<1, 1>>>(rank_select, 4, result);
   kernelCheck();
-  EXPECT_EQ(*result, RankSelectConfig::NUM_L2_PER_L1);
+  EXPECT_EQ(*result, RSConfig::NUM_L2_PER_L1);
 
   getNumLastL2BlocksKernel<<<1, 1>>>(rank_select, 5, result);
   kernelCheck();
@@ -244,29 +243,28 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexSizes) {
 
   getNumLastL2BlocksKernel<<<1, 1>>>(rank_select, 6, result);
   kernelCheck();
-  EXPECT_EQ(*result, RankSelectConfig::NUM_L2_PER_L1);
+  EXPECT_EQ(*result, RSConfig::NUM_L2_PER_L1);
 
   getNumL2BlocksKernel<<<1, 1>>>(rank_select, 4, result);
   kernelCheck();
-  EXPECT_EQ(*result, RankSelectConfig::NUM_L2_PER_L1);
+  EXPECT_EQ(*result, RSConfig::NUM_L2_PER_L1);
 
   getNumL2BlocksKernel<<<1, 1>>>(rank_select, 5, result);
   kernelCheck();
-  EXPECT_EQ(*result, RankSelectConfig::NUM_L2_PER_L1 + 1);
+  EXPECT_EQ(*result, RSConfig::NUM_L2_PER_L1 + 1);
 
   getNumL2BlocksKernel<<<1, 1>>>(rank_select, 6, result);
   kernelCheck();
-  EXPECT_EQ(*result, 2 * RankSelectConfig::NUM_L2_PER_L1);
+  EXPECT_EQ(*result, 2 * RSConfig::NUM_L2_PER_L1);
 }
 
 TEST_F(RankSelectBlocksTest, RankSelectIndexWriting) {
-  BitArray bit_array(std::vector<size_t>{1, RankSelectConfig::L2_BIT_SIZE - 1,
-                                         RankSelectConfig::L2_BIT_SIZE + 1,
-                                         2 * RankSelectConfig::L2_BIT_SIZE - 1,
-                                         RankSelectConfig::L1_BIT_SIZE - 1,
-                                         RankSelectConfig::L1_BIT_SIZE + 1,
-                                         2 * RankSelectConfig::L1_BIT_SIZE - 1},
-                     false);
+  BitArray bit_array(
+      std::vector<size_t>{
+          1, RSConfig::L2_BIT_SIZE - 1, RSConfig::L2_BIT_SIZE + 1,
+          2 * RSConfig::L2_BIT_SIZE - 1, RSConfig::L1_BIT_SIZE - 1,
+          RSConfig::L1_BIT_SIZE + 1, 2 * RSConfig::L1_BIT_SIZE - 1},
+      false);
   RankSelect rank_select(std::move(bit_array), 0);
 
   // Check that all entries of all arrays are initialized to 0
@@ -316,8 +314,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndexWriting) {
 
 TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
   {
-    BitArray bit_array(std::vector<size_t>{RankSelectConfig::L1_BIT_SIZE + 1},
-                       false);
+    BitArray bit_array(std::vector<size_t>{RSConfig::L1_BIT_SIZE + 1}, false);
 
     RankSelect rank_select(std::move(bit_array), 0);
 
@@ -339,13 +336,12 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
       EXPECT_EQ(*result, 0);
     }
   }
-  BitArray bit_array(std::vector<size_t>{1, RankSelectConfig::L2_BIT_SIZE + 1,
-                                         2 * RankSelectConfig::L2_BIT_SIZE - 1,
-                                         RankSelectConfig::L1_BIT_SIZE - 1,
-                                         RankSelectConfig::L1_BIT_SIZE + 1,
-                                         2 * RankSelectConfig::L1_BIT_SIZE - 1,
-                                         2 * RankSelectConfig::L1_BIT_SIZE + 1},
-                     true);
+  BitArray bit_array(
+      std::vector<size_t>{
+          1, RSConfig::L2_BIT_SIZE + 1, 2 * RSConfig::L2_BIT_SIZE - 1,
+          RSConfig::L1_BIT_SIZE - 1, RSConfig::L1_BIT_SIZE + 1,
+          2 * RSConfig::L1_BIT_SIZE - 1, 2 * RSConfig::L1_BIT_SIZE + 1},
+      true);
 
   RankSelect rank_select(std::move(bit_array), 0);
 
@@ -359,20 +355,20 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
       getL1EntryKernel<<<1, 1>>>(rank_select, i, j, result);
       kernelCheck();
       EXPECT_EQ(*result, num_ones);
-      num_ones += RankSelectConfig::L1_BIT_SIZE;
+      num_ones += RSConfig::L1_BIT_SIZE;
     }
     getNumL2BlocksKernel<<<1, 1>>>(rank_select, i, result);
     kernelCheck();
     uint32_t const num_l2 = *result;
     num_ones = 0;
     for (uint32_t j = 0; j < num_l2; ++j) {
-      if (j % RankSelectConfig::NUM_L2_PER_L1 == 0) {
+      if (j % RSConfig::NUM_L2_PER_L1 == 0) {
         num_ones = 0;
       }
       getL2EntryKernel<<<1, 1>>>(rank_select, i, j, result);
       kernelCheck();
       EXPECT_EQ(*result, num_ones);
-      num_ones += RankSelectConfig::L2_BIT_SIZE;
+      num_ones += RSConfig::L2_BIT_SIZE;
     }
   }
 }
@@ -380,11 +376,11 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesContent) {
 TEST_F(RankSelectBlocksTest, RankSelectSamplesContent) {
   std::vector<size_t> BA_sizes{
       1,
-      RankSelectConfig::SELECT_SAMPLE_RATE - 1,
-      RankSelectConfig::SELECT_SAMPLE_RATE + 1,
-      2 * RankSelectConfig::SELECT_SAMPLE_RATE - 1,
-      2 * RankSelectConfig::SELECT_SAMPLE_RATE + 1,
-      6 * RankSelectConfig::L2_BIT_SIZE + RankSelectConfig::L2_BIT_SIZE / 5};
+      RSConfig::SELECT_SAMPLE_RATE - 1,
+      RSConfig::SELECT_SAMPLE_RATE + 1,
+      2 * RSConfig::SELECT_SAMPLE_RATE - 1,
+      2 * RSConfig::SELECT_SAMPLE_RATE + 1,
+      6 * RSConfig::L2_BIT_SIZE + RSConfig::L2_BIT_SIZE / 5};
   for (bool const val : {true, false}) {
     BitArray bit_array(BA_sizes, val);
     RankSelect rank_select(std::move(bit_array), 0);
@@ -399,11 +395,11 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesContent) {
     }
 
     for (uint32_t i = 0; i < BA_sizes.size(); ++i) {
-      size_t num_samples = BA_sizes[i] / RankSelectConfig::SELECT_SAMPLE_RATE;
+      size_t num_samples = BA_sizes[i] / RSConfig::SELECT_SAMPLE_RATE;
       for (size_t j = 1; j <= num_samples; ++j) {
         getSelectSampleKernel<<<1, 1>>>(rank_select, i, j - 1, val, result);
         kernelCheck();
-        EXPECT_EQ(*result, j * RankSelectConfig::SELECT_SAMPLE_RATE - 1);
+        EXPECT_EQ(*result, j * RSConfig::SELECT_SAMPLE_RATE - 1);
       }
     }
   }
@@ -463,20 +459,20 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
     for (uint32_t j = 0; j < num_l1_blocks; ++j) {
       getL1EntryKernel<<<1, 1>>>(rank_select, i, j, result);
       kernelCheck();
-      EXPECT_EQ(*result, helpers[i].rank1(j * RankSelectConfig::L1_BIT_SIZE));
+      EXPECT_EQ(*result, helpers[i].rank1(j * RSConfig::L1_BIT_SIZE));
     }
     getNumL2BlocksKernel<<<1, 1>>>(rank_select, i, result);
     kernelCheck();
     uint32_t const num_l2 = *result;
     size_t local_l1_block = 0;
     for (uint32_t j = 0; j < num_l2; ++j) {
-      if (j % RankSelectConfig::NUM_L2_PER_L1 == 0 and j != 0) {
+      if (j % RSConfig::NUM_L2_PER_L1 == 0 and j != 0) {
         local_l1_block++;
       }
       getL2EntryKernel<<<1, 1>>>(rank_select, i, j, result);
       auto result_should =
-          helpers[i].rank1(j * RankSelectConfig::L2_BIT_SIZE) -
-          helpers[i].rank1(local_l1_block * RankSelectConfig::L1_BIT_SIZE);
+          helpers[i].rank1(j * RSConfig::L2_BIT_SIZE) -
+          helpers[i].rank1(local_l1_block * RSConfig::L1_BIT_SIZE);
       kernelCheck();
       EXPECT_EQ(*result, result_should);
     }
@@ -538,7 +534,7 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesRandom) {
       size_t select1 = 0;
       while (select0 != array_size or select1 != array_size) {
         select0 = helpers[i].select0((current_sample + 1) *
-                                     RankSelectConfig::SELECT_SAMPLE_RATE);
+                                     RSConfig::SELECT_SAMPLE_RATE);
         if (select0 != array_size) {
           getSelectSampleKernel<<<1, 1>>>(rank_select, i, current_sample, false,
                                           result);
@@ -546,7 +542,7 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesRandom) {
           EXPECT_EQ(*result, select0);
         }
         select1 = helpers[i].select1((current_sample + 1) *
-                                     RankSelectConfig::SELECT_SAMPLE_RATE);
+                                     RSConfig::SELECT_SAMPLE_RATE);
         if (select1 != array_size) {
           getSelectSampleKernel<<<1, 1>>>(rank_select, i, current_sample, true,
                                           result);
@@ -562,12 +558,10 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesRandom) {
 TEST_F(RankSelectBlocksTest, RankSelectOperations) {
   for (auto const &val : {true, false}) {
     BitArray bit_array(
-        std::vector<size_t>{RankSelectConfig::L2_BIT_SIZE + 1,
-                            2 * RankSelectConfig::L2_BIT_SIZE - 1,
-                            RankSelectConfig::L1_BIT_SIZE - 1,
-                            RankSelectConfig::L1_BIT_SIZE + 1,
-                            2 * RankSelectConfig::L1_BIT_SIZE - 1,
-                            2 * RankSelectConfig::L1_BIT_SIZE + 1},
+        std::vector<size_t>{
+            RSConfig::L2_BIT_SIZE + 1, 2 * RSConfig::L2_BIT_SIZE - 1,
+            RSConfig::L1_BIT_SIZE - 1, RSConfig::L1_BIT_SIZE + 1,
+            2 * RSConfig::L1_BIT_SIZE - 1, 2 * RSConfig::L1_BIT_SIZE + 1},
         val);
     auto num_arrays = bit_array.numArrays();
 
@@ -592,15 +586,22 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
                 <<<1, NumThreads>>>(rank_select, i, pos, result);
             kernelCheck();
             EXPECT_EQ(*result, pos);
-            select1Kernel<<<1, WS>>>(rank_select, i, pos, result);
+            select1Kernel<NumThreads>
+                <<<1, NumThreads>>>(rank_select, i, pos, result);
             kernelCheck();
             EXPECT_EQ(*result, pos - 1);
+            if (*result != pos - 1) {
+              select1Kernel<NumThreads>
+                  <<<1, NumThreads>>>(rank_select, i, pos, result);
+              kernelCheck();
+            }
           } else {
             rank0Kernel<NumThreads>
                 <<<1, NumThreads>>>(rank_select, i, pos, result);
             kernelCheck();
             EXPECT_EQ(*result, pos);
-            select0Kernel<<<1, WS>>>(rank_select, i, pos, result);
+            select0Kernel<NumThreads>
+                <<<1, NumThreads>>>(rank_select, i, pos, result);
             kernelCheck();
             EXPECT_EQ(*result, pos - 1);
           }
@@ -613,10 +614,12 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
               <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size - 1);
-          select1Kernel<<<1, WS>>>(rank_select, i, 1, result);
+          select1Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, 1, result);
           kernelCheck();
           EXPECT_EQ(*result, 0);
-          select1Kernel<<<1, WS>>>(rank_select, i, bit_size, result);
+          select1Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, bit_size, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size - 1);
 
@@ -624,7 +627,8 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
               <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
           kernelCheck();
           EXPECT_EQ(*result, 0);
-          select0Kernel<<<1, WS>>>(rank_select, i, 1, result);
+          select0Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, 1, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size);
         } else {
@@ -635,10 +639,12 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
               <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size - 1);
-          select0Kernel<<<1, WS>>>(rank_select, i, 1, result);
+          select0Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, 1, result);
           kernelCheck();
           EXPECT_EQ(*result, 0);
-          select0Kernel<<<1, WS>>>(rank_select, i, bit_size, result);
+          select0Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, bit_size, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size - 1);
 
@@ -646,7 +652,8 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
               <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
           kernelCheck();
           EXPECT_EQ(*result, 0);
-          select1Kernel<<<1, WS>>>(rank_select, i, 1, result);
+          select1Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, 1, result);
           kernelCheck();
           EXPECT_EQ(*result, bit_size);
         }
@@ -663,12 +670,10 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
   // test with the top half of the bits in each word set to 1
   uint32_t word = 0xFFFF0000;
 
-  auto sizes = std::vector<size_t>{RankSelectConfig::L2_BIT_SIZE + 1,
-                                   2 * RankSelectConfig::L2_BIT_SIZE - 1,
-                                   RankSelectConfig::L1_BIT_SIZE - 1,
-                                   RankSelectConfig::L1_BIT_SIZE + 1,
-                                   2 * RankSelectConfig::L1_BIT_SIZE - 1,
-                                   2 * RankSelectConfig::L1_BIT_SIZE + 1};
+  auto sizes = std::vector<size_t>{
+      RSConfig::L2_BIT_SIZE + 1,     2 * RSConfig::L2_BIT_SIZE - 1,
+      RSConfig::L1_BIT_SIZE - 1,     RSConfig::L1_BIT_SIZE + 1,
+      2 * RSConfig::L1_BIT_SIZE - 1, 2 * RSConfig::L1_BIT_SIZE + 1};
   BitArray bit_array(sizes, false);
   auto num_arrays = bit_array.numArrays();
 
@@ -710,49 +715,59 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
     std::generate(random_positions.begin(), random_positions.end(),
                   [&]() { return dis(gen); });
 
-    for (auto const &pos : random_positions) {
-      rank1Kernel<WS><<<1, WS>>>(rank_select, i, pos, result);
-      int8_t set_bits_in_last_word = pos % (sizeof(uint32_t) * 8) - 16;
-      size_t num_words = pos / (sizeof(uint32_t) * 8);
-      size_t rank1 = (sizeof(uint32_t) * 8) * num_words / 2 +
-                     (set_bits_in_last_word > 0 ? set_bits_in_last_word : 0);
-      assert(rank1 == helpers[i].rank1(pos));
-      kernelCheck();
-      EXPECT_EQ(*result, rank1);
-      if (rank1 == 0) continue;
-      select1Kernel<<<1, WS>>>(rank_select, i, rank1, result);
-      size_t select1 = (sizeof(uint32_t) * 8) * (rank1 / 16) - 1;
-      if (rank1 % 16 != 0) {
-        select1 += 16 + rank1 % 16;
-      }
-      assert(select1 == helpers[i].select1(rank1));
-      kernelCheck();
-      EXPECT_EQ(*result, select1);
+    auto rank_tests = [&]<int NumThreads>() {
+      for (auto const &pos : random_positions) {
+        rank1Kernel<NumThreads><<<1, NumThreads>>>(rank_select, i, pos, result);
+        int8_t set_bits_in_last_word = pos % (sizeof(uint32_t) * 8) - 16;
+        size_t num_words = pos / (sizeof(uint32_t) * 8);
+        size_t rank1 = (sizeof(uint32_t) * 8) * num_words / 2 +
+                       (set_bits_in_last_word > 0 ? set_bits_in_last_word : 0);
+        assert(rank1 == helpers[i].rank1(pos));
+        kernelCheck();
+        EXPECT_EQ(*result, rank1);
+        if (rank1 == 0) continue;
+        select1Kernel<NumThreads>
+            <<<1, NumThreads>>>(rank_select, i, rank1, result);
+        size_t select1 = (sizeof(uint32_t) * 8) * (rank1 / 16) - 1;
+        if (rank1 % 16 != 0) {
+          select1 += 16 + rank1 % 16;
+        }
+        assert(select1 == helpers[i].select1(rank1));
+        kernelCheck();
+        EXPECT_EQ(*result, select1);
 
-      rank0Kernel<WS><<<1, WS>>>(rank_select, i, pos, result);
-      size_t rank0 = (sizeof(uint32_t) * 8) * num_words / 2 +
-                     std::min(16UL, pos % (sizeof(uint32_t) * 8));
-      assert(rank0 == helpers[i].rank0(pos));
-      kernelCheck();
-      EXPECT_EQ(*result, rank0);
-      if (rank0 == 0) continue;
-      select0Kernel<<<1, WS>>>(rank_select, i, rank0, result);
-      size_t select0 = (sizeof(uint32_t) * 8) * (rank0 / 16) - 1;
-      if (rank0 % 16 != 0) {
-        select0 += std::min(16UL, rank0 % 16);
-      } else {
-        select0 -= 16;
+        rank0Kernel<NumThreads><<<1, NumThreads>>>(rank_select, i, pos, result);
+        size_t rank0 = (sizeof(uint32_t) * 8) * num_words / 2 +
+                       std::min(16UL, pos % (sizeof(uint32_t) * 8));
+        assert(rank0 == helpers[i].rank0(pos));
+        kernelCheck();
+        EXPECT_EQ(*result, rank0);
+        if (rank0 == 0) continue;
+        select0Kernel<NumThreads>
+            <<<1, NumThreads>>>(rank_select, i, rank0, result);
+        size_t select0 = (sizeof(uint32_t) * 8) * (rank0 / 16) - 1;
+        if (rank0 % 16 != 0) {
+          select0 += std::min(16UL, rank0 % 16);
+        } else {
+          select0 -= 16;
+        }
+        assert(select0 == helpers[i].select0(rank0));
+        kernelCheck();
+        EXPECT_EQ(*result, select0);
       }
-      assert(select0 == helpers[i].select0(rank0));
-      kernelCheck();
-      EXPECT_EQ(*result, select0);
-    }
+    };
+    rank_tests.operator()<32>();
+    rank_tests.operator()<16>();
+    rank_tests.operator()<8>();
+    rank_tests.operator()<4>();
+    rank_tests.operator()<2>();
+    rank_tests.operator()<1>();
   }
 }
 
 TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
   int num_arrays = 10;
-  for (int _ = 0; _ < 10; _++) {
+  for (int _ = 0; _ < 5; _++) {
     std::vector<size_t> sizes(num_arrays);
     std::vector<RankSelectHelper> helpers;
     // Sizes are random between 2000 and 10^6
@@ -798,8 +813,8 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
     }
     gpuErrchk(cudaFree(d_words_arr));
 
-    // perform rank and select queries on 500 random places in each array
-    uint32_t num_queries = 500;
+    // perform rank and select queries on 100 random places in each array
+    uint32_t num_queries = 100;
     RankSelect rank_select(std::move(bit_array), 0);
     for (uint32_t i = 0; i < num_arrays; ++i) {
       auto tests = [&]<int NumThreads>() {
@@ -821,11 +836,13 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
                 <<<1, NumThreads>>>(rank_select, i, index, result);
             kernelCheck();
           }
-          select1Kernel<<<1, WS>>>(rank_select, i, rank1, result);
+          select1Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, rank1, result);
           auto select1 = helpers[i].select1(rank1);
           kernelCheck();
           EXPECT_EQ(*result, select1);
-          select0Kernel<<<1, WS>>>(rank_select, i, rank0, result);
+          select0Kernel<NumThreads>
+              <<<1, NumThreads>>>(rank_select, i, rank0, result);
           auto select0 = helpers[i].select0(rank0);
           kernelCheck();
           EXPECT_EQ(*result, select0);

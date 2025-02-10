@@ -106,7 +106,7 @@ class WaveletTree {
    * \param num_indices Number of indices.
    * \return Vector of symbols.
    */
-  template <int NumThreads = 32>
+  template <int NumThreads = WS>
   __host__ std::span<T> access(size_t* indices, size_t const num_indices);
 
   /*!
@@ -115,7 +115,7 @@ class WaveletTree {
    * \param queries Vector of rank queries.
    * \return Vector of ranks.
    */
-  template <int NumThreads = 32>
+  template <int NumThreads = WS>
   __host__ std::span<size_t> rank(RankSelectQuery<T>* queries,
                                   size_t const num_queries);
 
@@ -125,6 +125,7 @@ class WaveletTree {
    * \param queries Vector of select queries.
    * \return Vector of selected indices.
    */
+  template <int ThreadsPerQuery = WS>
   __host__ std::vector<size_t> select(std::vector<RankSelectQuery<T>>& queries);
 
   /*!
@@ -280,7 +281,7 @@ __global__ void rankKernel(WaveletTree<T> tree,
  * \param num_queries Number of queries.
  * \param ranks Array to store the selected indices.
  */
-template <typename T>
+template <typename T, int ThreadsPerQuery>
 __global__ void selectKernel(WaveletTree<T> tree,
                              RankSelectQuery<T>* const queries,
                              size_t const num_queries, size_t* const results,
@@ -1005,12 +1006,13 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
 }
 
 template <typename T>
+template <int ThreadsPerQuery>
 __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
     std::vector<RankSelectQuery<T>>& queries) {
   assert(std::all_of(queries.begin(), queries.end(),
                      [](const RankSelectQuery<T>& s) { return s.index_ > 0; }));
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, selectKernel<T>));
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, selectKernel<T, WS>));
   uint32_t maxThreadsPerBlock =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
 
@@ -1049,10 +1051,10 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
                        num_queries * sizeof(RankSelectQuery<T>),
                        cudaMemcpyHostToDevice));
 
-  selectKernel<T><<<num_blocks, threads_per_block>>>(
+  selectKernel<T, ThreadsPerQuery><<<num_blocks, threads_per_block>>>(
       *this, d_queries, num_queries, d_results,
-      num_blocks * threads_per_block / WS, alphabet_size_, num_levels_,
-      codes_start_, isPowTwo<size_t>(alphabet_size_));
+      num_blocks * threads_per_block / ThreadsPerQuery, alphabet_size_,
+      num_levels_, codes_start_, isPowTwo<size_t>(alphabet_size_));
   kernelCheck();
 
   // copy results back to host
@@ -1720,18 +1722,20 @@ __device__ T getPrevCharStart(T const char_start, bool const is_rightmost_child,
   }
 }
 
-template <typename T>
+template <typename T, int ThreadsPerQuery>
 __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
     WaveletTree<T> tree, RankSelectQuery<T>* const queries,
     size_t const num_queries, size_t* const results, size_t const num_groups,
     size_t const alphabet_size, uint8_t const alphabet_num_bits,
     T const codes_start, bool const is_pow_two) {
   assert(blockDim.x % WS == 0);
-  __shared__ typename cub::WarpScan<uint16_t>::TempStorage
-      temp_storage[1024 / WS];  // TODO
+  __shared__
+      typename cub::WarpScan<RSConfig::L2_TYPE, ThreadsPerQuery>::TempStorage
+          temp_storage[1024 / ThreadsPerQuery];  // TODO
 
-  size_t const global_group_id = (blockIdx.x * blockDim.x + threadIdx.x) / WS;
-  uint8_t const local_t_id = threadIdx.x % WS;
+  size_t const global_group_id =
+      (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerQuery;
+  uint8_t const local_t_id = threadIdx.x % ThreadsPerQuery;
 
   for (size_t i = global_group_id; i < num_queries; i += num_groups) {
     RankSelectQuery<T> query = queries[i];
@@ -1762,19 +1766,19 @@ __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
               char_start, is_rightmost_child, alphabet_size, l,
               alphabet_num_bits, code.len_);
         }
-        start = tree.rank_select_.template rank<WS, 0, 1>(
+        start = tree.rank_select_.template rank<ThreadsPerQuery, 0, 1>(
             l, tree.getCounts(char_start), offset);
-        query.index_ =
-            tree.rank_select_.select<1>(l, start + query.index_, offset,
-                                        &temp_storage[threadIdx.x / WS]) +
-            1;
+        query.index_ = tree.rank_select_.select<1, ThreadsPerQuery>(
+                           l, start + query.index_, offset,
+                           &temp_storage[threadIdx.x / ThreadsPerQuery]) +
+                       1;
       } else {
-        start = tree.rank_select_.template rank<WS, 0, 0>(
+        start = tree.rank_select_.template rank<ThreadsPerQuery, 0, 0>(
             l, tree.getCounts(char_start), offset);
-        query.index_ =
-            tree.rank_select_.select<0>(l, start + query.index_, offset,
-                                        &temp_storage[threadIdx.x / WS]) +
-            1;
+        query.index_ = tree.rank_select_.select<0, ThreadsPerQuery>(
+                           l, start + query.index_, offset,
+                           &temp_storage[threadIdx.x / ThreadsPerQuery]) +
+                       1;
       }
       if (l == (code.len_ - 1) and
           query.index_ > tree.rank_select_.bit_array_.size(l)) {

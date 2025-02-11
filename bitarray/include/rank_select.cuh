@@ -561,39 +561,45 @@ class RankSelect {
     static_assert(std::is_integral<T>::value, "T must be an integral type.");
     static_assert(sizeof(T) == 4 or sizeof(T) == 8, "T must be 4 or 8 bytes.");
     assert(n > 0);
+    if constexpr (Value == 0) {
+      word = ~word;
+    }
+    T mask;
+    uint8_t shift;
+    uint8_t base = 0u;
+    uint8_t count;
     if constexpr (sizeof(T) == 4) {
-      assert(n <= (sizeof(uint32_t) * 8));
-      if constexpr (Value == 0) {
-        // Find the position of the n-th zero in the word
-        for (uint8_t i = 1; i < n; i++) {
-          word = word | (word + 1);  // set least significant 0-bit
-        }
-        return __ffs(~word) - 1;
-
-      } else {
-        // Find the position of the n-th one in the word
-        for (uint8_t i = 1; i < n; i++) {
-          word = word & (word - 1);  // clear least significant 1-bit
-        }
-        return __ffs(word) - 1;
-      }
+      assert(n <= 32);
+      mask = 0x0000FFFFu;
+      shift = 16u;
+      count = __popc(word & mask);
     } else {
-      assert(n <= (sizeof(uint64_t) * 8));
-      if constexpr (Value == 0) {
-        // Find the position of the n-th zero in the word
-        for (uint8_t i = 1; i < n; i++) {
-          word = word | (word + 1);  // set least significant 0-bit
-        }
-        return __ffsll(~word) - 1;
+      assert(n <= 64);
+      mask = 0x00000000FFFFFFFFu;
+      shift = 32u;
+    }
 
+    uint8_t num_iters = 5;
+    if constexpr (sizeof(T) == 8) {
+      num_iters = 6;
+    }
+#pragma unroll
+    for (uint8_t i = 0; i < num_iters; i++) {
+      if constexpr (sizeof(T) == 4) {
+        count = __popc(word & mask);
       } else {
-        // Find the position of the n-th one in the word
-        for (uint8_t i = 1; i < n; i++) {
-          word = word & (word - 1);  // clear least significant 1-bit
-        }
-        return __ffsll(word) - 1;
+        count = __popcll(word & mask);
+      }
+      if (n > count) {
+        base += shift;
+        shift >>= 1;
+        mask |= mask << shift;
+      } else {
+        shift >>= 1;
+        mask >>= shift;
       }
     }
+    return base;
   }
 
  private:

@@ -1,4 +1,7 @@
 #pragma once
+#include <thrust/binary_search.h>
+#include <thrust/execution_policy.h>
+
 #include <bit_array.cuh>
 #include <cstdint>
 #include <cub/block/block_scan.cuh>
@@ -216,7 +219,7 @@ class RankSelect {
       active_threads = __ballot_sync(mask, curr_l1_block < num_l1_blocks);
     }
     size_t current_val = 0;
-    size_t has_i_inside = 0;
+    size_t has_i_before = 0;
     while (curr_l1_block < num_l1_blocks) {
       if constexpr (Value == 0) {
         current_val = curr_l1_block * RSConfig::L1_BIT_SIZE -
@@ -224,11 +227,11 @@ class RankSelect {
       } else {
         current_val = d_l1_indices_[l1_offset + curr_l1_block];
       }
-      has_i_inside = current_val >= i ? curr_l1_block : 0;
+      has_i_before = current_val >= i ? curr_l1_block : 0;
       if constexpr (NumThreads > 1) {
-        shareVar<size_t>(current_val >= i, has_i_inside, active_threads);
+        shareVar<size_t>(current_val >= i, has_i_before, active_threads);
       }
-      if (has_i_inside != 0) {
+      if (has_i_before != 0) {
         break;
       }
       curr_l1_block += NumThreads;
@@ -238,10 +241,10 @@ class RankSelect {
       }
     }
     if constexpr (NumThreads > 1) {
-      shareVar<size_t>(current_val >= i, has_i_inside, mask);
+      shareVar<size_t>(current_val >= i, has_i_before, mask);
     }
-    if (has_i_inside != 0) {
-      curr_l1_block = has_i_inside - 1;
+    if (has_i_before != 0) {
+      curr_l1_block = has_i_before - 1;
       result = curr_l1_block * RSConfig::L1_BIT_SIZE;
       if constexpr (Value == 0) {
         i -= curr_l1_block * RSConfig::L1_BIT_SIZE -
@@ -259,45 +262,56 @@ class RankSelect {
       }
     }
     RSConfig::L2_TYPE const l1_block_length =
-        has_i_inside == 0 ? num_last_l2_blocks : RSConfig::NUM_L2_PER_L1;
-    uint16_t curr_l2_block = local_t_id + 1;
-
-    if constexpr (NumThreads > 1) {
-      active_threads = __ballot_sync(mask, curr_l2_block < l1_block_length);
-    }
+        has_i_before == 0 ? num_last_l2_blocks : RSConfig::NUM_L2_PER_L1;
     size_t const l1_block_start =
         (result / RSConfig::L1_BIT_SIZE) * RSConfig::NUM_L2_PER_L1;
-    while (curr_l2_block < l1_block_length) {
+    RSConfig::L2_TYPE const blocks_per_thread =
+        (l1_block_length + NumThreads - 1) / NumThreads;
+
+    size_t const start_l2_block =
+        l1_block_start + local_t_id * blocks_per_thread;
+    size_t const end_l2_block = min(l1_block_start + l1_block_length,
+                                    start_l2_block + blocks_per_thread);
+
+    has_i_before = 0;
+    if (start_l2_block < end_l2_block) {
       if constexpr (Value == 0) {
-        current_val = curr_l2_block * RSConfig::L2_BIT_SIZE -
-                      d_l2_indices_[l2_offset + l1_block_start + curr_l2_block];
+        has_i_before =
+            thrust::lower_bound(
+                thrust::seq, d_l2_indices_ + l2_offset + start_l2_block,
+                d_l2_indices_ + l2_offset + end_l2_block, i,
+                [&](auto const& elem, auto const& val) {
+                  auto const num_bits =
+                      reinterpret_cast<uintptr_t>(&elem - d_l2_indices_ -
+                                                  l2_offset - l1_block_start) *
+                      RSConfig::L2_BIT_SIZE;
+                  return (num_bits - elem) < val;
+                }) -
+            (d_l2_indices_ + l2_offset);
       } else {
-        current_val = d_l2_indices_[l2_offset + l1_block_start + curr_l2_block];
+        has_i_before =
+            thrust::lower_bound(thrust::seq,
+                                d_l2_indices_ + l2_offset + start_l2_block,
+                                d_l2_indices_ + l2_offset + end_l2_block, i) -
+            (d_l2_indices_ + l2_offset);
       }
-      has_i_inside = current_val >= i ? curr_l2_block : 0;
-      if constexpr (NumThreads > 1) {
-        shareVar<size_t>(current_val >= i, has_i_inside, active_threads);
-      }
-      if (has_i_inside != 0) {
-        break;
-      }
-      curr_l2_block += NumThreads;
-      if constexpr (NumThreads > 1) {
-        active_threads =
-            __ballot_sync(active_threads, curr_l2_block < l1_block_length);
+      if (has_i_before == end_l2_block) {
+        has_i_before = 0;
       }
     }
+
     if constexpr (NumThreads > 1) {
-      shareVar<size_t>(current_val >= i, has_i_inside, mask);
+      shareVar<size_t>(has_i_before != 0, has_i_before, mask);
     }
-    if (has_i_inside != 0) {
-      curr_l2_block = has_i_inside - 1;
-      result += curr_l2_block * RSConfig::L2_BIT_SIZE;
+    if (has_i_before != 0) {
+      result += (has_i_before - l1_block_start - 1) * RSConfig::L2_BIT_SIZE;
       if constexpr (Value == 0) {
-        i -= curr_l2_block * RSConfig::L2_BIT_SIZE -
-             d_l2_indices_[l2_offset + l1_block_start + curr_l2_block];
+        i -= (has_i_before - l1_block_start - 1) * RSConfig::L2_BIT_SIZE -
+             d_l2_indices_[l2_offset + l1_block_start +
+                           (has_i_before - l1_block_start - 1)];
       } else {
-        i -= d_l2_indices_[l2_offset + l1_block_start + curr_l2_block];
+        i -= d_l2_indices_[l2_offset + l1_block_start +
+                           (has_i_before - l1_block_start - 1)];
       }
     } else {
       result += (l1_block_length - 1) * RSConfig::L2_BIT_SIZE;
@@ -310,7 +324,7 @@ class RankSelect {
     }
 
     RSConfig::L2_TYPE const l2_block_length =
-        has_i_inside == 0 ? bit_array_.sizeInWords(array_index) -
+        has_i_before == 0 ? bit_array_.sizeInWords(array_index) -
                                 (result / (sizeof(uint32_t) * 8))
                           : RSConfig::L2_WORD_SIZE;
 

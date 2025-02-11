@@ -590,11 +590,6 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
                 <<<1, NumThreads>>>(rank_select, i, pos, result);
             kernelCheck();
             EXPECT_EQ(*result, pos - 1);
-            if (*result != pos - 1) {
-              select1Kernel<NumThreads>
-                  <<<1, NumThreads>>>(rank_select, i, pos, result);
-              kernelCheck();
-            }
           } else {
             rank0Kernel<NumThreads>
                 <<<1, NumThreads>>>(rank_select, i, pos, result);

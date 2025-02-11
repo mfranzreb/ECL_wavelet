@@ -334,21 +334,21 @@ class RankSelect {
       cub::WarpScan<RSConfig::L2_TYPE, NumThreads> warp_scan(*temp_storage);
       for (size_t current_group_word = word_start;
            current_group_word < word_start + l2_block_length;
-           current_group_word += NumThreads) {
-        size_t const local_word = current_group_word + local_t_id;
-        uint32_t word;
+           current_group_word += 2 * NumThreads) {
+        size_t const local_word = current_group_word + 2 * local_t_id;
+        uint64_t word;
         if constexpr (Value == 0) {
-          word = ~0;
+          word = ~0ULL;
         } else {
-          word = 0;
+          word = 0ULL;
         }
         RSConfig::L2_TYPE num_vals = 0;
         if (local_word < word_start + l2_block_length) {
-          word = bit_array_.word(array_index, local_word, BA_offset);
+          word = bit_array_.twoWords(array_index, local_word, BA_offset);
           if constexpr (Value == 0) {
-            num_vals = (sizeof(uint32_t) * 8) - __popc(word);
+            num_vals = (sizeof(uint64_t) * 8) - __popcll(word);
           } else {
-            num_vals = __popc(word);
+            num_vals = __popcll(word);
           }
         }
         RSConfig::L2_TYPE cum_vals = 0;
@@ -365,7 +365,7 @@ class RankSelect {
           // TODO: faster implementations possible
           i -= vals_at_start;
           result = local_word * (sizeof(uint32_t) * 8) +
-                   getNBitPos<Value>(i, word) + 1;
+                   getNBitPos<Value, uint64_t>(i, word) + 1;
         }
         // communicate the result to all threads
         shareVar<size_t>(result != 0, result, mask);
@@ -378,25 +378,25 @@ class RankSelect {
       }
     } else {
       RSConfig::L2_TYPE num_vals = 0;
-      for (size_t j = 0; j < l2_block_length; j++) {
-        uint32_t word;
+      for (size_t j = 0; j < l2_block_length; j += 2) {
+        uint64_t word;
         if constexpr (Value == 0) {
-          word = ~0;
+          word = ~0ULL;
         } else {
-          word = 0;
+          word = 0ULL;
         }
         RSConfig::L2_TYPE current_num_vals = 0;
 
-        word = bit_array_.word(array_index, word_start + j, BA_offset);
+        word = bit_array_.twoWords(array_index, word_start + j, BA_offset);
         if constexpr (Value == 0) {
-          current_num_vals = (sizeof(uint32_t) * 8) - __popc(word);
+          current_num_vals = (sizeof(uint64_t) * 8) - __popcll(word);
         } else {
-          current_num_vals = __popc(word);
+          current_num_vals = __popcll(word);
         }
         if ((num_vals + current_num_vals) >= i and num_vals < i) {
           i -= num_vals;
           result = (word_start + j) * (sizeof(uint32_t) * 8) +
-                   getNBitPos<Value>(i, word) + 1;
+                   getNBitPos<Value, uint64_t>(i, word) + 1;
           break;
         }
         num_vals += current_num_vals;
@@ -554,25 +554,45 @@ class RankSelect {
    * \param word Word the bit is in.
    * \return Position of the n-th bit. Starts from 0.
    */
-  template <uint32_t Value>
-  __device__ [[nodiscard]] uint8_t getNBitPos(uint8_t const n, uint32_t word) {
+  template <uint32_t Value, typename T>
+  __device__ [[nodiscard]] uint8_t getNBitPos(uint8_t const n, T word) {
     static_assert(Value == 0 or Value == 1,
                   "Template parameter must be 0 or 1");
+    static_assert(std::is_integral<T>::value, "T must be an integral type.");
+    static_assert(sizeof(T) == 4 or sizeof(T) == 8, "T must be 4 or 8 bytes.");
     assert(n > 0);
-    assert(n <= (sizeof(uint32_t) * 8));
-    if constexpr (Value == 0) {
-      // Find the position of the n-th zero in the word
-      for (uint8_t i = 1; i < n; i++) {
-        word = word | (word + 1);  // set least significant 0-bit
-      }
-      return __ffs(~word) - 1;
+    if constexpr (sizeof(T) == 4) {
+      assert(n <= (sizeof(uint32_t) * 8));
+      if constexpr (Value == 0) {
+        // Find the position of the n-th zero in the word
+        for (uint8_t i = 1; i < n; i++) {
+          word = word | (word + 1);  // set least significant 0-bit
+        }
+        return __ffs(~word) - 1;
 
-    } else {
-      // Find the position of the n-th one in the word
-      for (uint8_t i = 1; i < n; i++) {
-        word = word & (word - 1);  // clear least significant 1-bit
+      } else {
+        // Find the position of the n-th one in the word
+        for (uint8_t i = 1; i < n; i++) {
+          word = word & (word - 1);  // clear least significant 1-bit
+        }
+        return __ffs(word) - 1;
       }
-      return __ffs(word) - 1;
+    } else {
+      assert(n <= (sizeof(uint64_t) * 8));
+      if constexpr (Value == 0) {
+        // Find the position of the n-th zero in the word
+        for (uint8_t i = 1; i < n; i++) {
+          word = word | (word + 1);  // set least significant 0-bit
+        }
+        return __ffsll(~word) - 1;
+
+      } else {
+        // Find the position of the n-th one in the word
+        for (uint8_t i = 1; i < n; i++) {
+          word = word & (word - 1);  // clear least significant 1-bit
+        }
+        return __ffsll(word) - 1;
+      }
     }
   }
 
@@ -814,7 +834,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateSelectSamplesKernel(
           local_i < end_word) {
         size_t const sample_pos =
             local_i * (sizeof(uint32_t) * 8) +
-            rank_select.getNBitPos<1>(
+            rank_select.getNBitPos<1, uint32_t>(
                 (RSConfig::SELECT_SAMPLE_RATE -
                  ones_at_start % RSConfig::SELECT_SAMPLE_RATE),
                 word);
@@ -831,7 +851,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateSelectSamplesKernel(
           local_i < end_word) {
         size_t const sample_pos =
             local_i * (sizeof(uint32_t) * 8) +
-            rank_select.getNBitPos<0>(
+            rank_select.getNBitPos<0, uint32_t>(
                 (RSConfig::SELECT_SAMPLE_RATE -
                  zeros_at_start % RSConfig::SELECT_SAMPLE_RATE),
                 word);

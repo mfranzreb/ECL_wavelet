@@ -69,21 +69,15 @@ __global__ void rank1Kernel(RankSelect rank_select, uint32_t array_index,
 template <int NumThreads>
 __global__ void select0Kernel(RankSelect rank_select, uint32_t array_index,
                               size_t index, size_t *output) {
-  __shared__ typename cub::WarpScan<RSConfig::L2_TYPE, NumThreads>::TempStorage
-      temp_storage;
   *output = rank_select.select<0, NumThreads>(
-      array_index, index, rank_select.bit_array_.getOffset(array_index),
-      &temp_storage);
+      array_index, index, rank_select.bit_array_.getOffset(array_index));
 }
 
 template <int NumThreads>
 __global__ void select1Kernel(RankSelect rank_select, uint32_t array_index,
                               size_t index, size_t *output) {
-  __shared__ typename cub::WarpScan<RSConfig::L2_TYPE, NumThreads>::TempStorage
-      temp_storage;
   *output = rank_select.select<1, NumThreads>(
-      array_index, index, rank_select.bit_array_.getOffset(array_index),
-      &temp_storage);
+      array_index, index, rank_select.bit_array_.getOffset(array_index));
 }
 
 __global__ void getNumL1BlocksKernel(RankSelect rank_select,

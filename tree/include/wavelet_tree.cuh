@@ -1934,9 +1934,6 @@ __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
     T const codes_start, bool const is_pow_two, T const num_ranks,
     T const num_nodes_at_start) {
   assert(blockDim.x % WS == 0);
-  __shared__
-      typename cub::WarpScan<RSConfig::L2_TYPE, ThreadsPerQuery>::TempStorage
-          temp_storage[1024 / ThreadsPerQuery];  // TODO
   extern __shared__ size_t shmem[];
   if constexpr (ShmemRanks) {
     for (uint32_t i = threadIdx.x; i < num_ranks; i += blockDim.x) {
@@ -1997,8 +1994,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
           }
         }
         query.index_ = tree.rank_select_.select<1, ThreadsPerQuery>(
-                           l, start + query.index_, offset,
-                           &temp_storage[threadIdx.x / ThreadsPerQuery]) +
+                           l, start + query.index_, offset) +
                        1;
       } else {
         if (char_start == 0) {
@@ -2014,8 +2010,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
           }
         }
         query.index_ = tree.rank_select_.select<0, ThreadsPerQuery>(
-                           l, start + query.index_, offset,
-                           &temp_storage[threadIdx.x / ThreadsPerQuery]) +
+                           l, start + query.index_, offset) +
                        1;
       }
       if (l == (code.len_ - 1) and

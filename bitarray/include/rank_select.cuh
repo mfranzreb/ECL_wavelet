@@ -162,9 +162,8 @@ class RankSelect {
    * zeros/ones, the function returns the size of the bit array.
    */
   template <uint32_t Value, int NumThreads>
-  __device__ [[nodiscard]] size_t select(
-      uint32_t const array_index, size_t i, size_t const BA_offset,
-      cub::WarpScan<RSConfig::L2_TYPE, NumThreads>::TempStorage* temp_storage) {
+  __device__ [[nodiscard]] size_t select(uint32_t const array_index, size_t i,
+                                         size_t const BA_offset) {
     static_assert(Value == 0 or Value == 1, "Value must be 0 or 1.");
     static_assert(NumThreads <= 32);
     assert(array_index < bit_array_.numArrays());
@@ -331,7 +330,6 @@ class RankSelect {
     size_t const word_start = result / (sizeof(uint32_t) * 8);
     result = 0;  // 0 signalizes that nothing was found
     if constexpr (NumThreads > 1) {
-      cub::WarpScan<RSConfig::L2_TYPE, NumThreads> warp_scan(*temp_storage);
       for (size_t current_group_word = word_start;
            current_group_word < word_start + l2_block_length;
            current_group_word += 2 * NumThreads) {
@@ -354,7 +352,8 @@ class RankSelect {
         RSConfig::L2_TYPE cum_vals = 0;
 
         // inclusive prefix sum
-        warp_scan.InclusiveSum(num_vals, cum_vals);
+        warpInclusiveSum<RSConfig::L2_TYPE, NumThreads>(num_vals, cum_vals,
+                                                        mask);
 
         // Check if the i-th zero/one is in the current word
         RSConfig::L2_TYPE const vals_at_start = cum_vals - num_vals;
@@ -543,6 +542,20 @@ class RankSelect {
       val += __shfl_down_sync(mask, val, offset);
     }
     return val;
+  }
+
+  template <typename T, int NumThreads>
+  __device__ void warpInclusiveSum(T& input, T& output, uint32_t const mask) {
+    T val = input;
+    uint8_t const lane = threadIdx.x % NumThreads;
+
+#pragma unroll
+    for (int offset = 1; offset < NumThreads; offset *= 2) {
+      T temp = __shfl_up_sync(mask, val, offset);
+      val += temp * (lane >= offset);
+    }
+
+    output = val;
   }
 
   /*!
@@ -831,6 +844,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateSelectSamplesKernel(
       }
       size_t const num_ones = __popc(word);
       size_t cum_ones = 0;
+      // TODO: use custom one
       warp_scan.InclusiveSum(num_ones, cum_ones);
       cum_ones += group_counter[local_group_id];
       size_t const ones_at_start = cum_ones - num_ones;

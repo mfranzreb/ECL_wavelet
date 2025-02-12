@@ -536,6 +536,46 @@ TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
     compareAccessResults<TypeParam, 16>(wt, indices, data);
     compareAccessResults<TypeParam, 32>(wt, indices, data);
   }
+  if constexpr (sizeof(TypeParam) == 1) {
+    // test alphabet sizes of 4, 32, 128
+    size_t data_size = 1000 + (rand() % 1'000'000);
+    for (auto const alphabet_size : {4, 32, 128}) {
+      auto [alphabet, data] = generateRandomAlphabetAndData<TypeParam>(
+          alphabet_size, data_size, true);
+
+      WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                                kGPUIndex);
+
+      size_t num_indices = std::min(size_t(1'000), data_size / 10);
+      auto indices = generateRandomAccessQueries(data_size, num_indices);
+
+      compareAccessResults<TypeParam, 1>(wt, indices, data);
+      compareAccessResults<TypeParam, 2>(wt, indices, data);
+      compareAccessResults<TypeParam, 4>(wt, indices, data);
+      compareAccessResults<TypeParam, 8>(wt, indices, data);
+      compareAccessResults<TypeParam, 16>(wt, indices, data);
+      compareAccessResults<TypeParam, 32>(wt, indices, data);
+    }
+  } else if (sizeof(TypeParam) == 2) {
+    // test alphabet sizes of 4, 32, 128
+    size_t data_size = 100'000 + (rand() % 1'000'000);
+    size_t alphabet_size = 16384;
+    auto [alphabet, data] = generateRandomAlphabetAndData<TypeParam>(
+        alphabet_size, data_size, true);
+
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                              kGPUIndex);
+
+    size_t num_indices = std::min(size_t(1'000), data_size / 10);
+    auto indices = generateRandomAccessQueries(data_size, num_indices);
+
+    compareAccessResults<TypeParam, 1>(wt, indices, data);
+    compareAccessResults<TypeParam, 2>(wt, indices, data);
+    compareAccessResults<TypeParam, 4>(wt, indices, data);
+    compareAccessResults<TypeParam, 8>(wt, indices, data);
+    compareAccessResults<TypeParam, 16>(wt, indices, data);
+    compareAccessResults<TypeParam, 32>(wt, indices, data);
+  }
 }
 
 TYPED_TEST(WaveletTreeTestFixture, rank) {
@@ -601,6 +641,62 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
     compareRankResults<TypeParam, 16>(wt, queries, results_should);
     compareRankResults<TypeParam, 32>(wt, queries, results_should);
   }
+  if constexpr (sizeof(TypeParam) == 1) {
+    // test alphabet sizes of 4, 32, 128
+    size_t data_size = 1000 + (rand() % 1'000'000);
+    for (auto const alphabet_size : {4, 32, 128}) {
+      auto [alphabet, data] = generateRandomAlphabetAndData<TypeParam>(
+          alphabet_size, data_size, true);
+      auto alphabet_copy = alphabet;
+
+      WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                                kGPUIndex);
+
+      size_t num_queries = std::min(size_t(1'000), data_size / 10);
+      auto queries = generateRandomRankQueries<TypeParam>(
+          data_size, num_queries, alphabet_copy);
+
+      std::vector<size_t> results_should(queries.size());
+      for (size_t j = 0; j < queries.size(); ++j) {
+        results_should[j] = std::count(
+            data.begin(), data.begin() + queries[j].index_, queries[j].symbol_);
+      }
+
+      compareRankResults<TypeParam, 1>(wt, queries, results_should);
+      compareRankResults<TypeParam, 2>(wt, queries, results_should);
+      compareRankResults<TypeParam, 4>(wt, queries, results_should);
+      compareRankResults<TypeParam, 8>(wt, queries, results_should);
+      compareRankResults<TypeParam, 16>(wt, queries, results_should);
+      compareRankResults<TypeParam, 32>(wt, queries, results_should);
+    }
+  } else if (sizeof(TypeParam) == 2) {
+    // test alphabet sizes of 4, 32, 128
+    size_t data_size = 100'000 + (rand() % 1'000'000);
+    size_t alphabet_size = 16384;
+    auto [alphabet, data] = generateRandomAlphabetAndData<TypeParam>(
+        alphabet_size, data_size, true);
+    auto alphabet_copy = alphabet;
+
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                              kGPUIndex);
+
+    size_t num_queries = std::min(size_t(1'000), data_size / 10);
+    auto queries = generateRandomRankQueries<TypeParam>(data_size, num_queries,
+                                                        alphabet_copy);
+
+    std::vector<size_t> results_should(queries.size());
+    for (size_t j = 0; j < queries.size(); ++j) {
+      results_should[j] = std::count(
+          data.begin(), data.begin() + queries[j].index_, queries[j].symbol_);
+    }
+
+    compareRankResults<TypeParam, 1>(wt, queries, results_should);
+    compareRankResults<TypeParam, 2>(wt, queries, results_should);
+    compareRankResults<TypeParam, 4>(wt, queries, results_should);
+    compareRankResults<TypeParam, 8>(wt, queries, results_should);
+    compareRankResults<TypeParam, 16>(wt, queries, results_should);
+    compareRankResults<TypeParam, 32>(wt, queries, results_should);
+  }
 }
 
 TYPED_TEST(WaveletTreeTestFixture, select) {
@@ -625,8 +721,8 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
   compareSelectResults<TypeParam, 16>(wt, queries, results_should);
   compareSelectResults<TypeParam, 32>(wt, queries, results_should);
 
-  // Check that if there is no n-th occurrence of a symbol, the result is the
-  // size of the data
+  // Check that if there is no n-th occurrence of a symbol, the result is
+  // the size of the data
   queries = std::vector<RankSelectQuery<TypeParam>>{{11, 0}};
   auto results = wt.select(queries);
   EXPECT_EQ(data.size(), results[0]);
@@ -670,6 +766,78 @@ TYPED_TEST(WaveletTreeTestFixture, selectRandom) {
                                        }) -
                           data.begin();
     }
+    compareSelectResults<TypeParam, 1>(wt, queries, results_should);
+    compareSelectResults<TypeParam, 2>(wt, queries, results_should);
+    compareSelectResults<TypeParam, 4>(wt, queries, results_should);
+    compareSelectResults<TypeParam, 8>(wt, queries, results_should);
+    compareSelectResults<TypeParam, 16>(wt, queries, results_should);
+    compareSelectResults<TypeParam, 32>(wt, queries, results_should);
+  }
+  if constexpr (sizeof(TypeParam) == 1) {
+    // test alphabet sizes of 4, 32, 128
+    size_t data_size = 1000 + (rand() % 1'000'000);
+    for (auto const alphabet_size : {4, 32, 128}) {
+      std::vector<TypeParam> alphabet(alphabet_size);
+      std::iota(alphabet.begin(), alphabet.end(), 0);
+      auto [data, hist] =
+          generateRandomDataAndHist<TypeParam>(alphabet, data_size);
+      auto alphabet_copy = alphabet;
+
+      WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                                kGPUIndex);
+
+      size_t num_queries = std::min(size_t(1'000), data_size / 10);
+      auto queries = generateRandomSelectQueries<TypeParam>(hist, num_queries,
+                                                            alphabet_copy);
+
+      std::vector<size_t> results_should(queries.size());
+#pragma omp parallel for
+      for (size_t j = 0; j < queries.size(); ++j) {
+        size_t counts = 0;
+        results_should[j] = std::find_if(data.begin(), data.end(),
+                                         [&](TypeParam c) {
+                                           return c == queries[j].symbol_ and
+                                                  ++counts == queries[j].index_;
+                                         }) -
+                            data.begin();
+      }
+
+      compareSelectResults<TypeParam, 1>(wt, queries, results_should);
+      compareSelectResults<TypeParam, 2>(wt, queries, results_should);
+      compareSelectResults<TypeParam, 4>(wt, queries, results_should);
+      compareSelectResults<TypeParam, 8>(wt, queries, results_should);
+      compareSelectResults<TypeParam, 16>(wt, queries, results_should);
+      compareSelectResults<TypeParam, 32>(wt, queries, results_should);
+    }
+  } else if (sizeof(TypeParam) == 2) {
+    // test alphabet sizes of 4, 32, 128
+    size_t data_size = 100'000 + (rand() % 1'000'000);
+    size_t alphabet_size = 16384;
+    std::vector<TypeParam> alphabet(alphabet_size);
+    std::iota(alphabet.begin(), alphabet.end(), 0);
+    auto [data, hist] =
+        generateRandomDataAndHist<TypeParam>(alphabet, data_size);
+    auto alphabet_copy = alphabet;
+
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                              kGPUIndex);
+
+    size_t num_queries = std::min(size_t(1'000), data_size / 10);
+    auto queries = generateRandomSelectQueries<TypeParam>(hist, num_queries,
+                                                          alphabet_copy);
+
+    std::vector<size_t> results_should(queries.size());
+#pragma omp parallel for
+    for (size_t j = 0; j < queries.size(); ++j) {
+      size_t counts = 0;
+      results_should[j] = std::find_if(data.begin(), data.end(),
+                                       [&](TypeParam c) {
+                                         return c == queries[j].symbol_ and
+                                                ++counts == queries[j].index_;
+                                       }) -
+                          data.begin();
+    }
+
     compareSelectResults<TypeParam, 1>(wt, queries, results_should);
     compareSelectResults<TypeParam, 2>(wt, queries, results_should);
     compareSelectResults<TypeParam, 4>(wt, queries, results_should);

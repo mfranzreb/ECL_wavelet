@@ -617,23 +617,31 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   size_t const offsets_size = sizeof(size_t) * num_levels_;
 
   struct cudaDeviceProp prop = getDeviceProperties();
-  gpuErrchk(cudaFuncSetAttribute(accessKernel<T, true, NumThreads, true>,
-                                 cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                 prop.sharedMemPerBlockOptin));
-  gpuErrchk(cudaFuncSetAttribute(accessKernel<T, false, NumThreads, true>,
-                                 cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                 prop.sharedMemPerBlockOptin));
+  gpuErrchk(cudaFuncSetAttribute(
+      accessKernel<T, true, NumThreads, true>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin -
+          funcAttrib
+              .sharedSizeBytes));  //? SOmetimes 1024 despite no static shmem
+  gpuErrchk(cudaFuncSetAttribute(
+      accessKernel<T, false, NumThreads, true>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
 
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
 
-  bool const offsets_shmem = offsets_size * kMinBPM <= max_shmem_per_SM;
+  size_t shmem_per_block = funcAttrib.sharedSizeBytes;
+
+  bool const offsets_shmem =
+      (offsets_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM;
 
   auto min_block_size = kMinTPB;
   if (offsets_shmem) {
+    shmem_per_block += offsets_size;
     for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
          block_size /= 2) {
       auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
-      if (offsets_size * blocks_per_sm > max_shmem_per_SM) {
+      if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
         min_block_size = 2 * block_size;
         break;
       }
@@ -641,13 +649,14 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   }
 
   bool const counts_shmem =
-      (counts_size + offsets_size) * kMinBPM <= max_shmem_per_SM;
+      (counts_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM;
 
   if (counts_shmem) {
+    shmem_per_block += counts_size;
     for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
          block_size /= 2) {
       auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
-      if ((counts_size + offsets_size) * blocks_per_sm > max_shmem_per_SM) {
+      if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
         min_block_size = 2 * block_size;
         break;
       }
@@ -692,23 +701,22 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
       this,         nullptr, 0, nullptr, &alphabet_size_, (void*)&num_groups,
       &num_levels_, 0};
 
-  auto kernel_node_params_base =
-      cudaKernelNodeParams{.func = nullptr,
-                           .gridDim = dim3(num_blocks, 1, 1),
-                           .blockDim = dim3(threads_per_block, 1, 1),
-                           .sharedMemBytes = 0,
-                           .kernelParams = nullptr,
-                           .extra = nullptr};
+  auto kernel_node_params_base = cudaKernelNodeParams{
+      .func = nullptr,
+      .gridDim = dim3(num_blocks, 1, 1),
+      .blockDim = dim3(threads_per_block, 1, 1),
+      .sharedMemBytes =
+          static_cast<uint32_t>(shmem_per_block - funcAttrib.sharedSizeBytes),
+      .kernelParams = nullptr,
+      .extra = nullptr};
 
   if (offsets_shmem) {
     if (counts_shmem) {
-      kernel_node_params_base.sharedMemBytes = counts_size + offsets_size;
       kernel_node_params_base.func =
           (void*)(&accessKernel<T, true, NumThreads, true>);
     } else {
       kernel_node_params_base.func =
           (void*)(&accessKernel<T, false, NumThreads, true>);
-      kernel_node_params_base.sharedMemBytes = offsets_size;
     }
   } else {
     kernel_node_params_base.func =
@@ -840,23 +848,29 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   size_t const offsets_size = sizeof(size_t) * num_levels_;
 
   struct cudaDeviceProp prop = getDeviceProperties();
-  gpuErrchk(cudaFuncSetAttribute(rankKernel<T, true, NumThreads, true>,
-                                 cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                 prop.sharedMemPerBlockOptin));
-  gpuErrchk(cudaFuncSetAttribute(rankKernel<T, false, NumThreads, true>,
-                                 cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                 prop.sharedMemPerBlockOptin));
+  gpuErrchk(cudaFuncSetAttribute(
+      rankKernel<T, true, NumThreads, true>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
+  gpuErrchk(cudaFuncSetAttribute(
+      rankKernel<T, false, NumThreads, true>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
 
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
 
-  bool const offsets_shmem = offsets_size * kMinBPM <= max_shmem_per_SM;
+  size_t shmem_per_block = funcAttrib.sharedSizeBytes;
+
+  bool const offsets_shmem =
+      (offsets_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM;
 
   auto min_block_size = kMinTPB;
   if (offsets_shmem) {
+    shmem_per_block += offsets_size;
     for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
          block_size /= 2) {
       auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
-      if (offsets_size * blocks_per_sm > max_shmem_per_SM) {
+      if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
         min_block_size = 2 * block_size;
         break;
       }
@@ -864,13 +878,14 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   }
 
   bool const counts_shmem =
-      (counts_size + offsets_size) * kMinBPM <= max_shmem_per_SM;
+      (counts_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM;
 
   if (counts_shmem) {
+    shmem_per_block += counts_size;
     for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
          block_size /= 2) {
       auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
-      if ((counts_size + offsets_size) * blocks_per_sm > max_shmem_per_SM) {
+      if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
         min_block_size = 2 * block_size;
         break;
       }
@@ -928,23 +943,22 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
       this,         nullptr, 0, nullptr, (void*)&num_groups, &alphabet_size_,
       &num_levels_, 0};
 
-  auto kernel_node_params_base =
-      cudaKernelNodeParams{.func = nullptr,
-                           .gridDim = dim3(num_blocks, 1, 1),
-                           .blockDim = dim3(threads_per_block, 1, 1),
-                           .sharedMemBytes = 0,
-                           .kernelParams = nullptr,
-                           .extra = nullptr};
+  auto kernel_node_params_base = cudaKernelNodeParams{
+      .func = nullptr,
+      .gridDim = dim3(num_blocks, 1, 1),
+      .blockDim = dim3(threads_per_block, 1, 1),
+      .sharedMemBytes =
+          static_cast<uint32_t>(shmem_per_block - funcAttrib.sharedSizeBytes),
+      .kernelParams = nullptr,
+      .extra = nullptr};
 
   if (offsets_shmem) {
     if (counts_shmem) {
-      kernel_node_params_base.sharedMemBytes = counts_size + offsets_size;
       kernel_node_params_base.func =
           (void*)(&rankKernel<T, true, NumThreads, true>);
     } else {
       kernel_node_params_base.func =
           (void*)(&rankKernel<T, false, NumThreads, true>);
-      kernel_node_params_base.sharedMemBytes = offsets_size;
     }
   } else {
     kernel_node_params_base.func =
@@ -1311,9 +1325,9 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
 
   struct cudaDeviceProp prop = getDeviceProperties();
   if (level == 0) {
-    gpuErrchk(cudaFuncSetAttribute(fillLevelKernel<T, true>,
-                                   cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                   prop.sharedMemPerBlockOptin));
+    gpuErrchk(cudaFuncSetAttribute(
+        fillLevelKernel<T, true>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+        prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
   }
 
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
@@ -1331,7 +1345,8 @@ __host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
     padded_shmem = shmem_per_thread * max_threads_per_SM +
                    shmem_per_thread * max_threads_per_SM / kBanksPerLine;
   }
-  bool const enough_shmem = padded_shmem <= max_shmem_per_SM;
+  bool const enough_shmem =
+      (padded_shmem + funcAttrib.sharedSizeBytes) <= max_shmem_per_SM;
   if (enough_shmem) {
     shmem_per_thread = padded_shmem / max_threads_per_SM;
   }
@@ -1707,7 +1722,8 @@ __device__ T getPrevCharStart(T const char_start, bool const is_rightmost_child,
                               uint8_t const code_len) {
   if constexpr (IsPowTwo) {
     T const node_lens = 1ULL << (num_levels - level);
-    return char_start - node_lens;
+    // Round char_start down to the nearest node start
+    return char_start & ~(node_lens - 1);
   } else {
     if (is_rightmost_child) {
       uint32_t new_start = 0;

@@ -362,7 +362,6 @@ class RankSelect {
           // Find the position of the i-th zero/one in the word
           // 1-indexed to distinguish from having found nothing, which is
           // 0.
-          // TODO: faster implementations possible
           i -= vals_at_start;
           result = local_word * (sizeof(uint32_t) * 8) +
                    getNBitPos<Value, uint64_t>(i, word) + 1;

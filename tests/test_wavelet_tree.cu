@@ -18,6 +18,7 @@ class WaveletTreeTest : public WaveletTree<T> {
  public:
   using WaveletTree<T>::WaveletTree;
   using WaveletTree<T>::computeGlobalHistogram;
+  using WaveletTree<T>::getNodeInfos;
 };
 
 template <typename T>
@@ -93,6 +94,12 @@ template <typename T>
 __global__ void BAaccessKernel(BitArray bit_array, size_t array_index,
                                size_t index, T* output) {
   *output = static_cast<T>(bit_array.access(array_index, index));
+}
+
+template <typename T, bool IsPowTwo>
+__global__ void getNodePosKernel(WaveletTree<T> tree, T symbol, uint8_t l,
+                                 T* output) {
+  *output = tree.getNodePosAtLevel<IsPowTwo>(symbol, l);
 }
 
 template <typename T, int NumThreads>
@@ -191,6 +198,46 @@ TYPED_TEST(WaveletTreeTestFixture, createMinimalCodes) {
   EXPECT_EQ(codes[73 - 64].len_, 4);
   EXPECT_EQ(codes[74 - 64].code_, 112);
   EXPECT_EQ(codes[74 - 64].len_, 3);
+}
+
+TYPED_TEST(WaveletTreeTestFixture, getNodePosRandom) {
+  if (sizeof(TypeParam) >= 4) {
+    return;
+  }
+#pragma nv_diag_suppress 128
+  for (int i = 0; i < 10; i++) {
+#pragma nv_diag_default 128
+    size_t alphabet_size =
+
+        3 + (rand() % (std::numeric_limits<TypeParam>::max() - 3));
+
+    std::vector<TypeParam> alphabet(alphabet_size);
+    std::iota(alphabet.begin(), alphabet.end(), 0);
+
+    auto alphabet_copy = alphabet;
+    WaveletTree<TypeParam> wt(alphabet.data(), alphabet.size(),
+                              std::move(alphabet_copy), kGPUIndex);
+
+    auto const codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
+    auto const node_starts =
+        WaveletTreeTest<TypeParam>::getNodeInfos(alphabet, codes);
+    TypeParam node_counter = 0;
+    bool const is_pow_two = isPowTwo<TypeParam>(alphabet_size);
+    for (size_t j = 0; j < node_starts.size(); ++j) {
+      if (j > 0 and node_starts[j].level_ != node_starts[j - 1].level_) {
+        node_counter = 0;
+      }
+      if (is_pow_two) {
+        getNodePosKernel<TypeParam, true><<<1, 1>>>(
+            wt, node_starts[j].start_, node_starts[j].level_, this->result);
+      } else {
+        getNodePosKernel<TypeParam, false><<<1, 1>>>(
+            wt, node_starts[j].start_, node_starts[j].level_, this->result);
+      }
+      kernelCheck();
+      EXPECT_EQ(node_counter++, *this->result);
+    }
+  }
 }
 
 TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogram) {

@@ -26,6 +26,11 @@ struct GraphContents {
   std::vector<cudaGraphNode_t> copy_results_nodes;
 };
 
+template <typename T>
+struct NodeInfo {
+  T start_;
+  uint8_t level_;
+};
 std::unordered_map<uint16_t, GraphContents> queries_graph_cache;
 
 /*!
@@ -186,6 +191,43 @@ class WaveletTree {
    */
   __device__ T getCodesStart() const;
 
+  template <bool IsPowTwo>
+  __device__ T getNodePosAtLevel(T symbol, uint8_t const level) const {
+    if (level == 1) {
+      return 0;
+    }
+    T num_prev_nodes = 0;
+    T node_lens = 1;
+    if constexpr (IsPowTwo) {
+      // All node lens are equal
+      node_lens = 1ULL << (num_levels_ - level);
+    } else {
+      T remaining_symbols = alphabet_size_;
+      for (int16_t i = level - 1; i >= 0; --i) {
+        auto const subtree_size = getPrevPowTwo<T>(remaining_symbols);
+        node_lens = subtree_size >> i;
+        if (symbol <= subtree_size) {
+          break;
+        } else {
+          remaining_symbols -= subtree_size;
+          num_prev_nodes += subtree_size / node_lens;
+          symbol -= subtree_size;
+        }
+      }
+    }
+    return symbol / node_lens + num_prev_nodes - 1;  // First node doesnt count
+  }
+
+  __device__ size_t getPrecomputedRank(T const i) const { return d_ranks_[i]; }
+
+  __device__ void setPrecomputedRank(T const i, size_t const rank) {
+    d_ranks_[i] = rank;
+  }
+
+  __device__ T getNumNodesAtLevel(uint8_t const level) const {
+    return d_num_nodes_at_level_[level];
+  }
+
  protected:
   __host__ void computeGlobalHistogram(bool const is_pow_two,
                                        size_t const data_size, T* d_data,
@@ -193,6 +235,35 @@ class WaveletTree {
 
   __host__ void fillLevel(BitArray bit_array, T* const data,
                           size_t const data_size, uint32_t const level);
+
+  __host__ static std::vector<NodeInfo<T>> getNodeInfos(
+      std::vector<T> const& alphabet, std::vector<Code> const& codes) {
+    auto const alphabet_size = alphabet.size();
+    auto const symbol_len = static_cast<uint8_t>(ceilLog2Host(alphabet_size));
+
+    std::vector<Code> alphabet_codes(alphabet_size);
+    for (T i = 0; i < alphabet_size; ++i) {
+      if (i < alphabet_size - codes.size()) {
+        alphabet_codes[i] = {symbol_len, i};
+      } else {
+        alphabet_codes[i] = codes[i - (alphabet_size - codes.size())];
+      }
+    }
+
+    std::vector<NodeInfo<T>> node_starts;
+    for (uint8_t l = 1; l < symbol_len; ++l) {
+      // Find each position where the l-th MSB of the symbol is 0 and the
+      // previous 1
+      for (size_t i = 1; i < alphabet_size; ++i) {
+        if (alphabet_codes[i].len_ > l and
+            (getBit(symbol_len - l - 1, alphabet_codes[i].code_) == 0) and
+            (getBit(symbol_len - l - 1, alphabet_codes[i - 1].code_) == 1)) {
+          node_starts.push_back({alphabet[i], l});
+        }
+      }
+    }
+    return node_starts;
+  }
 
  private:
   std::vector<T> alphabet_;    /*!< Alphabet of the wavelet tree*/
@@ -211,6 +282,12 @@ class WaveletTree {
   static size_t access_mem_pool_size_;
   size_t* rank_pinned_mem_pool_;
   static size_t rank_mem_pool_size_;
+  T num_nodes_until_last_level_;
+  size_t* d_ranks_;
+  T* d_num_nodes_at_level_ =
+      nullptr; /*!< Number of nodes at each level, without counting nodes that
+                  start at 0*/
+  T num_ranks_;
 };
 
 /*!
@@ -243,6 +320,11 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 size_t const data_size,
                                 uint8_t const alphabet_start_bit,
                                 uint32_t const level);
+
+template <typename T>
+__global__ void precomputeRanksKernel(WaveletTree<T> tree,
+                                      NodeInfo<T>* const node_starts,
+                                      size_t const total_num_nodes);
 
 /*!
  * \brief Kernel for computing access queries on the wavelet tree.
@@ -281,14 +363,15 @@ __global__ void rankKernel(WaveletTree<T> tree,
  * \param num_queries Number of queries.
  * \param ranks Array to store the selected indices.
  */
-template <typename T, int ThreadsPerQuery>
+template <typename T, int ThreadsPerQuery, bool ShmemRanks>
 __global__ void selectKernel(WaveletTree<T> tree,
                              RankSelectQuery<T>* const queries,
                              size_t const num_queries, size_t* const results,
                              size_t const num_groups,
                              size_t const alphabet_size,
                              uint8_t const alphabet_num_bits,
-                             T const codes_start, bool const is_pow_two);
+                             T const codes_start, bool const is_pow_two,
+                             T const num_ranks, T const num_nodes_at_start);
 
 /****************************************************************************************
  * Implementation
@@ -309,7 +392,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type");
   assert(data_size > 0);
-  assert(alphabet_.size() > 0);
+  assert(alphabet_.size() > 2);
   assert(std::is_sorted(alphabet_.begin(), alphabet_.end()));
 
   checkWarpSize(GPU_index);
@@ -323,22 +406,26 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
                   [i = 0](unsigned value) mutable { return value == i++; });
 
   std::vector<Code> codes;
+  std::vector<NodeInfo<T>> node_starts;
   // make minimal alphabet
   if (not is_min_alphabet_) {
     auto min_alphabet = std::vector<T>(alphabet_size_);
     std::iota(min_alphabet.begin(), min_alphabet.end(), 0);
     codes = createMinimalCodes(min_alphabet);
+    node_starts = getNodeInfos(min_alphabet, codes);
   } else {
     codes = createMinimalCodes(alphabet_);
+    node_starts = getNodeInfos(alphabet_, codes);
   }
 
   num_levels_ = ceilLog2Host<T>(alphabet_size_);
   alphabet_start_bit_ = num_levels_ - 1;
   codes_start_ = alphabet_size_ - codes.size();
 
+  std::vector<T> num_nodes_at_level(num_levels_ - 1);
   //  create codes and copy to device
   uint8_t* d_code_lens = nullptr;
-  if (codes.size() > 0) {
+  if (not is_pow_two) {
     gpuErrchk(cudaMalloc(&d_codes_, codes.size() * sizeof(Code)));
     gpuErrchk(cudaMemcpy(d_codes_, codes.data(), codes.size() * sizeof(Code),
                          cudaMemcpyHostToDevice));
@@ -351,7 +438,38 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     gpuErrchk(cudaMemcpy(d_code_lens, code_lens.data(),
                          code_lens.size() * sizeof(uint8_t),
                          cudaMemcpyHostToDevice));
+
+    // Get number of nodes at each level
+    T counter = 0;
+    for (T i = 0; i < node_starts.size(); ++i) {
+      if (i > 0 and node_starts[i].level_ > node_starts[i - 1].level_) {
+        num_nodes_at_level[node_starts[i].level_ - 1] = counter;
+        counter = 0;
+      }
+      counter++;
+    }
+    num_nodes_until_last_level_ = 0;
+    for (int i = 0; i < num_nodes_at_level.size(); ++i) {
+      num_nodes_until_last_level_ += num_nodes_at_level[i];
+    }
+    gpuErrchk(
+        cudaMalloc(&d_num_nodes_at_level_, (num_levels_ - 1) * sizeof(T)));
+    gpuErrchk(cudaMemcpy(d_num_nodes_at_level_, num_nodes_at_level.data(),
+                         (num_levels_ - 1) * sizeof(T),
+                         cudaMemcpyHostToDevice));
+  } else {
+    num_nodes_until_last_level_ =
+        node_starts.size() - (powTwo<T>(num_levels_ - 1) - 1);
   }
+  num_ranks_ = node_starts.size();
+
+  gpuErrchk(cudaMalloc(&d_ranks_, num_ranks_ * sizeof(size_t)));
+
+  NodeInfo<T>* d_node_starts = nullptr;
+  gpuErrchk(cudaMalloc(&d_node_starts, num_ranks_ * sizeof(NodeInfo<T>)));
+  gpuErrchk(cudaMemcpy(d_node_starts, node_starts.data(),
+                       num_ranks_ * sizeof(NodeInfo<T>),
+                       cudaMemcpyHostToDevice));
 
   // Allocate space for counts array
   gpuErrchk(cudaMalloc(&d_counts_, alphabet_size_ * sizeof(size_t)));
@@ -458,6 +576,11 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   // build rank and select structures from bit-vectors
   rank_select_ = RankSelect(std::move(bit_array), GPU_index);
 
+  // TODO: optimize
+  precomputeRanksKernel<T><<<1, 256>>>(*this, d_node_starts, num_ranks_);
+  gpuErrchk(cudaFree(d_node_starts));
+  kernelCheck();
+
   //? WHat size?
   gpuErrchk(cudaHostAlloc(&access_pinned_mem_pool_,
                           access_mem_pool_size_ * sizeof(T),
@@ -477,6 +600,8 @@ __host__ WaveletTree<T>::WaveletTree(WaveletTree const& other)
       num_levels_(other.num_levels_),
       d_codes_(other.d_codes_),
       d_counts_(other.d_counts_),
+      d_num_nodes_at_level_(other.d_num_nodes_at_level_),
+      d_ranks_(other.d_ranks_),
       is_min_alphabet_(other.is_min_alphabet_),
       codes_start_(other.codes_start_),
       access_pinned_mem_pool_(other.access_pinned_mem_pool_),
@@ -490,6 +615,10 @@ WaveletTree<T>::~WaveletTree() {
     gpuErrchk(cudaFree(d_counts_));
     gpuErrchk(cudaFreeHost(access_pinned_mem_pool_));
     gpuErrchk(cudaFreeHost(rank_pinned_mem_pool_));
+    if (d_num_nodes_at_level_ != nullptr) {
+      gpuErrchk(cudaFree(d_num_nodes_at_level_));
+    }
+    gpuErrchk(cudaFree(d_ranks_));
   }
 }
 
@@ -1026,19 +1155,45 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
   assert(std::all_of(queries.begin(), queries.end(),
                      [](const RankSelectQuery<T>& s) { return s.index_ > 0; }));
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, selectKernel<T, WS>));
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                  selectKernel<T, ThreadsPerQuery, true>));
   uint32_t maxThreadsPerBlock =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
 
   maxThreadsPerBlock = findLargestDivisor(kMaxTPB, maxThreadsPerBlock);
   // launch kernel with 1 warp per index
   size_t const num_queries = queries.size();
-
   auto prop = getDeviceProperties();
+
+  gpuErrchk(cudaFuncSetAttribute(
+      selectKernel<T, ThreadsPerQuery, true>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
+
+  size_t const ranks_size = sizeof(size_t) * num_ranks_;
+
+  size_t const total_shmem_per_block = ranks_size + funcAttrib.sharedSizeBytes;
+
+  auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
+
+  bool const ranks_shmem = total_shmem_per_block * kMinBPM <= max_shmem_per_SM;
+
+  auto min_block_size = kMinTPB;
+  if (ranks_shmem) {
+    for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
+         block_size /= 2) {
+      auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
+      if (total_shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
+        min_block_size = 2 * block_size;
+        break;
+      }
+    }
+  }
+
   auto [num_blocks, threads_per_block] = getLaunchConfig(
       (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount + WS - 1) /
           WS,
-      kMinTPB, maxThreadsPerBlock);
+      min_block_size, maxThreadsPerBlock);
 
   // allocate space for results
   size_t* d_results;
@@ -1065,10 +1220,20 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
                        num_queries * sizeof(RankSelectQuery<T>),
                        cudaMemcpyHostToDevice));
 
-  selectKernel<T, ThreadsPerQuery><<<num_blocks, threads_per_block>>>(
-      *this, d_queries, num_queries, d_results,
-      num_blocks * threads_per_block / ThreadsPerQuery, alphabet_size_,
-      num_levels_, codes_start_, isPowTwo<size_t>(alphabet_size_));
+  if (ranks_shmem) {
+    selectKernel<T, ThreadsPerQuery, true>
+        <<<num_blocks, threads_per_block, ranks_size>>>(
+            *this, d_queries, num_queries, d_results,
+            num_blocks * threads_per_block / ThreadsPerQuery, alphabet_size_,
+            num_levels_, codes_start_, isPowTwo<size_t>(alphabet_size_),
+            num_ranks_, num_nodes_until_last_level_);
+  } else {
+    selectKernel<T, ThreadsPerQuery, false><<<num_blocks, threads_per_block>>>(
+        *this, d_queries, num_queries, d_results,
+        num_blocks * threads_per_block / ThreadsPerQuery, alphabet_size_,
+        num_levels_, codes_start_, isPowTwo<size_t>(alphabet_size_), num_ranks_,
+        num_nodes_until_last_level_);
+  }
   kernelCheck();
 
   // copy results back to host
@@ -1533,6 +1698,30 @@ __global__ LB(MAX_TPB,
   }
 }
 
+template <typename T>
+__global__ LB(MAX_TPB, MIN_BPM) void precomputeRanksKernel(
+    WaveletTree<T> tree, NodeInfo<T>* const node_starts,
+    size_t const total_num_nodes) {
+  static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
+                "T must be an unsigned integral type");
+  assert(blockDim.x % WS == 0);
+
+  uint32_t const global_t_id = (blockIdx.x * blockDim.x + threadIdx.x);
+  uint32_t const num_threads = gridDim.x * blockDim.x;
+
+  for (size_t i = global_t_id; i < total_num_nodes; i += num_threads) {
+    auto const node_info = node_starts[i];
+    size_t const char_counts = tree.getCounts(node_info.start_);
+    uint8_t const level = node_info.level_;
+    size_t const offset = tree.rank_select_.bit_array_.getOffset(level);
+
+#pragma nv_diag_suppress 174
+    tree.setPrecomputedRank(i, tree.rank_select_.template rank<1, false, 0>(
+                                   level, char_counts, offset));
+#pragma nv_diag_default 174
+  }
+}
+
 template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets>
 __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
     WaveletTree<T> tree, size_t* const indices, size_t const num_indices,
@@ -1727,7 +1916,6 @@ __device__ T getPrevCharStart(T const char_start, bool const is_rightmost_child,
   } else {
     if (is_rightmost_child) {
       uint32_t new_start = 0;
-      // TODO: look if lookup table is faster
       for (uint32_t l = 0; l < level; l++) {
         new_start += getPrevPowTwo(alphabet_size - new_start);
       }
@@ -1738,16 +1926,23 @@ __device__ T getPrevCharStart(T const char_start, bool const is_rightmost_child,
   }
 }
 
-template <typename T, int ThreadsPerQuery>
+template <typename T, int ThreadsPerQuery, bool ShmemRanks>
 __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
     WaveletTree<T> tree, RankSelectQuery<T>* const queries,
     size_t const num_queries, size_t* const results, size_t const num_groups,
     size_t const alphabet_size, uint8_t const alphabet_num_bits,
-    T const codes_start, bool const is_pow_two) {
+    T const codes_start, bool const is_pow_two, T const num_ranks,
+    T const num_nodes_at_start) {
   assert(blockDim.x % WS == 0);
   __shared__
       typename cub::WarpScan<RSConfig::L2_TYPE, ThreadsPerQuery>::TempStorage
           temp_storage[1024 / ThreadsPerQuery];  // TODO
+  extern __shared__ size_t shmem[];
+  if constexpr (ShmemRanks) {
+    for (uint32_t i = threadIdx.x; i < num_ranks; i += blockDim.x) {
+      shmem[i] = tree.getPrecomputedRank(i);
+    }
+  }
 
   size_t const global_group_id =
       (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerQuery;
@@ -1767,9 +1962,15 @@ __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
 
     T char_start = query.symbol_;
     size_t start;
-    for (int16_t l = code.len_ - 1; l >= 0; --l) {
-      // If it's a right child
+    T ranks_start = num_nodes_at_start;
+    int16_t l = code.len_ - 1;
+    for (int16_t level = alphabet_num_bits - 2; level >= l; --level) {
+      ranks_start -=
+          is_pow_two ? powTwo<T>(level) - 1 : tree.getNumNodesAtLevel(level);
+    }
+    for (; l >= 0; --l) {
       size_t const offset = tree.rank_select_.bit_array_.getOffset(l);
+      // If it's a right child
       if (getBit<T>(alphabet_num_bits - 1 - l, code.code_) == true) {
         if (is_pow_two) {
           char_start = getPrevCharStart<T, true>(
@@ -1782,15 +1983,36 @@ __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
               char_start, is_rightmost_child, alphabet_size, l,
               alphabet_num_bits, code.len_);
         }
-        start = tree.rank_select_.template rank<ThreadsPerQuery, 0, 1>(
-            l, tree.getCounts(char_start), offset);
+        if (char_start == 0) {
+          start = 0;
+        } else {
+          T const node_pos = is_pow_two
+                                 ? tree.getNodePosAtLevel<true>(char_start, l)
+                                 : tree.getNodePosAtLevel<false>(char_start, l);
+          if constexpr (ShmemRanks) {
+            start = tree.getCounts(char_start) - shmem[ranks_start + node_pos];
+          } else {
+            start = tree.getCounts(char_start) -
+                    tree.getPrecomputedRank(ranks_start + node_pos);
+          }
+        }
         query.index_ = tree.rank_select_.select<1, ThreadsPerQuery>(
                            l, start + query.index_, offset,
                            &temp_storage[threadIdx.x / ThreadsPerQuery]) +
                        1;
       } else {
-        start = tree.rank_select_.template rank<ThreadsPerQuery, 0, 0>(
-            l, tree.getCounts(char_start), offset);
+        if (char_start == 0) {
+          start = 0;
+        } else {
+          T const node_pos = is_pow_two
+                                 ? tree.getNodePosAtLevel<true>(char_start, l)
+                                 : tree.getNodePosAtLevel<false>(char_start, l);
+          if constexpr (ShmemRanks) {
+            start = shmem[ranks_start + node_pos];
+          } else {
+            start = tree.getPrecomputedRank(ranks_start + node_pos);
+          }
+        }
         query.index_ = tree.rank_select_.select<0, ThreadsPerQuery>(
                            l, start + query.index_, offset,
                            &temp_storage[threadIdx.x / ThreadsPerQuery]) +
@@ -1802,6 +2024,10 @@ __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
         break;
       }
       query.index_ -= tree.getCounts(char_start);
+      if (l > 1) {
+        ranks_start -=
+            is_pow_two ? powTwo<T>(l - 1) - 1 : tree.getNumNodesAtLevel(l - 1);
+      }
     }
     if (local_t_id == 0) {
       results[i] = query.index_ - 1;  // 0-indexed

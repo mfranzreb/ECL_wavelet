@@ -552,7 +552,9 @@ class RankSelect {
 #pragma unroll
     for (int offset = 1; offset < NumThreads; offset *= 2) {
       T temp = __shfl_up_sync(mask, val, offset);
-      val += temp * (lane >= offset);
+      if (lane >= offset) {
+        val += temp;
+      }
     }
 
     output = val;
@@ -567,7 +569,7 @@ class RankSelect {
    * \return Position of the n-th bit. Starts from 0.
    */
   template <uint32_t Value, typename T>
-  __device__ [[nodiscard]] uint8_t getNBitPos(uint8_t const n, T word) {
+  __device__ [[nodiscard]] uint8_t getNBitPos(uint8_t n, T word) {
     static_assert(Value == 0 or Value == 1,
                   "Template parameter must be 0 or 1");
     static_assert(std::is_integral<T>::value, "T must be an integral type.");
@@ -576,32 +578,26 @@ class RankSelect {
     if constexpr (Value == 0) {
       word = ~word;
     }
-    T mask;
-    uint8_t shift;
+    uint32_t mask = 0x0000FFFFu;
+    uint8_t shift = 16u;
     uint8_t base = 0u;
     uint8_t count;
     if constexpr (sizeof(T) == 4) {
       assert(n <= 32);
-      mask = 0x0000FFFFu;
-      shift = 16u;
-      count = __popc(word & mask);
     } else {
       assert(n <= 64);
-      mask = 0x00000000FFFFFFFFu;
-      shift = 32u;
+      count = __popc(word & 0xFFFFFFFFu);
+      if (n > count) {
+        base = 32;
+        n -= count;
+        // move top 32 bits to bottom
+        word >>= 32;
+      }
     }
 
-    uint8_t num_iters = 5;
-    if constexpr (sizeof(T) == 8) {
-      num_iters = 6;
-    }
 #pragma unroll
-    for (uint8_t i = 0; i < num_iters; i++) {
-      if constexpr (sizeof(T) == 4) {
-        count = __popc(word & mask);
-      } else {
-        count = __popcll(word & mask);
-      }
+    for (uint8_t i = 0; i < 5; i++) {
+      count = __popc(word & mask);
       if (n > count) {
         base += shift;
         shift >>= 1;
@@ -621,13 +617,13 @@ class RankSelect {
   RSConfig::L2_TYPE*
       d_l2_indices_; /*!< Device pointer to L2 indices for all arrays.*/
 
-  size_t*
-      d_l1_offsets_; /*!< Offsets where each L1 index for a bit array starts.*/
-  size_t*
-      d_l2_offsets_; /*!< Offsets where each L2 index for a bit array starts.*/
+  size_t* d_l1_offsets_; /*!< Offsets where each L1 index for a bit array
+                            starts.*/
+  size_t* d_l2_offsets_; /*!< Offsets where each L2 index for a bit array
+                            starts.*/
 
-  uint16_t* d_num_last_l2_blocks_; /*!< Number of L2 blocks in the last L1 block
-                                   for each bit array.*/
+  uint16_t* d_num_last_l2_blocks_; /*!< Number of L2 blocks in the last L1
+                                   block for each bit array.*/
   size_t* d_num_l1_blocks_; /*!< Number of L1 blocks for each bit array.*/
   std::vector<size_t> num_l1_blocks_; /*!< Number of L1 blocks for all bit
                                       arrays. Not accessible from device.*/

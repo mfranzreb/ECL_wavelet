@@ -749,9 +749,7 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   gpuErrchk(cudaFuncSetAttribute(
       accessKernel<T, true, NumThreads, true>,
       cudaFuncAttributeMaxDynamicSharedMemorySize,
-      prop.sharedMemPerBlockOptin -
-          funcAttrib
-              .sharedSizeBytes));  //? SOmetimes 1024 despite no static shmem
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
   gpuErrchk(cudaFuncSetAttribute(
       accessKernel<T, false, NumThreads, true>,
       cudaFuncAttributeMaxDynamicSharedMemorySize,
@@ -1926,6 +1924,7 @@ __device__ T getPrevCharStart(T const char_start, bool const is_rightmost_child,
   }
 }
 
+// TODO: add counts to shmem
 template <typename T, int ThreadsPerQuery, bool ShmemRanks>
 __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
     WaveletTree<T> tree, RankSelectQuery<T>* const queries,
@@ -1939,6 +1938,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
     for (uint32_t i = threadIdx.x; i < num_ranks; i += blockDim.x) {
       shmem[i] = tree.getPrecomputedRank(i);
     }
+    __syncthreads();
   }
 
   size_t const global_group_id =

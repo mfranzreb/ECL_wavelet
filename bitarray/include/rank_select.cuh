@@ -26,7 +26,8 @@ struct RSConfig {
   static constexpr size_t L1_WORD_SIZE = L1_BIT_SIZE / (sizeof(uint32_t) * 8);
 
   // Number of 1s and 0s between each sampled position.
-  static constexpr size_t SELECT_SAMPLE_RATE = 4096;
+  static constexpr size_t SELECT_SAMPLE_RATE =
+      4096;  // TODO: try different sizes
 
   using L1_TYPE = uint64_t;
   using L2_TYPE = uint16_t;
@@ -190,60 +191,110 @@ class RankSelect {
       }
     }
 
-    size_t const prev_sample_pos = i / RSConfig::SELECT_SAMPLE_RATE;
+    size_t const prev_sample_index = i / RSConfig::SELECT_SAMPLE_RATE;
     size_t result = 1;  // 1 so that "curr_l2_block" is not 0 if no sample found
-    if (prev_sample_pos > 0) {
+    size_t next_sample_pos;
+    if (prev_sample_index > 0) {
       if constexpr (Value == 0) {
-        result = d_select_samples_0_[d_select_samples_0_offsets_[array_index] +
-                                     prev_sample_pos - 1];
+        result =
+            d_select_samples_0_[d_select_samples_0_offsets_[array_index] +
+                                prev_sample_index -
+                                1];  // -1 since pos of 0th val is not saved
+        if ((prev_sample_index + 1) * RSConfig::SELECT_SAMPLE_RATE >
+            getTotalNumVals<0>(array_index)) {
+          next_sample_pos = bit_array_.size(array_index);
+        } else {
+          next_sample_pos =
+              d_select_samples_0_[d_select_samples_0_offsets_[array_index] +
+                                  prev_sample_index];
+        }
+
       } else {
         result = d_select_samples_1_[d_select_samples_1_offsets_[array_index] +
-                                     prev_sample_pos - 1];
+                                     prev_sample_index - 1];
+        if ((prev_sample_index + 1) * RSConfig::SELECT_SAMPLE_RATE >
+            getTotalNumVals<1>(array_index)) {
+          next_sample_pos = bit_array_.size(array_index);
+        } else {
+          next_sample_pos =
+              d_select_samples_1_[d_select_samples_1_offsets_[array_index] +
+                                  prev_sample_index];
+        }
+      }
+    } else {
+      if constexpr (Value == 0) {
+        if (RSConfig::SELECT_SAMPLE_RATE > getTotalNumVals<0>(array_index)) {
+          next_sample_pos = bit_array_.size(array_index);
+        } else {
+          next_sample_pos =
+              d_select_samples_0_[d_select_samples_0_offsets_[array_index]];
+        }
+      } else {
+        if (RSConfig::SELECT_SAMPLE_RATE > getTotalNumVals<1>(array_index)) {
+          next_sample_pos = bit_array_.size(array_index);
+        } else {
+          next_sample_pos =
+              d_select_samples_1_[d_select_samples_1_offsets_[array_index]];
+        }
       }
     }
 
-    // TODO: reduce register usage here
     //  Find next L1 block where the i-th zero/one is, starting from result
     size_t const l1_offset = d_l1_offsets_[array_index];
     size_t const l2_offset = d_l2_offsets_[array_index];
-    RSConfig::L2_TYPE const num_last_l2_blocks =
-        d_num_last_l2_blocks_[array_index];
-    size_t const num_l1_blocks = d_num_l1_blocks_[array_index];
 
-    // Starting from 1 since 0-th entry always 0.
-    size_t curr_l1_block = local_t_id + (result + RSConfig::L1_BIT_SIZE - 1) /
-                                            RSConfig::L1_BIT_SIZE;
-    uint32_t active_threads;
-    if constexpr (NumThreads > 1) {
-      active_threads = __ballot_sync(mask, curr_l1_block < num_l1_blocks);
-    }
-    size_t current_val = 0;
+    size_t const num_l1_blocks = d_num_l1_blocks_[array_index];
     size_t has_i_before = 0;
-    while (curr_l1_block < num_l1_blocks) {
-      if constexpr (Value == 0) {
-        current_val = curr_l1_block * RSConfig::L1_BIT_SIZE -
-                      d_l1_indices_[l1_offset + curr_l1_block];
-      } else {
-        current_val = d_l1_indices_[l1_offset + curr_l1_block];
+
+    if (num_l1_blocks > 1) {
+      // Starting from 1 since 0-th entry always 0.
+      size_t const start_l1_block =
+          (result + RSConfig::L1_BIT_SIZE - 1) / RSConfig::L1_BIT_SIZE;
+      size_t const end_l1_block =
+          min(num_l1_blocks, ((next_sample_pos + RSConfig::L1_BIT_SIZE - 1) /
+                              RSConfig::L1_BIT_SIZE) +
+                                 1);
+
+      uint32_t const l1_blocks_per_thread =
+          ((end_l1_block - start_l1_block) + NumThreads - 1) / NumThreads;
+
+      size_t const local_start_l1_block =
+          start_l1_block + local_t_id * l1_blocks_per_thread;
+      size_t const local_end_l1_block =
+          min(local_start_l1_block + l1_blocks_per_thread, end_l1_block);
+
+      if (local_start_l1_block < local_end_l1_block) {
+        if constexpr (Value == 0) {
+          has_i_before =
+              thrust::lower_bound(
+                  thrust::seq, d_l1_indices_ + l1_offset + local_start_l1_block,
+                  d_l1_indices_ + l1_offset + local_end_l1_block, i,
+                  [&](auto const& elem, auto const& val) {
+                    auto const num_bits =
+                        reinterpret_cast<uintptr_t>(&elem - d_l1_indices_ -
+                                                    l1_offset) *
+                        RSConfig::L1_BIT_SIZE;
+                    return (num_bits - elem) < val;
+                  }) -
+              (d_l1_indices_ + l1_offset);
+        } else {
+          has_i_before =
+              thrust::lower_bound(
+                  thrust::seq, d_l1_indices_ + l1_offset + local_start_l1_block,
+                  d_l1_indices_ + l1_offset + local_end_l1_block, i) -
+              (d_l1_indices_ + l1_offset);
+        }
+        if (has_i_before == local_end_l1_block) {
+          has_i_before = 0;
+        }
       }
-      has_i_before = current_val >= i ? curr_l1_block : 0;
+
       if constexpr (NumThreads > 1) {
-        shareVar<size_t>(current_val >= i, has_i_before, active_threads);
+        shareVar<size_t>(has_i_before != 0, has_i_before, mask);
       }
-      if (has_i_before != 0) {
-        break;
-      }
-      curr_l1_block += NumThreads;
-      if constexpr (NumThreads > 1) {
-        active_threads =
-            __ballot_sync(active_threads, curr_l1_block < num_l1_blocks);
-      }
-    }
-    if constexpr (NumThreads > 1) {
-      shareVar<size_t>(current_val >= i, has_i_before, mask);
     }
     if (has_i_before != 0) {
-      curr_l1_block = has_i_before - 1;
+      size_t const curr_l1_block = has_i_before - 1;
       result = curr_l1_block * RSConfig::L1_BIT_SIZE;
       if constexpr (Value == 0) {
         i -= curr_l1_block * RSConfig::L1_BIT_SIZE -
@@ -261,16 +312,17 @@ class RankSelect {
       }
     }
     RSConfig::L2_TYPE const l1_block_length =
-        has_i_before == 0 ? num_last_l2_blocks : RSConfig::NUM_L2_PER_L1;
+        has_i_before == 0 ? d_num_last_l2_blocks_[array_index]
+                          : RSConfig::NUM_L2_PER_L1;
     size_t const l1_block_start =
         (result / RSConfig::L1_BIT_SIZE) * RSConfig::NUM_L2_PER_L1;
-    RSConfig::L2_TYPE const blocks_per_thread =
+    RSConfig::L2_TYPE const l2_blocks_per_thread =
         (l1_block_length + NumThreads - 1) / NumThreads;
 
     size_t const start_l2_block =
-        l1_block_start + local_t_id * blocks_per_thread;
+        l1_block_start + local_t_id * l2_blocks_per_thread;
     size_t const end_l2_block = min(l1_block_start + l1_block_length,
-                                    start_l2_block + blocks_per_thread);
+                                    start_l2_block + l2_blocks_per_thread);
 
     has_i_before = 0;
     if (start_l2_block < end_l2_block) {
@@ -561,8 +613,8 @@ class RankSelect {
   }
 
   /*!
-   * \brief Get the position of the n-th 0 or 1 bit in a word, starting from the
-   * least significant bit.
+   * \brief Get the position of the n-th 0 or 1 bit in a word, starting from
+   * the least significant bit.
    * \tparam Value 0 for zeros, 1 for ones.
    * \param n Rank of the bit. Starts from 1.
    * \param word Word the bit is in.

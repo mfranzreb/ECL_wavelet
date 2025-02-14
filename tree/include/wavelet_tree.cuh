@@ -1146,6 +1146,7 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   return std::span<size_t>(results, num_queries);
 }
 
+// TODO: when documenting, emphasize the power of sorting queries
 template <typename T>
 template <int ThreadsPerQuery>
 __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
@@ -1197,7 +1198,6 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
   size_t* d_results;
   gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(size_t)));
 
-  // TODO: Maybe convert to codes
   //  Convert query symbols to minimal alphabet
   if (not is_min_alphabet_) {
 #pragma omp parallel for

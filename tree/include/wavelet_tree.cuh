@@ -130,7 +130,8 @@ class WaveletTree {
    * \return Vector of selected indices.
    */
   template <int ThreadsPerQuery = WS>
-  __host__ std::vector<size_t> select(std::vector<RankSelectQuery<T>>& queries);
+  __host__ std::span<size_t> select(RankSelectQuery<T>* queries,
+                                    size_t const num_queries);
 
   /*!
    * \brief Encodes a symbol from the alphabet. Only symbols that have a code
@@ -281,6 +282,9 @@ class WaveletTree {
   static size_t access_mem_pool_size_;
   size_t* rank_pinned_mem_pool_;
   static size_t rank_mem_pool_size_;
+  size_t* select_pinned_mem_pool_;
+  static size_t select_mem_pool_size_;
+
   T num_nodes_until_last_level_;
   size_t* d_ranks_;
   T* d_num_nodes_at_level_ =
@@ -382,6 +386,9 @@ size_t WaveletTree<T>::access_mem_pool_size_ = 10'000'000;
 
 template <typename T>
 size_t WaveletTree<T>::rank_mem_pool_size_ = 10'000'000;
+
+template <typename T>
+size_t WaveletTree<T>::select_mem_pool_size_ = 10'000'000;
 
 template <typename T>
 __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
@@ -588,6 +595,10 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   gpuErrchk(cudaHostAlloc(&rank_pinned_mem_pool_,
                           rank_mem_pool_size_ * sizeof(size_t),
                           cudaHostAllocPortable));
+
+  gpuErrchk(cudaHostAlloc(&select_pinned_mem_pool_,
+                          select_mem_pool_size_ * sizeof(size_t),
+                          cudaHostAllocPortable));
 }
 
 template <typename T>
@@ -596,15 +607,18 @@ __host__ WaveletTree<T>::WaveletTree(WaveletTree const& other)
       rank_select_(other.rank_select_),
       alphabet_size_(other.alphabet_size_),
       alphabet_start_bit_(other.alphabet_start_bit_),
-      num_levels_(other.num_levels_),
       d_codes_(other.d_codes_),
       d_counts_(other.d_counts_),
-      d_num_nodes_at_level_(other.d_num_nodes_at_level_),
-      d_ranks_(other.d_ranks_),
+      num_levels_(other.num_levels_),
       is_min_alphabet_(other.is_min_alphabet_),
       codes_start_(other.codes_start_),
       access_pinned_mem_pool_(other.access_pinned_mem_pool_),
       rank_pinned_mem_pool_(other.rank_pinned_mem_pool_),
+      d_num_nodes_at_level_(other.d_num_nodes_at_level_),
+      select_pinned_mem_pool_(other.select_pinned_mem_pool_),
+      num_nodes_until_last_level_(other.num_nodes_until_last_level_),
+      d_ranks_(other.d_ranks_),
+      num_ranks_(other.num_ranks_),
       is_copy_(true) {}
 
 template <typename T>
@@ -614,6 +628,7 @@ WaveletTree<T>::~WaveletTree() {
     gpuErrchk(cudaFree(d_counts_));
     gpuErrchk(cudaFreeHost(access_pinned_mem_pool_));
     gpuErrchk(cudaFreeHost(rank_pinned_mem_pool_));
+    gpuErrchk(cudaFreeHost(select_pinned_mem_pool_));
     if (d_num_nodes_at_level_ != nullptr) {
       gpuErrchk(cudaFree(d_num_nodes_at_level_));
     }
@@ -693,12 +708,13 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   gpuErrchk(cudaPointerGetAttributes(&attr, indices));
   bool const is_pinned_mem = attr.type == cudaMemoryTypeHost;
 
-  std::thread cpu_mem_thread([&]() {
-    if (not is_pinned_mem) {
+  std::thread cpu_mem_thread;
+  if (not is_pinned_mem) {
+    cpu_mem_thread = std::thread([&]() {
       gpuErrchk(cudaHostRegister(indices, num_indices * sizeof(size_t),
                                  cudaHostRegisterPortable));
-    }
-  });
+    });
+  }
 
   // should rarely happen
   if (num_indices > access_mem_pool_size_) {
@@ -849,7 +865,9 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
 
   // Allocations must be done before setting parameters
   gpu_alloc_thread.join();
-  cpu_mem_thread.join();
+  if (not is_pinned_mem) {
+    cpu_mem_thread.join();
+  }
   for (uint16_t i = 0; i < num_chunks; ++i) {
     auto const current_chunk_size =
         i == num_chunks - 1 ? last_chunk_size : chunk_size;
@@ -918,13 +936,14 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   gpuErrchk(cudaPointerGetAttributes(&attr, queries));
   bool const is_pinned_mem = attr.type == cudaMemoryTypeHost;
 
-  std::thread cpu_mem_thread([&]() {
-    if (not is_pinned_mem) {
+  std::thread cpu_mem_thread;
+  if (not is_pinned_mem) {
+    cpu_mem_thread = std::thread([&]() {
       gpuErrchk(cudaHostRegister(queries,
                                  num_queries * sizeof(RankSelectQuery<T>),
                                  cudaHostRegisterPortable));
-    }
-  });
+    });
+  }
 
   // should rarely happen
   if (num_queries > rank_mem_pool_size_) {
@@ -1128,7 +1147,9 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
 
   // Allocations must be done before setting parameters
   gpu_alloc_thread.join();
-  cpu_mem_thread.join();
+  if (not is_pinned_mem) {
+    cpu_mem_thread.join();
+  }
   for (uint16_t i = 0; i < num_chunks; ++i) {
     auto const current_chunk_size =
         i == num_chunks - 1 ? last_chunk_size : chunk_size;
@@ -1182,10 +1203,51 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
 // TODO: when documenting, emphasize the power of sorting queries
 template <typename T>
 template <int ThreadsPerQuery>
-__host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
-    std::vector<RankSelectQuery<T>>& queries) {
-  assert(std::all_of(queries.begin(), queries.end(),
+__host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
+    RankSelectQuery<T>* queries, size_t const num_queries) {
+  assert(std::all_of(queries, queries + num_queries,
                      [](const RankSelectQuery<T>& s) { return s.index_ > 0; }));
+  cudaPointerAttributes attr;
+  gpuErrchk(cudaPointerGetAttributes(&attr, queries));
+  bool const is_pinned_mem = attr.type == cudaMemoryTypeHost;
+
+  std::thread cpu_mem_thread;
+  if (not is_pinned_mem) {
+    cpu_mem_thread = std::thread([&]() {
+      gpuErrchk(cudaHostRegister(queries,
+                                 num_queries * sizeof(RankSelectQuery<T>),
+                                 cudaHostRegisterPortable));
+    });
+  }
+
+  // should rarely happen
+  if (num_queries > select_mem_pool_size_) {
+    gpuErrchk(cudaFreeHost(select_pinned_mem_pool_));
+    select_mem_pool_size_ = num_queries;
+    gpuErrchk(cudaHostAlloc(&select_pinned_mem_pool_,
+                            select_mem_pool_size_ * sizeof(size_t),
+                            cudaHostAllocPortable));
+  }
+
+  // TODO: find good heuristic
+  //  Divide indices into chunks
+  uint32_t const num_chunks = num_queries < 10 ? 1 : 10;
+  uint8_t const num_buffers = std::min(num_chunks, 2U);
+  size_t const chunk_size = num_queries / num_chunks;
+  size_t const last_chunk_size = chunk_size + num_queries % num_chunks;
+
+  RankSelectQuery<T>* d_queries;
+  size_t* d_results;
+
+  std::thread gpu_alloc_thread([&]() {
+    gpuErrchk(cudaMalloc(&d_queries, last_chunk_size * num_buffers *
+                                         sizeof(RankSelectQuery<T>)));
+
+    gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(size_t)));
+  });
+
+  size_t* results = select_pinned_mem_pool_;
+
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
                                   selectKernel<T, ThreadsPerQuery, true>));
@@ -1193,8 +1255,7 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
 
   maxThreadsPerBlock = findLargestDivisor(kMaxTPB, maxThreadsPerBlock);
-  // launch kernel with 1 warp per index
-  size_t const num_queries = queries.size();
+
   auto prop = getDeviceProperties();
 
   gpuErrchk(cudaFuncSetAttribute(
@@ -1223,13 +1284,14 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
   }
 
   auto [num_blocks, threads_per_block] = getLaunchConfig(
-      (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount + WS - 1) /
-          WS,
+      std::min((chunk_size * ThreadsPerQuery + WS - 1) / WS,
+               static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
+                                    prop.multiProcessorCount) /
+                                   WS)),
       min_block_size, maxThreadsPerBlock);
 
-  // allocate space for results
-  size_t* d_results;
-  gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(size_t)));
+  uint32_t const num_groups =
+      (num_blocks * threads_per_block) / ThreadsPerQuery;
 
   //  Convert query symbols to minimal alphabet
   if (not is_min_alphabet_) {
@@ -1244,38 +1306,98 @@ __host__ [[nodiscard]] std::vector<size_t> WaveletTree<T>::select(
     }
   }
 
-  // Copy queries to device
-  RankSelectQuery<T>* d_queries;
-  gpuErrchk(cudaMalloc(&d_queries, num_queries * sizeof(RankSelectQuery<T>)));
-  gpuErrchk(cudaMemcpy(d_queries, queries.data(),
-                       num_queries * sizeof(RankSelectQuery<T>),
-                       cudaMemcpyHostToDevice));
-
-  if (ranks_shmem) {
-    selectKernel<T, ThreadsPerQuery, true>
-        <<<num_blocks, threads_per_block, ranks_size>>>(
-            *this, d_queries, num_queries, d_results,
-            num_blocks * threads_per_block / ThreadsPerQuery, alphabet_size_,
-            num_levels_, codes_start_, isPowTwo<size_t>(alphabet_size_),
-            num_ranks_, num_nodes_until_last_level_);
+  GraphContents graph_contents;
+  if (queries_graph_cache.find(num_chunks) == queries_graph_cache.end()) {
+    graph_contents = createQueriesGraph(num_chunks, num_buffers);
+    queries_graph_cache[num_chunks] = graph_contents;
   } else {
-    selectKernel<T, ThreadsPerQuery, false><<<num_blocks, threads_per_block>>>(
-        *this, d_queries, num_queries, d_results,
-        num_blocks * threads_per_block / ThreadsPerQuery, alphabet_size_,
-        num_levels_, codes_start_, isPowTwo<size_t>(alphabet_size_), num_ranks_,
-        num_nodes_until_last_level_);
+    graph_contents = queries_graph_cache[num_chunks];
   }
+  bool is_pow_two = isPowTwo(alphabet_size_);
+  // Change parameters of graph
+  void* kernel_params_base[11] = {this,
+                                  nullptr,
+                                  0,
+                                  nullptr,
+                                  (void*)&num_groups,
+                                  &alphabet_size_,
+                                  &num_levels_,
+                                  &codes_start_,
+                                  &is_pow_two,
+                                  &num_ranks_,
+                                  &num_nodes_until_last_level_};
+
+  auto kernel_node_params_base =
+      cudaKernelNodeParams{.func = nullptr,
+                           .gridDim = dim3(num_blocks, 1, 1),
+                           .blockDim = dim3(threads_per_block, 1, 1),
+                           .sharedMemBytes = 0,
+                           .kernelParams = nullptr,
+                           .extra = nullptr};
+  if (ranks_shmem) {
+    kernel_node_params_base.func =
+        (void*)(&selectKernel<T, ThreadsPerQuery, true>);
+    kernel_node_params_base.sharedMemBytes = ranks_size;
+  } else {
+    kernel_node_params_base.func =
+        (void*)(&selectKernel<T, ThreadsPerQuery, false>);
+  }
+
+  gpu_alloc_thread.join();
+  if (not is_pinned_mem) {
+    cpu_mem_thread.join();
+  }
+  for (uint16_t i = 0; i < num_chunks; ++i) {
+    auto const current_chunk_size =
+        i == num_chunks - 1 ? last_chunk_size : chunk_size;
+    RankSelectQuery<T>* current_d_queries =
+        d_queries + last_chunk_size * (i % num_buffers);
+
+    gpuErrchk(cudaGraphExecMemcpyNodeSetParams1D(
+        graph_contents.graph_exec, graph_contents.copy_indices_nodes[i],
+        current_d_queries, queries + i * chunk_size,
+        current_chunk_size * sizeof(RankSelectQuery<T>),
+        cudaMemcpyHostToDevice));
+
+    auto kernel_node_params = kernel_node_params_base;
+    size_t* current_d_results = d_results + i * chunk_size;
+
+    void* kernel_params[11] = {kernel_params_base[0],
+                               &current_d_queries,
+                               current_chunk_size == last_chunk_size
+                                   ? (size_t*)&last_chunk_size
+                                   : (size_t*)&chunk_size,
+                               &current_d_results,
+                               kernel_params_base[4],
+                               kernel_params_base[5],
+                               kernel_params_base[6],
+                               kernel_params_base[7],
+                               kernel_params_base[8],
+                               kernel_params_base[9],
+                               kernel_params_base[10]};
+
+    kernel_node_params.kernelParams = kernel_params;
+
+    gpuErrchk(cudaGraphExecKernelNodeSetParams(graph_contents.graph_exec,
+                                               graph_contents.kernel_nodes[i],
+                                               &kernel_node_params));
+
+    gpuErrchk(cudaGraphExecMemcpyNodeSetParams1D(
+        graph_contents.graph_exec, graph_contents.copy_results_nodes[i],
+        results + i * chunk_size, current_d_results,
+        current_chunk_size * sizeof(size_t), cudaMemcpyDeviceToHost));
+  }
+  gpuErrchk(cudaGraphLaunch(graph_contents.graph_exec, 0));
   kernelCheck();
 
-  // copy results back to host
-  std::vector<size_t> results(num_queries);
-  gpuErrchk(cudaMemcpy(results.data(), d_results, num_queries * sizeof(size_t),
-                       cudaMemcpyDeviceToHost));
   gpuErrchk(cudaFree(d_queries));
   gpuErrchk(cudaFree(d_results));
+  if (not is_pinned_mem) {
+    gpuErrchk(cudaHostUnregister(queries));
+  }
 
-  return results;
-}
+  return std::span<size_t>(results, num_queries);
+}  // namespace ecl
 
 template <typename T>
 __device__ WaveletTree<T>::Code WaveletTree<T>::encode(T const c) {
@@ -1940,7 +2062,6 @@ __device__ T getPrevCharStart(T const char_start, bool const is_rightmost_child,
   }
 }
 
-// TODO: add counts to shmem
 template <typename T, int ThreadsPerQuery, bool ShmemRanks>
 __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
     WaveletTree<T> tree, RankSelectQuery<T>* const queries,

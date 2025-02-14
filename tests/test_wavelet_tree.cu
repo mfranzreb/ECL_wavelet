@@ -130,7 +130,8 @@ __host__ void compareSelectResults(
     WaveletTree<T>& wt, std::vector<RankSelectQuery<T>> const& queries,
     std::vector<size_t> const& results_should) {
   auto queries_copy = queries;
-  auto const results = wt.template select<NumThreads>(queries_copy);
+  auto const results =
+      wt.template select<NumThreads>(queries_copy.data(), queries_copy.size());
   for (size_t i = 0; i < queries.size(); ++i) {
     EXPECT_EQ(results_should[i], results[i]);
   }
@@ -773,7 +774,7 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
   // Check that if there is no n-th occurrence of a symbol, the result is
   // the size of the data
   queries = std::vector<RankSelectQuery<TypeParam>>{{11, 0}};
-  auto results = wt.select(queries);
+  auto results = wt.select(queries.data(), queries.size());
   EXPECT_EQ(data.size(), results[0]);
 }
 

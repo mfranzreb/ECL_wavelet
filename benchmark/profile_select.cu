@@ -19,23 +19,23 @@ void profileSelect(size_t const data_size, size_t const alphabet_size,
   ecl::WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), 0);
 
   auto queries_copy = queries;
-  auto results = wt.template select<1>(queries_copy);
+  auto results = wt.template select<1>(queries_copy.data(), num_queries);
   queries_copy = queries;
   if (use_profiler_api) {
     cudaProfilerStart();
-    results = wt.template select<1>(queries_copy);
+    results = wt.template select<1>(queries_copy.data(), num_queries);
     cudaProfilerStop();
     queries_copy = queries;
   }
-  results = wt.template select<2>(queries_copy);
+  results = wt.template select<2>(queries_copy.data(), num_queries);
   queries_copy = queries;
-  results = wt.template select<4>(queries_copy);
+  results = wt.template select<4>(queries_copy.data(), num_queries);
   queries_copy = queries;
-  results = wt.template select<8>(queries_copy);
+  results = wt.template select<8>(queries_copy.data(), num_queries);
   queries_copy = queries;
-  results = wt.template select<16>(queries_copy);
+  results = wt.template select<16>(queries_copy.data(), num_queries);
   queries_copy = queries;
-  results = wt.template select<32>(queries_copy);
+  results = wt.template select<32>(queries_copy.data(), num_queries);
 }
 
 int main(int argc, char** argv) {

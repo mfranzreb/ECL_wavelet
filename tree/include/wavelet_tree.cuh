@@ -348,13 +348,15 @@ __global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
  * \param num_queries Number of queries.
  * \param ranks Array to store the ranks.
  */
-template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets>
+template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets,
+          bool ShmemRanks>
 __global__ void rankKernel(WaveletTree<T> tree,
                            RankSelectQuery<T>* const queries,
                            size_t const num_queries, size_t* const ranks,
                            uint32_t const num_groups,
                            size_t const alphabet_size, uint8_t const num_levels,
-                           size_t const counter_start);
+                           size_t const counter_start, T const num_ranks,
+                           bool const is_pow_two);
 
 /*!
  * \brief Kernel for computing select queries on the wavelet tree.
@@ -964,7 +966,7 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
 
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
-                                  rankKernel<T, true, NumThreads, true>));
+                                  rankKernel<T, true, NumThreads, true, true>));
   uint32_t maxThreadsPerBlock =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
 
@@ -974,13 +976,23 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
 
   size_t const offsets_size = sizeof(size_t) * num_levels_;
 
+  size_t const ranks_size = sizeof(size_t) * num_ranks_;
+
   struct cudaDeviceProp prop = getDeviceProperties();
   gpuErrchk(cudaFuncSetAttribute(
-      rankKernel<T, true, NumThreads, true>,
+      rankKernel<T, true, NumThreads, true, true>,
       cudaFuncAttributeMaxDynamicSharedMemorySize,
       prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
   gpuErrchk(cudaFuncSetAttribute(
-      rankKernel<T, false, NumThreads, true>,
+      rankKernel<T, false, NumThreads, true, true>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
+  gpuErrchk(cudaFuncSetAttribute(
+      rankKernel<T, true, NumThreads, true, false>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
+  gpuErrchk(cudaFuncSetAttribute(
+      rankKernel<T, false, NumThreads, true, false>,
       cudaFuncAttributeMaxDynamicSharedMemorySize,
       prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
 
@@ -994,6 +1006,21 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   auto min_block_size = kMinTPB;
   if (offsets_shmem) {
     shmem_per_block += offsets_size;
+    for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
+         block_size /= 2) {
+      auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
+      if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
+        min_block_size = 2 * block_size;
+        break;
+      }
+    }
+  }
+
+  bool const ranks_shmem =
+      (ranks_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM;
+
+  if (ranks_shmem) {
+    shmem_per_block += ranks_size;
     for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
          block_size /= 2) {
       auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
@@ -1065,10 +1092,18 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
     graph_contents = queries_graph_cache[num_chunks];
   }
 
+  bool is_pow_two = isPowTwo(alphabet_size_);
   // Change parameters of graph
-  void* kernel_params_base[8] = {
-      this,         nullptr, 0, nullptr, (void*)&num_groups, &alphabet_size_,
-      &num_levels_, 0};
+  void* kernel_params_base[10] = {this,
+                                  nullptr,
+                                  0,
+                                  nullptr,
+                                  (void*)&num_groups,
+                                  &alphabet_size_,
+                                  &num_levels_,
+                                  0,
+                                  &num_ranks_,
+                                  &is_pow_two};
 
   auto kernel_node_params_base = cudaKernelNodeParams{
       .func = nullptr,
@@ -1080,16 +1115,26 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
       .extra = nullptr};
 
   if (offsets_shmem) {
-    if (counts_shmem) {
-      kernel_node_params_base.func =
-          (void*)(&rankKernel<T, true, NumThreads, true>);
+    if (ranks_shmem) {
+      if (counts_shmem) {
+        kernel_node_params_base.func =
+            (void*)(&rankKernel<T, true, NumThreads, true, true>);
+      } else {
+        kernel_node_params_base.func =
+            (void*)(&rankKernel<T, false, NumThreads, true, true>);
+      }
     } else {
-      kernel_node_params_base.func =
-          (void*)(&rankKernel<T, false, NumThreads, true>);
+      if (counts_shmem) {
+        kernel_node_params_base.func =
+            (void*)(&rankKernel<T, true, NumThreads, true, false>);
+      } else {
+        kernel_node_params_base.func =
+            (void*)(&rankKernel<T, false, NumThreads, true, false>);
+      }
     }
   } else {
     kernel_node_params_base.func =
-        (void*)(&rankKernel<T, false, NumThreads, false>);
+        (void*)(&rankKernel<T, false, NumThreads, false, false>);
   }
 
   // Allocations must be done before setting parameters
@@ -1112,16 +1157,18 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
 
     size_t current_d_queries_offset = i * chunk_size;
 
-    void* kernel_params[8] = {kernel_params_base[0],
-                              &current_d_queries,
-                              current_chunk_size == last_chunk_size
-                                  ? (size_t*)&last_chunk_size
-                                  : (size_t*)&chunk_size,
-                              &current_d_results,
-                              kernel_params_base[4],
-                              kernel_params_base[5],
-                              kernel_params_base[6],
-                              &current_d_queries_offset};
+    void* kernel_params[10] = {kernel_params_base[0],
+                               &current_d_queries,
+                               current_chunk_size == last_chunk_size
+                                   ? (size_t*)&last_chunk_size
+                                   : (size_t*)&chunk_size,
+                               &current_d_results,
+                               kernel_params_base[4],
+                               kernel_params_base[5],
+                               kernel_params_base[6],
+                               &current_d_queries_offset,
+                               kernel_params_base[8],
+                               kernel_params_base[9]};
 
     kernel_node_params.kernelParams = kernel_params;
 
@@ -1815,12 +1862,13 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
   }
 }
 
-template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets>
+template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets,
+          bool ShmemRanks>
 __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
     WaveletTree<T> tree, RankSelectQuery<T>* const queries,
     size_t const num_queries, size_t* const ranks, uint32_t const num_groups,
     size_t const alphabet_size, uint8_t const num_levels,
-    size_t const counter_start) {
+    size_t const counter_start, T const num_ranks, bool const is_pow_two) {
   assert(blockDim.x % WS == 0);
   extern __shared__ size_t shmem[];
 
@@ -1828,10 +1876,15 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
     for (uint32_t i = threadIdx.x; i < num_levels; i += blockDim.x) {
       shmem[i] = tree.rank_select_.bit_array_.getOffset(i);
     }
+    if constexpr (ShmemRanks) {
+      for (uint32_t i = threadIdx.x; i < num_ranks; i += blockDim.x) {
+        shmem[num_levels + i] = tree.getPrecomputedRank(i);
+      }
+    }
 
     if constexpr (ShmemCounts) {
       for (size_t i = threadIdx.x; i < alphabet_size; i += blockDim.x) {
-        shmem[num_levels + i] = tree.getCounts(i);
+        shmem[num_levels + num_ranks + i] = tree.getCounts(i);
       }
     }
     __syncthreads();
@@ -1861,13 +1914,14 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
     T char_end = alphabet_size - 1;
     T char_split;
     size_t start, pos;
+    T ranks_start = 0;
     for (uint8_t l = 0; l < num_levels; ++l) {
       if (char_end - char_start == 0) {
         break;
       }
       size_t char_counts;
       if constexpr (ShmemCounts) {
-        char_counts = shmem[num_levels + char_start];
+        char_counts = shmem[num_levels + num_ranks + char_start];
       } else {
         char_counts = tree.getCounts(char_start);
       }
@@ -1877,9 +1931,19 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
       } else {
         offset = tree.rank_select_.bit_array_.getOffset(l);
       }
+      if (char_start == 0) {
+        start = 0;
+      } else {
+        auto const node_pos =
+            is_pow_two ? tree.getNodePosAtLevel<true>(char_start, l)
+                       : tree.getNodePosAtLevel<false>(char_start, l);
+        if constexpr (ShmemRanks) {
+          start = shmem[num_levels + ranks_start + node_pos];
+        } else {
+          start = tree.getPrecomputedRank(ranks_start + node_pos);
+        }
+      }
 #pragma nv_diag_suppress 174
-      start = tree.rank_select_.template rank<ThreadsPerQuery, false, 0>(
-          l, char_counts, offset);
       pos = tree.rank_select_.template rank<ThreadsPerQuery, false, 0>(
           l, char_counts + query.index_, offset);
 #pragma nv_diag_default 174
@@ -1891,6 +1955,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
         query.index_ -= pos - start;
         char_start = char_split;
       }
+      ranks_start += is_pow_two ? powTwo<T>(l) - 1 : tree.getNumNodesAtLevel(l);
     }
     if (local_t_id == 0) {
       ranks[i] = query.index_;

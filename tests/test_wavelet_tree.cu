@@ -200,6 +200,8 @@ TYPED_TEST(WaveletTreeTestFixture, createMinimalCodes) {
   EXPECT_EQ(codes[74 - 64].len_, 3);
 }
 
+// TODO: weird bug when alphabet_size is 55494 when writing select samples.
+// Memcheck invalid write.
 TYPED_TEST(WaveletTreeTestFixture, getNodePosRandom) {
   if (sizeof(TypeParam) >= 4) {
     return;

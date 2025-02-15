@@ -1,7 +1,4 @@
 #include <benchmark/benchmark.h>
-#include <nvbio/basic/packed_vector.h>
-#include <nvbio/strings/alphabet.h>
-#include <nvbio/strings/wavelet_tree.h>
 
 #include <random>
 #include <utils.cuh>

@@ -832,9 +832,7 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   }
 
   bool const counts_shmem =
-      (ideal_configs.access_counts_shmem_limit > alphabet_size_ or
-       ideal_configs.access_counts_shmem_limit == 0) and
-      ((counts_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM);
+      (counts_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM;
 
   if (counts_shmem) {
     shmem_per_block += counts_size;

@@ -25,15 +25,8 @@ def apply_access_tunes(tune_files):
             square, slope, intercept = np.polyfit(df["num_warps"], df["time"], 2)
             # Find minimum of polynomial
             best_num_warps = -slope / (2 * square)
-        elif "alphabet" in tune_file:
-            # Find "alphabet_size" from which "time" becomes larger than "time_no_shmem" for all alphabet sizes larger than it
-            for i, row in df.iterrows():
-                if row["time"] > row["time_no_shmem"]:
-                    alphabet_size = row["alphabet_size"]
-                else:
-                    alphabet_size = 2 * df["alphabet_size"].max()
 
-    tune_string = f".ideal_tot_threads_accessKernel = {int(best_num_warps*32)}, .accessKernel_linrel = {{{slope}, {intercept}}}, .access_counts_shmem_limit = {alphabet_size}"
+    tune_string = f".ideal_tot_threads_accessKernel = {int(best_num_warps*32)}, .accessKernel_linrel = {{{slope}, {intercept}}}"
     return tune_string
 
 

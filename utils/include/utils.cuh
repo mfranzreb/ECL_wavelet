@@ -232,7 +232,6 @@ struct LogRel {
 };
 
 struct IdealConfigs {
-  size_t ideal_tot_threads_accessKernel = 0;
   LogRel accessKernel_logrel = {0.0f, 0.0f};
 
   uint32_t ideal_TPB_calculateL2EntriesKernel = 0;

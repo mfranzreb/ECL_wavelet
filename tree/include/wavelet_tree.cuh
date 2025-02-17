@@ -851,22 +851,12 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
     }
   }
 
-  int num_blocks, threads_per_block;
-  if (ideal_configs.ideal_tot_threads_accessKernel != 0) {
-    size_t const num_warps =
-        std::min(ideal_configs.ideal_tot_threads_accessKernel / WS,
-                 static_cast<size_t>((chunk_size * NumThreads) / WS));
-    std::tie(num_blocks, threads_per_block) =
-        getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockAccess);
-  } else {
-    // Make the minimum block size a multiple of WS
-    std::tie(num_blocks, threads_per_block) = getLaunchConfig(
-        std::min((chunk_size * NumThreads + WS - 1) / WS,
-                 static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
-                                      prop.multiProcessorCount) /
-                                     WS)),
-        min_block_size, maxThreadsPerBlockAccess);
-  }
+  auto [num_blocks, threads_per_block] = getLaunchConfig(
+      std::min((chunk_size * NumThreads + WS - 1) / WS,
+               static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
+                                    prop.multiProcessorCount) /
+                                   WS)),
+      min_block_size, maxThreadsPerBlockAccess);
 
   uint32_t const num_groups = (num_blocks * threads_per_block) / NumThreads;
 

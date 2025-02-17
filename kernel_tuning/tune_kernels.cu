@@ -35,7 +35,7 @@ void tune_accessKernel(std::string out_dir, uint32_t const GPU_index) {
   std::vector<uint8_t> num_chunks_vec({2, 4, 6, 8, 10, 12, 14, 16, 18, 20});
   std::vector<uint32_t> num_queries_vec({100'000, 500'000, 1'000'000, 5'000'000,
                                          10'000'000, 50'000'000, 100'000'000});
-  size_t const alphabet_size = 4;
+  size_t const alphabet_size = 16;
   auto [blocks, threads] = getLaunchConfig(num_warps, kMinTPB, max_size);
 
   std::vector<uint8_t> alphabet(alphabet_size);
@@ -87,56 +87,6 @@ void tune_accessKernel(std::string out_dir, uint32_t const GPU_index) {
     }
     gpuErrchk(cudaHostUnregister(queries.data()));
   }
-  // Tune TPB and total warps
-  size_t const num_queries =
-      prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount * 100;
-  out_file = out_dir + "/access_time_vs_warps.csv";
-  // Write column names to CSV
-  file.open(out_file);
-  file << "num_warps,time,GPU_name" << std::endl;
-  file.close();
-  std::vector<uint32_t> num_warps_vec;
-  // From 20% occupancy to 500%
-  size_t const warps_at_20_occ = num_warps / 5;
-  for (size_t i = warps_at_20_occ; i <= num_warps * 5; i += warps_at_20_occ) {
-    num_warps_vec.push_back(i);
-  }
-  auto queries = generateRandomAccessQueries(data_size, num_queries);
-  // register queries
-  gpuErrchk(cudaHostRegister(queries.data(), num_queries * sizeof(size_t),
-                             cudaHostRegisterDefault));
-
-  auto const num_levels = ceilLog2Host(alphabet_size);
-  for (auto num_warps : num_warps_vec) {
-    auto const [blocks, threads] =
-        getLaunchConfig(num_warps, max_size, max_size);
-    if (blocks == -1 or threads == -1) {
-      continue;
-    }
-    ideal_configs.ideal_tot_threads_accessKernel = blocks * threads;
-    // Warmup
-    for (uint8_t i = 0; i < 2; ++i) {
-      auto results = wt.template access<1>(queries.data(), num_queries);
-    }
-    std::vector<size_t> times(num_iters);
-    for (uint8_t i = 0; i < num_iters; ++i) {
-      start_time = std::chrono::high_resolution_clock::now();
-      auto results = wt.template access<1>(queries.data(), num_queries);
-      end_time = std::chrono::high_resolution_clock::now();
-      times[i] = std::chrono::duration_cast<std::chrono::microseconds>(
-                     end_time - start_time)
-                     .count();
-    }
-    // Write median time to CSV
-    std::nth_element(times.begin(), times.begin() + times.size() / 2,
-                     times.end());
-    std::ofstream file(out_file, std::ios_base::app);
-    file << num_warps << "," << times[times.size() / 2] << "," << GPU_name
-         << std::endl;
-    file.close();
-  }
-  gpuErrchk(cudaHostUnregister(queries.data()));
-}
 
 }  // namespace ecl
 

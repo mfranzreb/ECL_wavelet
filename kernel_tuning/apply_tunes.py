@@ -27,10 +27,7 @@ def apply_access_tunes(tune_files):
                 np.log(trimmed_df["num_queries"]), trimmed_df["num_chunks"], 1
             )
 
-        elif "warps" in tune_file:
-            best_num_warps = df["num_warps"].iloc[df["time"].idxmin()]
-
-    tune_string = f".ideal_tot_threads_accessKernel = {int(best_num_warps*32)}, .accessKernel_logrel = {{{mult}, {intercept}}}"
+    tune_string = f".accessKernel_logrel = {{{mult}, {intercept}}}"
     return tune_string
 
 

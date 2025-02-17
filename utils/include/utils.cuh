@@ -226,9 +226,15 @@ __host__ uint8_t ceilLog2Host(T n) {
   }
 }
 
+struct LinRel {
+  float slope;
+  float intercept;
+};
+
 struct IdealConfigs {
-  uint32_t ideal_TPB_accessKernel = 0;
   size_t ideal_tot_threads_accessKernel = 0;
+  LinRel accessKernel_linrel = {0.0f, 0.0f};
+  size_t access_counts_shmem_limit = 0;
 
   uint32_t ideal_TPB_calculateL2EntriesKernel = 0;
 

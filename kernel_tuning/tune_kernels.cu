@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <bit_array.cuh>
 #include <chrono>
 #include <cstdint>
@@ -9,455 +10,238 @@
 
 namespace ecl {
 
-void tune_accessKernel(std::string out_file, uint32_t const GPU_index) {
-  using T = uint16_t;
-  // Write column names to CSV
-  std::ofstream file(out_file);
-  file << "alphabet_size,num_blocks,num_threads,duration,use_shmem,GPU_name"
-       << std::endl;
-
-  std::vector<uint32_t> block_sizes;
-
+void tune_accessKernel(std::string out_dir, uint32_t const GPU_index) {
+  uint8_t const num_iters = 100;
+  auto const prop = getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, accessKernel<T, true>));
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                  accessKernel<uint8_t, true, 1, true, true>));
   uint32_t max_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-
-  max_size = findLargestDivisor(kMaxTPB, max_size);
-
-  for (uint32_t i = kMinTPB; i <= max_size; i *= 2) {
-    block_sizes.push_back(i);
-  }
-
-  struct cudaDeviceProp prop = getDeviceProperties();
   size_t const data_size = prop.totalGlobalMem / 10;
-
-  size_t const num_queries =
-      20 * (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount / WS);
-  std::vector<size_t> queries(num_queries);
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> dis(0, data_size - 1);
-  std::generate(queries.begin(), queries.end(), [&]() { return dis(gen); });
-
-  size_t* d_queries;
-  gpuErrchk(cudaMalloc(&d_queries, num_queries * sizeof(size_t)));
-  gpuErrchk(cudaMemcpy(d_queries, queries.data(), num_queries * sizeof(size_t),
-                       cudaMemcpyHostToDevice));
-
-  T* d_results;
-  gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(T)));
-
-  uint8_t const alphabet_size = 4;
-  std::vector<T> alphabet(alphabet_size);
-  std::iota(alphabet.begin(), alphabet.end(), 0);
-  auto data = generateRandomData<T>(alphabet, data_size);
-  WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), GPU_index);
-  uint32_t const min_warps = static_cast<uint32_t>(
+  size_t num_warps =
       (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount + WS - 1) /
-      WS);
-  for (uint32_t num_warps = min_warps; num_warps <= num_queries;
-       num_warps *= 2) {
-    for (uint32_t block_size : block_sizes) {
-      auto const [num_blocks, num_threads] =
-          getLaunchConfig(num_warps, block_size, block_size);
+      WS;
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
 
-      if (num_blocks == -1 or num_threads == -1) {
+  auto const GPU_name = prop.name;
+
+  // Tune chunks vs queries
+  std::string out_file = out_dir + "/access_chunks_vs_queries.csv";
+  // Write column names to CSV
+  std::ofstream file(out_file);
+  file << "num_chunks,num_queries,time,GPU_name" << std::endl;
+  file.close();
+  {
+    std::vector<uint8_t> num_chunks_vec({2, 4, 6, 8, 10, 12, 14, 16, 18, 20});
+    std::vector<uint32_t> num_queries_vec({100'000, 500'000, 1'000'000,
+                                           5'000'000, 10'000'000, 50'000'000,
+                                           100'000'000});
+    size_t const alphabet_size = 4;
+    auto [blocks, threads] = getLaunchConfig(num_warps, kMinTPB, max_size);
+
+    std::vector<uint8_t> alphabet(alphabet_size);
+    std::iota(alphabet.begin(), alphabet.end(), 0);
+    auto data = generateRandomData<uint8_t>(alphabet, data_size);
+
+    WaveletTree<uint8_t> wt(data.data(), data_size, std::move(alphabet),
+                            GPU_index);
+
+    // create graphs for each number of chunks
+    for (auto chunk : num_chunks_vec) {
+      queries_graph_cache[chunk] = createQueriesGraph(chunk, 2);
+    }
+
+    std::chrono::high_resolution_clock::time_point start_time, end_time;
+    IdealConfigs& ideal_configs = getIdealConfigs(GPU_name);
+    for (uint32_t num_query : num_queries_vec) {
+      auto queries = generateRandomAccessQueries(
+          data_size, static_cast<size_t>(num_query));
+      gpuErrchk(cudaHostRegister(queries.data(), num_query * sizeof(size_t),
+                                 cudaHostRegisterDefault));
+
+      for (auto num_chunk : num_chunks_vec) {
+        // Set ideal_configs slope so that correct num_chunks is chosen
+        ideal_configs.accessKernel_linrel.slope =
+            static_cast<float>(num_chunk) / static_cast<float>(num_query);
+        // Warmup
+        for (uint8_t i = 0; i < 2; ++i) {
+          auto results = wt.template access<1>(queries.data(), num_query);
+        }
+
+        std::vector<float> times(num_iters);
+        for (uint8_t i = 0; i < num_iters; ++i) {
+          start_time = std::chrono::high_resolution_clock::now();
+          auto results = wt.template access<1>(queries.data(), num_query);
+          end_time = std::chrono::high_resolution_clock::now();
+          times[i] = std::chrono::duration_cast<std::chrono::microseconds>(
+                         end_time - start_time)
+                         .count();
+        }
+        // Write median time to CSV
+        std::nth_element(times.begin(), times.begin() + times.size() / 2,
+                         times.end());
+        std::ofstream file(out_file, std::ios_base::app);
+        file << +num_chunk << "," << num_query << "," << times[num_iters / 2]
+             << "," << GPU_name << std::endl;
+        file.close();
+      }
+      gpuErrchk(cudaHostUnregister(queries.data()));
+    }
+    // Tune TPB and total warps
+    size_t const num_queries =
+        prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount * 10;
+    out_file = out_dir + "/access_time_vs_warps.csv";
+    // Write column names to CSV
+    file.open(out_file);
+    file << "num_warps,time,GPU_name" << std::endl;
+    file.close();
+    std::vector<uint32_t> num_warps_vec;
+    // From 20% occupancy to 500%
+    size_t const warps_at_20_occ = num_warps / 5;
+    for (size_t i = warps_at_20_occ; i <= num_warps * 5; i += warps_at_20_occ) {
+      num_warps_vec.push_back(i);
+    }
+    auto queries = generateRandomAccessQueries(data_size, num_queries);
+    size_t* d_queries;
+    gpuErrchk(cudaMalloc(&d_queries, num_queries * sizeof(size_t)));
+    gpuErrchk(cudaMemcpy(d_queries, queries.data(),
+                         num_queries * sizeof(size_t), cudaMemcpyHostToDevice));
+    uint8_t* d_results;
+    gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(uint8_t)));
+
+    auto const num_levels = ceilLog2Host(alphabet_size);
+    for (auto num_warps : num_warps_vec) {
+      auto const [blocks, threads] =
+          getLaunchConfig(num_warps, max_size, max_size);
+      if (blocks == -1 or threads == -1) {
         continue;
       }
-      bool const use_shmem =
-          sizeof(size_t) * alphabet_size *
-              (prop.maxThreadsPerMultiProcessor / num_threads) <=
-          prop.sharedMemPerMultiprocessor;
-      uint8_t const num_iters = 5;
-      auto start = std::chrono::high_resolution_clock::now();
-      for (uint8_t i = 0; i < num_iters; ++i) {
-        if (use_shmem) {
-          accessKernel<T, true>
-              <<<num_blocks, num_threads, sizeof(size_t) * alphabet_size>>>(
-                  wt, d_queries, num_queries, d_results, alphabet_size);
-        } else {
-          accessKernel<T, false><<<num_blocks, num_threads>>>(
-              wt, d_queries, num_queries, d_results, alphabet_size);
-        }
+      // Warmup
+      for (uint8_t i = 0; i < 2; ++i) {
+        // ShmemRanks approximated since more than enough shmem available
+        accessKernel<uint8_t, true, 1, true, true>
+            <<<blocks, threads,
+               sizeof(size_t) * (2 * alphabet_size + num_levels)>>>(
+                wt, d_queries, num_queries, d_results, alphabet_size,
+                blocks * threads, num_levels);
         kernelCheck();
       }
-      auto end = std::chrono::high_resolution_clock::now();
-      auto duration =
-          std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-              .count();
-
-      // Write to CSV
-      std::ofstream file(out_file, std::ios_base::app);
-      file << alphabet_size << "," << num_blocks << "," << num_threads << ","
-           << duration << "," << use_shmem << "," << prop.name << std::endl;
-      file.close();
-    }
-  }
-  gpuErrchk(cudaFree(d_queries));
-  gpuErrchk(cudaFree(d_results));
-}
-
-void tune_rankKernel(std::string out_file, uint32_t const GPU_index) {
-  using T = uint16_t;
-  // Write column names to CSV
-  std::ofstream file(out_file);
-  file << "alphabet_size,num_blocks,num_threads,duration,use_shmem,GPU_name"
-       << std::endl;
-
-  std::vector<uint32_t> block_sizes;
-
-  struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, rankKernel<T, true>));
-  uint32_t max_size =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-
-  max_size = findLargestDivisor(kMaxTPB, max_size);
-
-  for (uint32_t i = kMinTPB; i <= max_size; i *= 2) {
-    block_sizes.push_back(i);
-  }
-
-  struct cudaDeviceProp prop = getDeviceProperties();
-  size_t const data_size = prop.totalGlobalMem / 10;
-
-  size_t const alphabet_size = 4;
-
-  std::vector<T> alphabet(alphabet_size);
-  std::iota(alphabet.begin(), alphabet.end(), 0);
-
-  size_t const num_queries =
-      20 * (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount / WS);
-  std::vector<RankSelectQuery<T>> queries(num_queries);
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> dis(0, data_size - 1);
-  std::uniform_int_distribution<T> dis2(0, alphabet.size() - 1);
-  std::generate(queries.begin(), queries.end(), [&]() {
-    return RankSelectQuery<T>(dis(gen), alphabet[dis2(gen)]);
-  });
-  RankSelectQuery<T>* d_queries;
-  gpuErrchk(cudaMalloc(&d_queries, num_queries * sizeof(RankSelectQuery<T>)));
-
-  gpuErrchk(cudaMemcpy(d_queries, queries.data(),
-                       num_queries * sizeof(RankSelectQuery<T>),
-                       cudaMemcpyHostToDevice));
-
-  size_t* d_results;
-  gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(size_t)));
-
-  auto data = generateRandomData<T>(alphabet, data_size);
-  WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), GPU_index);
-  uint32_t const min_warps = static_cast<uint32_t>(
-      (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount + WS - 1) /
-      WS);
-  for (uint32_t num_warps = min_warps; num_warps <= num_queries;
-       num_warps *= 2) {
-    for (uint32_t block_size : block_sizes) {
-      auto const [num_blocks, num_threads] =
-          getLaunchConfig(num_warps, block_size, block_size);
-
-      if (num_blocks == -1 or num_threads == -1) {
-        continue;
-      }
-      bool const use_shmem =
-          sizeof(size_t) * alphabet_size *
-              (prop.maxThreadsPerMultiProcessor / num_threads) <=
-          prop.sharedMemPerMultiprocessor;
-      uint8_t const num_iters = 5;
-      auto start = std::chrono::high_resolution_clock::now();
+      std::vector<float> times(num_iters);
       for (uint8_t i = 0; i < num_iters; ++i) {
-        if (use_shmem) {
-          rankKernel<T, true>
-              <<<num_blocks, num_threads, sizeof(size_t) * alphabet_size>>>(
-                  wt, d_queries, num_queries, d_results);
-        } else {
-          rankKernel<T, false><<<num_blocks, num_threads>>>(
-              wt, d_queries, num_queries, d_results);
-        }
+        gpuErrchk(cudaEventRecord(start));
+        accessKernel<uint8_t, true, 1, true, true>
+            <<<blocks, threads,
+               sizeof(size_t) * (2 * alphabet_size + num_levels)>>>(
+                wt, d_queries, num_queries, d_results, alphabet_size,
+                blocks * threads, num_levels);
+        gpuErrchk(cudaEventRecord(stop));
         kernelCheck();
+        gpuErrchk(cudaEventSynchronize(stop));
+        gpuErrchk(cudaEventElapsedTime(&times[i], start, stop));
       }
-      auto end = std::chrono::high_resolution_clock::now();
-      auto duration =
-          std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-              .count();
-
-      // Write to CSV
+      // Write median time to CSV
+      std::nth_element(times.begin(), times.begin() + times.size() / 2,
+                       times.end());
       std::ofstream file(out_file, std::ios_base::app);
-      file << alphabet_size << "," << num_blocks << "," << num_threads << ","
-           << duration << "," << use_shmem << "," << prop.name << std::endl;
+      file << num_warps << "," << times[times.size() / 2] << "," << GPU_name
+           << std::endl;
       file.close();
     }
+    gpuErrchk(cudaFree(d_queries));
+    gpuErrchk(cudaFree(d_results));
   }
-  gpuErrchk(cudaFree(d_queries));
-  gpuErrchk(cudaFree(d_results));
-}
 
-void tune_calculateL2EntriesKernel(std::string out_file,
-                                   uint32_t const GPU_index) {
-  checkWarpSize(GPU_index);
-
+  // FOr different alphabet sizes, check when shmem usage becomes detrimental
+  out_file = out_dir + "/access_alphabet_vs_counts_shmem.csv";
   // Write column names to CSV
-  std::ofstream file(out_file);
-  file << "data_size,num_threads,duration,GPU_name" << std::endl;
-
-  std::vector<uint32_t> block_sizes;
-
-  struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
-  uint32_t max_size =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-
-  max_size = findLargestDivisor(kMaxTPB, max_size);
-
-  for (uint32_t i = kMinTPB; i <= max_size; i *= 2) {
-    block_sizes.push_back(i);
+  file.open(out_file);
+  file << "alphabet_size,time,time_no_shmem,GPU_name" << std::endl;
+  file.close();
+  uint8_t const blocks_per_SM = prop.maxThreadsPerMultiProcessor / max_size;
+  // approximated upper bound
+  size_t max_alphabet_size =
+      prop.sharedMemPerMultiprocessor / (2 * sizeof(size_t) * blocks_per_SM);
+  std::vector<size_t> alphabet_sizes;
+  for (size_t i = 10; i < max_alphabet_size; i += 500) {
+    alphabet_sizes.push_back(i);
   }
+  auto [blocks, threads] = getLaunchConfig(num_warps, max_size, max_size);
+  size_t const num_queries = 500'000;
 
-  struct cudaDeviceProp prop = getDeviceProperties();
+  gpuErrchk(cudaFuncSetAttribute(
+      accessKernel<T, true, NumThreads, true, true>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
+  gpuErrchk(cudaFuncSetAttribute(
+      accessKernel<T, false, NumThreads, true, true>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
+  gpuErrchk(cudaFuncSetAttribute(
+      accessKernel<T, false, NumThreads, true, false>,
+      cudaFuncAttributeMaxDynamicSharedMemorySize,
+      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
 
-  size_t const ba_size = prop.totalGlobalMem / 10;
-  BitArray bit_array({ba_size});
-  RankSelect rs(std::move(bit_array), GPU_index);
-  size_t const num_blocks =
-      (ba_size + RSConfig::L1_BIT_SIZE - 1) / RSConfig::L1_BIT_SIZE;
-  for (uint32_t block_size : block_sizes) {
-    uint8_t const num_iters = 5;
-    uint8_t const num_last_l2_blocks =
-        (rs.bit_array_.sizeHost(0) % RSConfig::L1_BIT_SIZE +
-         RSConfig::L2_BIT_SIZE - 1) /
-        RSConfig::L2_BIT_SIZE;
-    auto start = std::chrono::high_resolution_clock::now();
-    for (uint8_t i = 0; i < num_iters; ++i) {
-      calculateL2EntriesKernel<<<num_blocks, block_size>>>(rs, 0,
-                                                           num_last_l2_blocks);
+  for (auto alphabet_size : alphabet_sizes) {
+    std::vector<uint16_t> alphabet(alphabet_size);
+    std::iota(alphabet.begin(), alphabet.end(), 0);
+    auto data = generateRandomData<uint16_t>(alphabet, data_size);
+    WaveletTree<uint16_t> wt(data.data(), data_size, std::move(alphabet),
+                             GPU_index);
+    auto queries = generateRandomAccessQueries(data_size, num_queries);
+    size_t* d_queries;
+    gpuErrchk(cudaMalloc(&d_queries, num_queries * sizeof(size_t)));
+    gpuErrchk(cudaMemcpy(d_queries, queries.data(),
+                         num_queries * sizeof(size_t), cudaMemcpyHostToDevice));
+    uint16_t* d_results;
+    gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(uint16_t)));
+    uint8_t const num_levels = ceilLog2Host(alphabet_size);
+    for (uint8_t i = 0; i < 2; ++i) {
+      accessKernel<uint16_t, true, 1, true, true>
+          <<<blocks, threads, sizeof(size_t) * 2 * alphabet_size>>>(
+              wt, d_queries, num_queries, d_results, alphabet_size,
+              blocks * threads, num_levels);
       kernelCheck();
     }
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-            .count();
-
-    // Write to CSV
+    std::vector<float> times(num_iters);
+    for (uint8_t i = 0; i < num_iters; ++i) {
+      gpuErrchk(cudaEventRecord(start));
+      accessKernel<uint16_t, true, 1, true, true, true>
+          <<<blocks, threads, sizeof(size_t) * 2 * alphabet_size>>>(
+              wt, d_queries, num_queries, d_results, alphabet_size,
+              blocks * threads, num_levels);
+      gpuErrchk(cudaEventRecord(stop));
+      kernelCheck();
+      gpuErrchk(cudaEventSynchronize(stop));
+      gpuErrchk(cudaEventElapsedTime(&times[i], start, stop));
+    }
+    std::vector<float> times_no_shmem(num_iters);
+    for (uint8_t i = 0; i < num_iters; ++i) {
+      gpuErrchk(cudaEventRecord(start));
+      accessKernel<uint16_t, false, 1, true>
+          <<<blocks, threads, sizeof(size_t) * alphabet_size>>>(
+              wt, d_queries, num_queries, d_results, alphabet_size,
+              blocks * threads, num_levels);
+      gpuErrchk(cudaEventRecord(stop));
+      kernelCheck();
+      gpuErrchk(cudaEventSynchronize(stop));
+      gpuErrchk(cudaEventElapsedTime(&times_no_shmem[i], start, stop));
+    }
+    // Write median time to CSV
+    std::nth_element(times.begin(), times.begin() + times.size() / 2,
+                     times.end());
+    std::nth_element(times_no_shmem.begin(),
+                     times_no_shmem.begin() + times_no_shmem.size() / 2,
+                     times_no_shmem.end());
     std::ofstream file(out_file, std::ios_base::app);
-    file << ba_size << "," << block_size << "," << duration << "," << prop.name
+    file << alphabet_size << "," << times[times.size() / 2] << ","
+         << times_no_shmem[times_no_shmem.size() / 2] << "," << GPU_name
          << std::endl;
-  }
-}
-
-void tune_computeGlobalHistogramKernel(std::string out_file,
-                                       uint32_t const GPU_index) {
-  using T = uint8_t;
-  // Write column names to CSV
-  std::ofstream file(out_file);
-  file << "data_size,alphabet_size,num_blocks,num_threads,duration,used_"
-          "shmem,"
-          "GPU_name"
-       << std::endl;
-  // Tuning params
-  struct cudaDeviceProp prop = getDeviceProperties();
-  std::string const GPU_name = prop.name;
-  size_t const data_size = prop.totalGlobalMem / 2;
-  T const alphabet_size = 4;
-  struct cudaFuncAttributes funcAttrib;
-  // No encoding in test, minimal alphabet
-  gpuErrchk(cudaFuncGetAttributes(
-      &funcAttrib, computeGlobalHistogramKernel<T, true, true, true>));
-  // Using biggest size possible, since it allows for a higher bound on
-  // shmem usage
-
-  uint32_t block_size =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-
-  // Make block_size a divisor of kMaxTPB
-  block_size = findLargestDivisor(kMaxTPB, block_size);
-
-  // Test also with low occupancy
-  size_t min_warps = static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
-                                              prop.multiProcessorCount +
-                                          WS - 1) /
-                                         WS) /
-                     5;
-
-  // Tuning
-  std::vector<T> alphabet(alphabet_size);
-  std::iota(alphabet.begin(), alphabet.end(), 0);
-
-  auto alphabet_copy = alphabet;
-  WaveletTree<T> wt(alphabet.data(), alphabet_size, std::move(alphabet_copy),
-                    GPU_index);
-
-  T* d_alphabet;
-  gpuErrchk(cudaMalloc(&d_alphabet, alphabet_size * sizeof(T)));
-  gpuErrchk(cudaMemcpy(d_alphabet, alphabet.data(), alphabet_size * sizeof(T),
-                       cudaMemcpyHostToDevice));
-
-  size_t* d_histogram;
-  gpuErrchk(cudaMalloc(&d_histogram, alphabet_size * sizeof(size_t)));
-
-  auto data = generateRandomData<T>(alphabet, data_size);
-
-  T* d_data;
-  gpuErrchk(cudaMalloc(&d_data, data_size * sizeof(T)));
-  gpuErrchk(cudaMemcpy(d_data, data.data(), data_size * sizeof(T),
-                       cudaMemcpyHostToDevice));
-
-  size_t const max_warps = (data_size + WS - 1) / WS;
-  for (size_t num_warps = min_warps; num_warps <= max_warps; num_warps *= 2) {
-    auto const [num_blocks, num_threads] =
-        getLaunchConfig(num_warps, block_size, block_size);
-
-    if (num_blocks == -1 or num_threads == -1) {
-      continue;
-    }
-
-    auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
-    auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
-    size_t const hist_size = sizeof(size_t) * alphabet_size;
-
-    uint16_t const blocks_per_SM = max_threads_per_SM / num_threads;
-
-    size_t const used_shmem =
-        std::min(max_shmem_per_SM / blocks_per_SM, prop.sharedMemPerBlock);
-
-    uint16_t const hists_per_block =
-        std::min(static_cast<size_t>(num_threads), used_shmem / hist_size);
-
-    uint8_t const num_iters = 5;
-    auto start = std::chrono::high_resolution_clock::now();
-    for (uint8_t i = 0; i < num_iters; ++i) {
-      gpuErrchk(cudaMemset(d_histogram, 0, alphabet_size * sizeof(size_t)));
-      if (hists_per_block > 0) {
-        computeGlobalHistogramKernel<T, true, true, true>
-            <<<num_blocks, num_threads, used_shmem>>>(
-                wt, d_data, data_size, d_histogram, d_alphabet, alphabet_size,
-                hists_per_block);
-      } else {
-        computeGlobalHistogramKernel<T, true, true, false>
-            <<<num_blocks, num_threads>>>(wt, d_data, data_size, d_histogram,
-                                          d_alphabet, alphabet_size,
-                                          hists_per_block);
-      }
-      kernelCheck();
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-            .count() /
-        num_iters;
-
-    // Write to CSV
-    std::ofstream file(out_file, std::ios_base::app);
-    file << data_size << "," << alphabet_size << "," << num_blocks << ","
-         << num_threads << "," << duration << ","
-         << int(1 ? hists_per_block > 0 : 0) << "," << GPU_name << std::endl;
-  }
-  gpuErrchk(cudaFree(d_data));
-  gpuErrchk(cudaFree(d_alphabet));
-  gpuErrchk(cudaFree(d_histogram));
-}
-
-void tune_fillLevelKernel(std::string out_file) {
-  using T = uint8_t;
-
-  // Write column names to CSV
-  std::ofstream file(out_file);
-  file << "data_size,num_blocks,num_threads,shmem_per_thread,"
-          "duration,GPU_name"
-       << std::endl;
-  // Tuning params
-  std::vector<uint32_t> block_sizes;
-
-  struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T, true>));
-  uint32_t max_size =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T, false>));
-  max_size =
-      std::min(max_size, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-
-  max_size = findLargestDivisor(kMaxTPB, max_size);
-
-  for (uint32_t i = kMinTPB; i <= max_size; i *= 2) {
-    block_sizes.push_back(i);
-  }
-
-  struct cudaDeviceProp prop = getDeviceProperties();
-  std::string const GPU_name = prop.name;
-  cudaFuncSetAttribute(fillLevelKernel<T, true>,
-                       cudaFuncAttributeMaxDynamicSharedMemorySize,
-                       prop.sharedMemPerBlockOptin);
-
-  size_t const min_warps = static_cast<size_t>(
-      (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount + WS - 1) /
-      WS);
-
-  size_t const data_size = prop.totalGlobalMem / (4 * sizeof(T));
-
-  auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
-  auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
-  auto shmem_per_thread = sizeof(uint32_t) * 8 * sizeof(T);
-
-  // Pad shmem banks if memory suffices
-  size_t padded_shmem = std::numeric_limits<size_t>::max();
-  if constexpr (kBankSizeBytes <= sizeof(T)) {
-    // If the bank size is smaller than or equal to T, one element of
-    // padding per thread is needed.
-    padded_shmem =
-        shmem_per_thread * max_threads_per_SM + sizeof(T) * max_threads_per_SM;
-  } else {
-    padded_shmem = shmem_per_thread * max_threads_per_SM +
-                   shmem_per_thread * max_threads_per_SM / kBanksPerLine;
-  }
-  bool const enough_shmem = shmem_per_thread * padded_shmem <= max_shmem_per_SM;
-  if (enough_shmem) {
-    shmem_per_thread = padded_shmem / max_threads_per_SM;
-  }
-
-  // Tuning
-  BitArray bit_array({data_size}, false);
-  auto const data = generateRandomData<T>({0, 1, 2, 3}, data_size);
-  for (uint32_t block_size : block_sizes) {
-    size_t const max_warps = (data_size + WS - 1) / WS;
-    for (size_t num_warps = min_warps; num_warps <= max_warps; num_warps *= 2) {
-      T* d_data;
-      gpuErrchk(cudaMalloc(&d_data, data_size * sizeof(T)));
-      gpuErrchk(cudaMemcpy(d_data, data.data(), data_size * sizeof(T),
-                           cudaMemcpyHostToDevice));
-
-      auto const [num_blocks, num_threads] =
-          getLaunchConfig(num_warps, block_size, block_size);
-
-      if (num_blocks == -1 or num_threads == -1) {
-        continue;
-      }
-
-      auto start = std::chrono::high_resolution_clock::now();
-      uint8_t const num_iters = 5;
-      for (uint8_t i = 0; i < num_iters; ++i) {
-        if (enough_shmem) {
-          fillLevelKernel<T, true>
-              <<<num_blocks, num_threads, shmem_per_thread * num_threads>>>(
-                  bit_array, d_data, data_size, 1, 0);
-        } else {
-          fillLevelKernel<T, false><<<num_blocks, num_threads,
-                                      sizeof(uint32_t) * (num_threads / WS)>>>(
-              bit_array, d_data, data_size, 1, 0);
-        }
-        kernelCheck();
-      }
-      auto end = std::chrono::high_resolution_clock::now();
-      auto duration =
-          std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-              .count() /
-          num_iters;
-
-      // Write to CSV
-      std::ofstream file(out_file, std::ios_base::app);
-      file << data_size << "," << num_blocks << "," << num_threads << ","
-           << enough_shmem << "," << duration << "," << GPU_name << std::endl;
-      gpuErrchk(cudaFree(d_data));
-    }
+    file.close();
+    gpuErrchk(cudaFree(d_queries));
+    gpuErrchk(cudaFree(d_results));
   }
 }
 
@@ -467,13 +251,6 @@ int main(int argc, char* argv[]) {
   auto const parent_dir = argv[1];
   auto const GPU_index = std::stoi(argv[2]);
   ecl::checkWarpSize(GPU_index);
-  ecl::tune_accessKernel(std::string(parent_dir) + "/accessKernel.csv",
-                         GPU_index);
-  ecl::tune_rankKernel(std::string(parent_dir) + "/rankKernel.csv", GPU_index);
-  ecl::tune_calculateL2EntriesKernel(
-      std::string(parent_dir) + "/calculateL2EntriesKernel.csv", GPU_index);
-  ecl::tune_fillLevelKernel(std::string(parent_dir) + "/fillLevelKernel.csv");
-  ecl::tune_computeGlobalHistogramKernel(
-      std::string(parent_dir) + "/computeGlobalHistogramKernel.csv", GPU_index);
+  ecl::tune_accessKernel(std::string(parent_dir), GPU_index);
   return 0;
 }

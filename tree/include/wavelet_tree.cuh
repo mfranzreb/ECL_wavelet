@@ -2,7 +2,10 @@
 
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
+#include <thrust/host_vector.h>
+#include <thrust/mr/allocator.h>
 #include <thrust/remove.h>
+#include <thrust/system/cuda/memory_resource.h>
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +21,11 @@
 // TODO: add restricts
 // TODO: check if shmem helpful for all kernels
 namespace ecl {
+
+template <typename T>
+using PinnedVector = thrust::host_vector<
+    T, thrust::mr::stateless_resource_allocator<
+           T, thrust::system::cuda::universal_host_pinned_memory_resource>>;
 
 struct GraphContents {
   cudaGraphExec_t graph_exec;
@@ -704,6 +712,8 @@ template <int NumThreads>
 __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
     size_t* indices, size_t const num_indices) {
   assert(num_indices > 0);
+  IdealConfigs const& ideal_configs =
+      getIdealConfigs(getDeviceProperties().name);
 
   // CHeck if indices ptr points to pinned memory
   cudaPointerAttributes attr;
@@ -729,7 +739,17 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
 
   // TODO: find good heuristic
   //  Divide indices into chunks
-  uint32_t const num_chunks = num_indices < 10 ? 1 : 10;
+  uint32_t num_chunks;
+  if (ideal_configs.accessKernel_linrel.slope != 0.0f) {
+    auto lin_rel = ideal_configs.accessKernel_linrel;
+    num_chunks = num_indices * lin_rel.slope + lin_rel.intercept;
+    // Round to next multiple of 2
+    num_chunks = (num_chunks + 1) & ~1;
+    num_chunks = std::min(static_cast<size_t>(num_chunks), num_indices);
+
+  } else {
+    num_chunks = num_indices < 10 ? 1 : 10;
+  }
   uint8_t const num_buffers = std::min(num_chunks, 2U);
   size_t const chunk_size = num_indices / num_chunks;
   size_t const last_chunk_size = chunk_size + num_indices % num_chunks;
@@ -769,10 +789,6 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
       prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
   gpuErrchk(cudaFuncSetAttribute(
       accessKernel<T, false, NumThreads, true, true>,
-      cudaFuncAttributeMaxDynamicSharedMemorySize,
-      prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
-  gpuErrchk(cudaFuncSetAttribute(
-      accessKernel<T, true, NumThreads, true, false>,
       cudaFuncAttributeMaxDynamicSharedMemorySize,
       prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
   gpuErrchk(cudaFuncSetAttribute(
@@ -816,7 +832,9 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   }
 
   bool const counts_shmem =
-      (counts_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM;
+      (ideal_configs.access_counts_shmem_limit > alphabet_size_ or
+       ideal_configs.access_counts_shmem_limit == 0) and
+      ((counts_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM);
 
   if (counts_shmem) {
     shmem_per_block += counts_size;
@@ -831,18 +849,12 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   }
 
   int num_blocks, threads_per_block;
-  IdealConfigs ideal_configs = getIdealConfigs(prop.name);
-  if (ideal_configs.ideal_TPB_accessKernel != 0) {
+  if (ideal_configs.ideal_tot_threads_accessKernel != 0) {
     size_t const num_warps =
         std::min(ideal_configs.ideal_tot_threads_accessKernel / WS,
                  static_cast<size_t>((chunk_size * NumThreads) / WS));
-    if (ideal_configs.ideal_TPB_accessKernel < min_block_size) {
-      std::tie(num_blocks, threads_per_block) =
-          getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockAccess);
-    } else {
-      threads_per_block = ideal_configs.ideal_TPB_accessKernel;
-      num_blocks = (num_warps * WS) / threads_per_block;
-    }
+    std::tie(num_blocks, threads_per_block) =
+        getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockAccess);
   } else {
     // Make the minimum block size a multiple of WS
     std::tie(num_blocks, threads_per_block) = getLaunchConfig(

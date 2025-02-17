@@ -996,11 +996,16 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   //  Divide indices into chunks
   uint32_t num_chunks;
   if (ideal_configs.rankKernel_logrel.slope != 0.0f) {
-    auto lin_rel = ideal_configs.rankKernel_logrel;
-    num_chunks = num_queries * lin_rel.slope + lin_rel.intercept;
+    auto log_rel = ideal_configs.rankKernel_logrel;
+    int result =
+        std::max(2, static_cast<int>(log_rel.slope * std::log(num_queries) +
+                                     log_rel.intercept));
+    result = std::min(result, 20);
     // Round to next multiple of 2
-    num_chunks = (num_chunks + 1) & ~1;
-    num_chunks = std::min(static_cast<size_t>(num_chunks), num_queries);
+    result = (result + 1) & ~1;
+    num_chunks = num_queries < static_cast<uint32_t>(result)
+                     ? 1
+                     : static_cast<uint32_t>(result);
 
   } else {
     num_chunks = num_queries < 10 ? 1 : 10;
@@ -1267,11 +1272,16 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
   //  Divide indices into chunks
   uint32_t num_chunks;
   if (ideal_configs.selectKernel_logrel.slope != 0.0f) {
-    auto lin_rel = ideal_configs.selectKernel_logrel;
-    num_chunks = num_queries * lin_rel.slope + lin_rel.intercept;
+    auto log_rel = ideal_configs.selectKernel_logrel;
+    int result =
+        std::max(2, static_cast<int>(log_rel.slope * std::log(num_queries) +
+                                     log_rel.intercept));
+    result = std::min(result, 20);
     // Round to next multiple of 2
-    num_chunks = (num_chunks + 1) & ~1;
-    num_chunks = std::min(static_cast<size_t>(num_chunks), num_queries);
+    result = (result + 1) & ~1;
+    num_chunks = num_queries < static_cast<uint32_t>(result)
+                     ? 1
+                     : static_cast<uint32_t>(result);
 
   } else {
     num_chunks = num_queries < 10 ? 1 : 10;

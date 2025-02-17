@@ -11,7 +11,7 @@
 namespace ecl {
 
 void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
-  uint8_t const num_iters = 1;
+  uint8_t const num_iters = 100;
   auto const prop = getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,

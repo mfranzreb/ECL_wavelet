@@ -46,8 +46,8 @@ if __name__ == "__main__":
     select_tunes = [f for f in tune_csvs if f.split("/")[-1].startswith("select")]
     GPU_name = pd.read_csv(access_tunes[0])["GPU_name"][0]
     tune_string = '{"' + GPU_name + '"' + ", IdealConfigs {"
-    tune_string += apply_queries_tunes(access_tunes, "access")
-    tune_string += apply_queries_tunes(rank_tunes, "rank")
+    tune_string += apply_queries_tunes(access_tunes, "access") + ","
+    tune_string += apply_queries_tunes(rank_tunes, "rank") + ","
     tune_string += apply_queries_tunes(select_tunes, "select")
     tune_string += "}}"
 

@@ -60,6 +60,9 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
     num_last_l2_blocks[i] = (bit_array_.sizeHost(i) % RSConfig::L1_BIT_SIZE +
                              RSConfig::L2_BIT_SIZE - 1) /
                             RSConfig::L2_BIT_SIZE;
+    if (num_last_l2_blocks[i] == 0) {
+      num_last_l2_blocks[i] = RSConfig::NUM_L2_PER_L1;
+    }
   }
   // transfer to device
   gpuErrchk(cudaMalloc(&d_num_last_l2_blocks_,
@@ -150,11 +153,6 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
           <<<1, kBlockSize>>>(*this, i, num_l2_blocks);
       kernelStreamCheck(cudaStreamPerThread);
     } else {
-      uint16_t const num_last_l2_blocks =
-          (bit_array_.sizeHost(i) % RSConfig::L1_BIT_SIZE +
-           RSConfig::L2_BIT_SIZE - 1) /
-          RSConfig::L2_BIT_SIZE;
-
       // Get minimal block size that still fully loads GPU
       auto const min_threads = static_cast<size_t>(
           prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount);
@@ -174,7 +172,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
 
       // calculate L2 entries for all L1 blocks
       calculateL2EntriesKernel<kItemsPerThread>
-          <<<num_l1_blocks, kBlockSize>>>(*this, i, num_last_l2_blocks);
+          <<<num_l1_blocks, kBlockSize>>>(*this, i, num_last_l2_blocks[i]);
       kernelStreamCheck(cudaStreamPerThread);
 
       RSConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);

@@ -737,7 +737,6 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
                             cudaHostAllocPortable));
   }
 
-  // TODO: find good heuristic
   //  Divide indices into chunks
   uint32_t num_chunks;
   if (ideal_configs.accessKernel_logrel.slope != 0.0f) {
@@ -969,6 +968,8 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
                      [&](const RankSelectQuery<T>& s) {
                        return s.index_ < rank_select_.bit_array_.sizeHost(0);
                      }));
+  IdealConfigs const& ideal_configs =
+      getIdealConfigs(getDeviceProperties().name);
 
   cudaPointerAttributes attr;
   gpuErrchk(cudaPointerGetAttributes(&attr, queries));
@@ -992,9 +993,18 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
                             cudaHostAllocPortable));
   }
 
-  // TODO: find good heuristic
   //  Divide indices into chunks
-  uint32_t const num_chunks = num_queries < 10 ? 1 : 10;
+  uint32_t num_chunks;
+  if (ideal_configs.rankKernel_logrel.slope != 0.0f) {
+    auto lin_rel = ideal_configs.rankKernel_logrel;
+    num_chunks = num_queries * lin_rel.slope + lin_rel.intercept;
+    // Round to next multiple of 2
+    num_chunks = (num_chunks + 1) & ~1;
+    num_chunks = std::min(static_cast<size_t>(num_chunks), num_queries);
+
+  } else {
+    num_chunks = num_queries < 10 ? 1 : 10;
+  }
   uint8_t const num_buffers = std::min(num_chunks, 2U);
   size_t const chunk_size = num_queries / num_chunks;
   size_t const last_chunk_size = chunk_size + num_queries % num_chunks;
@@ -1093,28 +1103,12 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
     }
   }
 
-  int num_blocks, threads_per_block;
-  IdealConfigs ideal_configs = getIdealConfigs(prop.name);
-  if (ideal_configs.ideal_TPB_rankKernel != 0) {
-    size_t const num_warps =
-        std::min(ideal_configs.ideal_tot_threads_rankKernel / WS,
-                 static_cast<size_t>((chunk_size * NumThreads) / WS));
-    if (ideal_configs.ideal_TPB_rankKernel < min_block_size) {
-      std::tie(num_blocks, threads_per_block) =
-          getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlock);
-    } else {
-      threads_per_block = ideal_configs.ideal_TPB_rankKernel;
-      num_blocks = (num_warps * WS) / threads_per_block;
-    }
-  } else {
-    // Make the minimum block size a multiple of WS
-    std::tie(num_blocks, threads_per_block) = getLaunchConfig(
-        std::min((chunk_size * NumThreads + WS - 1) / WS,
-                 static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
-                                      prop.multiProcessorCount) /
-                                     WS)),
-        min_block_size, maxThreadsPerBlock);
-  }
+  auto [num_blocks, threads_per_block] = getLaunchConfig(
+      std::min((chunk_size * NumThreads + WS - 1) / WS,
+               static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
+                                    prop.multiProcessorCount) /
+                                   WS)),
+      min_block_size, maxThreadsPerBlock);
 
   uint32_t const num_groups = (num_blocks * threads_per_block) / NumThreads;
 
@@ -1245,6 +1239,9 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
     RankSelectQuery<T>* queries, size_t const num_queries) {
   assert(std::all_of(queries, queries + num_queries,
                      [](const RankSelectQuery<T>& s) { return s.index_ > 0; }));
+  IdealConfigs const& ideal_configs =
+      getIdealConfigs(getDeviceProperties().name);
+
   cudaPointerAttributes attr;
   gpuErrchk(cudaPointerGetAttributes(&attr, queries));
   bool const is_pinned_mem = attr.type == cudaMemoryTypeHost;
@@ -1267,9 +1264,18 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
                             cudaHostAllocPortable));
   }
 
-  // TODO: find good heuristic
   //  Divide indices into chunks
-  uint32_t const num_chunks = num_queries < 10 ? 1 : 10;
+  uint32_t num_chunks;
+  if (ideal_configs.selectKernel_logrel.slope != 0.0f) {
+    auto lin_rel = ideal_configs.selectKernel_logrel;
+    num_chunks = num_queries * lin_rel.slope + lin_rel.intercept;
+    // Round to next multiple of 2
+    num_chunks = (num_chunks + 1) & ~1;
+    num_chunks = std::min(static_cast<size_t>(num_chunks), num_queries);
+
+  } else {
+    num_chunks = num_queries < 10 ? 1 : 10;
+  }
   uint8_t const num_buffers = std::min(num_chunks, 2U);
   size_t const chunk_size = num_queries / num_chunks;
   size_t const last_chunk_size = chunk_size + num_queries % num_chunks;

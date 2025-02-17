@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 
 
-def apply_access_tunes(tune_files):
+def apply_queries_tunes(tune_files, query_type):
     for tune_file in tune_files:
         with open(tune_file, "r") as f:
             df = pd.read_csv(f)
@@ -27,7 +27,7 @@ def apply_access_tunes(tune_files):
                 np.log(trimmed_df["num_queries"]), trimmed_df["num_chunks"], 1
             )
 
-    tune_string = f".accessKernel_logrel = {{{mult}, {intercept}}}"
+    tune_string = f".{query_type}Kernel_logrel = {{{mult}, {intercept}}}"
     return tune_string
 
 
@@ -42,9 +42,13 @@ if __name__ == "__main__":
     tune_csvs = [file_dir + "/" + f for f in os.listdir(file_dir) if f.endswith(".csv")]
     # get access csv files
     access_tunes = [f for f in tune_csvs if f.split("/")[-1].startswith("access")]
+    rank_tunes = [f for f in tune_csvs if f.split("/")[-1].startswith("rank")]
+    select_tunes = [f for f in tune_csvs if f.split("/")[-1].startswith("select")]
     GPU_name = pd.read_csv(access_tunes[0])["GPU_name"][0]
     tune_string = '{"' + GPU_name + '"' + ", IdealConfigs {"
-    tune_string += apply_access_tunes(access_tunes)
+    tune_string += apply_queries_tunes(access_tunes, "access")
+    tune_string += apply_queries_tunes(rank_tunes, "rank")
+    tune_string += apply_queries_tunes(select_tunes, "select")
     tune_string += "}}"
 
     with open(args.tune_file, "r") as f:

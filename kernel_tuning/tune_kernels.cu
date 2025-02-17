@@ -60,8 +60,9 @@ void tune_accessKernel(std::string out_dir, uint32_t const GPU_index) {
 
     for (auto num_chunk : num_chunks_vec) {
       // Set ideal_configs slope so that correct num_chunks is chosen
-      ideal_configs.accessKernel_linrel.slope =
-          static_cast<float>(num_chunk) / static_cast<float>(num_query);
+      ideal_configs.accessKernel_logrel.slope =
+          static_cast<float>(num_chunk) /
+          std::log(static_cast<float>(num_query));
       // Warmup
       for (uint8_t i = 0; i < 2; ++i) {
         auto results = wt.template access<1>(queries.data(), num_query);
@@ -115,12 +116,12 @@ void tune_accessKernel(std::string out_dir, uint32_t const GPU_index) {
     ideal_configs.ideal_tot_threads_accessKernel = blocks * threads;
     // Warmup
     for (uint8_t i = 0; i < 2; ++i) {
-      wt.template access<1>(queries.data(), num_queries);
+      auto results = wt.template access<1>(queries.data(), num_queries);
     }
     std::vector<size_t> times(num_iters);
     for (uint8_t i = 0; i < num_iters; ++i) {
       start_time = std::chrono::high_resolution_clock::now();
-      wt.template access<1>(queries.data(), num_queries);
+      auto results = wt.template access<1>(queries.data(), num_queries);
       end_time = std::chrono::high_resolution_clock::now();
       times[i] = std::chrono::duration_cast<std::chrono::microseconds>(
                      end_time - start_time)

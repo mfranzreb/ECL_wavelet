@@ -17,13 +17,20 @@ def apply_access_tunes(tune_files):
             best_chunk_sizes = grouped_df["time"].idxmin()
             # remove all other chunk sizes
             trimmed_df = df.loc[best_chunk_sizes]
-            slope, intercept = np.polyfit(
-                trimmed_df["num_queries"], trimmed_df["num_chunks"], 1
+            # remove the rows with "chunk_size" == max_chunk_size except the first occurrence
+            max_chunk_size = trimmed_df["num_chunks"].max()
+            trimmed_df = trimmed_df.drop(
+                trimmed_df[trimmed_df["num_chunks"] == max_chunk_size].index[1:]
             )
+            # Find logaritmic fit
+            mult, intercept = np.polyfit(
+                np.log(trimmed_df["num_queries"]), trimmed_df["num_chunks"], 1
+            )
+
         elif "warps" in tune_file:
             best_num_warps = df["num_warps"].iloc[df["time"].idxmin()]
 
-    tune_string = f".ideal_tot_threads_accessKernel = {int(best_num_warps*32)}, .accessKernel_linrel = {{{slope}, {intercept}}}"
+    tune_string = f".ideal_tot_threads_accessKernel = {int(best_num_warps*32)}, .accessKernel_logrel = {{{mult}, {intercept}}}"
     return tune_string
 
 

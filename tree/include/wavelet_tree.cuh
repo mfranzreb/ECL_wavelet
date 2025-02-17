@@ -740,12 +740,17 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   // TODO: find good heuristic
   //  Divide indices into chunks
   uint32_t num_chunks;
-  if (ideal_configs.accessKernel_linrel.slope != 0.0f) {
-    auto lin_rel = ideal_configs.accessKernel_linrel;
-    num_chunks = num_indices * lin_rel.slope + lin_rel.intercept;
+  if (ideal_configs.accessKernel_logrel.slope != 0.0f) {
+    auto log_rel = ideal_configs.accessKernel_logrel;
+    int result =
+        std::max(2, static_cast<int>(log_rel.slope * std::log(num_indices) +
+                                     log_rel.intercept));
+    result = std::min(result, 20);
     // Round to next multiple of 2
-    num_chunks = (num_chunks + 1) & ~1;
-    num_chunks = std::min(static_cast<size_t>(num_chunks), num_indices);
+    result = (result + 1) & ~1;
+    num_chunks = num_indices < static_cast<uint32_t>(result)
+                     ? 1
+                     : static_cast<uint32_t>(result);
 
   } else {
     num_chunks = num_indices < 10 ? 1 : 10;

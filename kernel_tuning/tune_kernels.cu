@@ -22,9 +22,6 @@ void tune_accessKernel(std::string out_dir, uint32_t const GPU_index) {
   size_t num_warps =
       (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount + WS - 1) /
       WS;
-  cudaEvent_t start, stop;
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
 
   auto const GPU_name = prop.name;
 
@@ -91,7 +88,7 @@ void tune_accessKernel(std::string out_dir, uint32_t const GPU_index) {
   }
   // Tune TPB and total warps
   size_t const num_queries =
-      prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount * 10;
+      prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount * 100;
   out_file = out_dir + "/access_time_vs_warps.csv";
   // Write column names to CSV
   file.open(out_file);
@@ -104,12 +101,9 @@ void tune_accessKernel(std::string out_dir, uint32_t const GPU_index) {
     num_warps_vec.push_back(i);
   }
   auto queries = generateRandomAccessQueries(data_size, num_queries);
-  size_t* d_queries;
-  gpuErrchk(cudaMalloc(&d_queries, num_queries * sizeof(size_t)));
-  gpuErrchk(cudaMemcpy(d_queries, queries.data(), num_queries * sizeof(size_t),
-                       cudaMemcpyHostToDevice));
-  uint8_t* d_results;
-  gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(uint8_t)));
+  // register queries
+  gpuErrchk(cudaHostRegister(queries.data(), num_queries * sizeof(size_t),
+                             cudaHostRegisterDefault));
 
   auto const num_levels = ceilLog2Host(alphabet_size);
   for (auto num_warps : num_warps_vec) {
@@ -118,26 +112,19 @@ void tune_accessKernel(std::string out_dir, uint32_t const GPU_index) {
     if (blocks == -1 or threads == -1) {
       continue;
     }
+    ideal_configs.ideal_tot_threads_accessKernel = blocks * threads;
     // Warmup
     for (uint8_t i = 0; i < 2; ++i) {
-      // ShmemRanks approximated since more than enough shmem available
-      accessKernel<uint8_t, true, 1, true, true>
-          <<<blocks, threads, sizeof(size_t) * 3 * alphabet_size>>>(
-              wt, d_queries, num_queries, d_results, alphabet_size,
-              blocks * threads, num_levels, 1);
-      kernelCheck();
+      wt.template access<1>(queries.data(), num_queries);
     }
-    std::vector<float> times(num_iters);
+    std::vector<size_t> times(num_iters);
     for (uint8_t i = 0; i < num_iters; ++i) {
-      gpuErrchk(cudaEventRecord(start));
-      accessKernel<uint8_t, true, 1, true, true>
-          <<<blocks, threads, sizeof(size_t) * 3 * alphabet_size>>>(
-              wt, d_queries, num_queries, d_results, alphabet_size,
-              blocks * threads, num_levels, 1);
-      gpuErrchk(cudaEventRecord(stop));
-      kernelCheck();
-      gpuErrchk(cudaEventSynchronize(stop));
-      gpuErrchk(cudaEventElapsedTime(&times[i], start, stop));
+      start_time = std::chrono::high_resolution_clock::now();
+      wt.template access<1>(queries.data(), num_queries);
+      end_time = std::chrono::high_resolution_clock::now();
+      times[i] = std::chrono::duration_cast<std::chrono::microseconds>(
+                     end_time - start_time)
+                     .count();
     }
     // Write median time to CSV
     std::nth_element(times.begin(), times.begin() + times.size() / 2,
@@ -147,8 +134,7 @@ void tune_accessKernel(std::string out_dir, uint32_t const GPU_index) {
          << std::endl;
     file.close();
   }
-  gpuErrchk(cudaFree(d_queries));
-  gpuErrchk(cudaFree(d_results));
+  gpuErrchk(cudaHostUnregister(queries.data()));
 }
 
 }  // namespace ecl

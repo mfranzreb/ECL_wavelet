@@ -21,10 +21,7 @@ def apply_access_tunes(tune_files):
                 trimmed_df["num_queries"], trimmed_df["num_chunks"], 1
             )
         elif "warps" in tune_file:
-            # Make polynomial line of best fit for "num_warps" vs "time"
-            square, slope, intercept = np.polyfit(df["num_warps"], df["time"], 2)
-            # Find minimum of polynomial
-            best_num_warps = -slope / (2 * square)
+            best_num_warps = df["num_warps"].iloc[df["time"].idxmin()]
 
     tune_string = f".ideal_tot_threads_accessKernel = {int(best_num_warps*32)}, .accessKernel_linrel = {{{slope}, {intercept}}}"
     return tune_string

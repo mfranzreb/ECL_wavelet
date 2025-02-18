@@ -4,7 +4,7 @@
 
 #include <bit_array.cuh>
 #include <cstdint>
-#include <cub/block/block_scan.cuh>
+#include <cub/device/device_scan.cuh>
 
 namespace ecl {
 /*!
@@ -193,6 +193,11 @@ class RankSelect {
 
     auto const prop = getDeviceProperties();
 
+    auto min_block_size = kMinTPB;
+    while (prop.maxBlocksPerMultiProcessor * funcAttrib.sharedSizeBytes >
+           prop.sharedMemPerMultiprocessor) {
+      min_block_size += kMinTPB;
+    }
 #pragma omp parallel for num_threads(num_arrays)
     for (uint32_t i = 0; i < num_arrays; i++) {
       auto const num_l1_blocks = num_l1_blocks_[i];
@@ -219,16 +224,13 @@ class RankSelect {
             (RSConfig::NUM_L2_PER_L1 + block_size - 1) / block_size);
         kernelStreamCheck(cudaStreamPerThread);
       } else {
-        auto const threads_per_block = std::min(
-            max_block_size,
-            static_cast<uint32_t>(ThreadsPerL2 * RSConfig::NUM_L2_PER_L1));
         // calculate L2 entries for all L1 blocks
         calculateL2EntriesKernel<ThreadsPerL2>
-            <<<num_l1_blocks, threads_per_block>>>(
+            <<<num_l1_blocks, min_block_size>>>(
                 *this, i, num_last_l2_blocks[i], num_l1_blocks,
-                threads_per_block / ThreadsPerL2,
-                (RSConfig::NUM_L2_PER_L1 + threads_per_block - 1) /
-                    threads_per_block);
+                min_block_size / ThreadsPerL2,
+                (RSConfig::NUM_L2_PER_L1 + min_block_size - 1) /
+                    min_block_size);
         kernelStreamCheck(cudaStreamPerThread);
 
         RSConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
@@ -1125,9 +1127,15 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateSelectSamplesKernel(
     size_t* total_num_ones) {
   assert(blockDim.x % WS == 0);
   extern __shared__ size_t group_counter[];
-  __shared__ typename cub::WarpScan<size_t,
-                                    ThreadsPerIndex>::TempStorage
-      temp_storage[1024 / ThreadsPerIndex];  // TODO
+
+  uint32_t mask;
+  if constexpr (ThreadsPerIndex > 1) {
+    mask = ~0;
+    if constexpr (ThreadsPerIndex < WS) {
+      mask = ((1 << ThreadsPerIndex) - 1)
+             << (ThreadsPerIndex * ((threadIdx.x % WS) / ThreadsPerIndex));
+    }
+  }
 
   uint8_t constexpr start_l2_block =
       (RSConfig::SELECT_SAMPLE_RATE / RSConfig::L2_BIT_SIZE) - 1;
@@ -1148,8 +1156,6 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateSelectSamplesKernel(
     size_t const start_word = curr_l2_block * RSConfig::L2_WORD_SIZE;
     size_t const end_word =
         min(start_word + RSConfig::L2_WORD_SIZE, bit_array_size_in_words);
-    cub::WarpScan<size_t, ThreadsPerIndex> warp_scan(
-        temp_storage[local_group_id]);
     for (size_t i = start_word; i < end_word; i += ThreadsPerIndex) {
       size_t local_i = i + local_t_id;
       uint32_t word = 0;
@@ -1165,10 +1171,10 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateSelectSamplesKernel(
           word = rank_select.bit_array_.partialWord(word, word_size);
         }
       }
-      size_t const num_ones = __popc(word);
+      size_t num_ones = __popc(word);
       size_t cum_ones = 0;
-      // TODO: use custom one
-      warp_scan.InclusiveSum(num_ones, cum_ones);
+      rank_select.warpSum<size_t, ThreadsPerIndex, true>(num_ones, cum_ones,
+                                                         mask);
       cum_ones += group_counter[local_group_id];
       size_t const ones_at_start = cum_ones - num_ones;
       if (cum_ones / RSConfig::SELECT_SAMPLE_RATE >

@@ -38,6 +38,29 @@ struct RankResult {
   bool bit;
 };
 
+class RankSelect;
+
+/*!
+ * \brief Fill L2 indices and prepare L1 indices for prefix sum.
+ * \param rank_select RankSelect object to fill indices for.
+ * \param array_index Index of the bit array to be used.
+ * \param num_last_l2_blocks Number of L2 blocks in the last L1 block.
+ */
+// TODO: reoptimize and retune kernel
+// TODO: fuse bothe kernels together
+template <int ThreadsPerL2>
+__global__ void calculateL2EntriesKernel(RankSelect rank_select,
+                                         uint32_t const array_index,
+                                         uint16_t const num_last_l2_blocks,
+                                         size_t const num_l1_blocks,
+                                         uint32_t const num_groups);
+
+template <int ThreadsPerIndex>
+__global__ void calculateSelectSamplesKernel(
+    RankSelect rank_select, uint32_t const array_index, size_t const num_groups,
+    size_t const total_num_l2_blocks, size_t const bit_array_size_in_words,
+    size_t* total_num_ones);
+
 /*!
  * \brief Rank and select support for the bit array.
  */
@@ -56,7 +79,232 @@ class RankSelect {
    * \param bit_array \c BitArray to be used for queries.
    * \param GPU_index Index of the GPU to be used.
    */
-  __host__ RankSelect(BitArray&& bit_array, uint8_t const GPU_index) noexcept;
+  __host__ RankSelect(BitArray&& bit_array, uint8_t const GPU_index) noexcept
+      : bit_array_(std::move(bit_array)), is_copy_(false) {
+    checkWarpSize(GPU_index);
+
+    auto const num_arrays = bit_array_.numArrays();
+
+    // Compute the number of L1 blocks.
+    num_l1_blocks_.resize(num_arrays);
+    for (size_t i = 0; i < num_arrays; ++i) {
+      num_l1_blocks_[i] = (bit_array_.sizeHost(i) + RSConfig::L1_BIT_SIZE - 1) /
+                          RSConfig::L1_BIT_SIZE;
+    }
+    // transfer to device
+    gpuErrchk(
+        cudaMalloc(&d_num_l1_blocks_, num_l1_blocks_.size() * sizeof(size_t)));
+    gpuErrchk(cudaMemcpy(d_num_l1_blocks_, num_l1_blocks_.data(),
+                         num_l1_blocks_.size() * sizeof(size_t),
+                         cudaMemcpyHostToDevice));
+    size_t total_l1_blocks = 0;
+    for (auto const& num_blocks : num_l1_blocks_) {
+      total_l1_blocks += num_blocks;
+    }
+    // Allocate memory for the L1 index.
+    // For convenience, right now first entry is for the first block, which is
+    // always 0.
+    gpuErrchk(cudaMalloc(&d_l1_indices_,
+                         total_l1_blocks * sizeof(RSConfig::L1_TYPE)));
+    gpuErrchk(cudaMemset(d_l1_indices_, 0,
+                         total_l1_blocks * sizeof(RSConfig::L1_TYPE)));
+
+    std::vector<size_t> l1_offsets(num_l1_blocks_.size());
+
+    std::exclusive_scan(num_l1_blocks_.begin(), num_l1_blocks_.end(),
+                        l1_offsets.begin(), 0);
+    gpuErrchk(cudaMalloc(&d_l1_offsets_, l1_offsets.size() * sizeof(size_t)));
+    gpuErrchk(cudaMemcpy(d_l1_offsets_, l1_offsets.data(),
+                         l1_offsets.size() * sizeof(size_t),
+                         cudaMemcpyHostToDevice));
+
+    // Get how many l2 blocks each last L1 block has
+    std::vector<uint16_t> num_last_l2_blocks(num_arrays);
+    for (size_t i = 0; i < num_arrays; ++i) {
+      num_last_l2_blocks[i] = (bit_array_.sizeHost(i) % RSConfig::L1_BIT_SIZE +
+                               RSConfig::L2_BIT_SIZE - 1) /
+                              RSConfig::L2_BIT_SIZE;
+      if (num_last_l2_blocks[i] == 0) {
+        num_last_l2_blocks[i] = RSConfig::NUM_L2_PER_L1;
+      }
+    }
+    // transfer to device
+    gpuErrchk(cudaMalloc(&d_num_last_l2_blocks_,
+                         num_last_l2_blocks.size() * sizeof(uint16_t)));
+    gpuErrchk(cudaMemcpy(d_num_last_l2_blocks_, num_last_l2_blocks.data(),
+                         num_last_l2_blocks.size() * sizeof(uint16_t),
+                         cudaMemcpyHostToDevice));
+
+    std::vector<size_t> num_l2_blocks_per_arr(num_arrays);
+    for (size_t i = 0; i < num_arrays; ++i) {
+      num_l2_blocks_per_arr[i] =
+          (num_l1_blocks_[i] - 1) * RSConfig::NUM_L2_PER_L1 +
+          num_last_l2_blocks[i];
+    }
+
+    total_num_l2_blocks_ = 0;
+    for (auto const& num_blocks : num_l2_blocks_per_arr) {
+      total_num_l2_blocks_ += num_blocks;
+    }
+
+    // Allocate memory for the L2 index.
+    // For convenience, right now first entry is for the first block, which is
+    // always 0.
+    gpuErrchk(cudaMalloc(&d_l2_indices_,
+                         total_num_l2_blocks_ * sizeof(RSConfig::L2_TYPE)));
+    gpuErrchk(cudaMemset(d_l2_indices_, 0,
+                         total_num_l2_blocks_ * sizeof(RSConfig::L2_TYPE)));
+
+    std::exclusive_scan(num_l2_blocks_per_arr.begin(),
+                        num_l2_blocks_per_arr.end(),
+                        num_l2_blocks_per_arr.begin(), 0);
+
+    gpuErrchk(cudaMalloc(&d_l2_offsets_,
+                         num_l2_blocks_per_arr.size() * sizeof(size_t)));
+    gpuErrchk(cudaMemcpy(d_l2_offsets_, num_l2_blocks_per_arr.data(),
+                         num_l2_blocks_per_arr.size() * sizeof(size_t),
+                         cudaMemcpyHostToDevice));
+
+    // TODO loop unnecessary for wavelet tree
+    // Get maximum storage needed for device sums
+    size_t temp_storage_bytes = 0;
+    for (uint32_t i = 0; i < num_arrays; i++) {
+      auto const num_l1_blocks = num_l1_blocks_[i];
+      RSConfig::L1_TYPE* d_data = getL1EntryPointer(i, 0);
+      size_t prev_storage_bytes = temp_storage_bytes;
+      gpuErrchk(cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes,
+                                              d_data, num_l1_blocks));
+      temp_storage_bytes = std::max(temp_storage_bytes, prev_storage_bytes);
+    }
+    void* d_temp_storage = nullptr;
+    gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+
+    uint8_t constexpr ThreadsPerL2 = 1;
+    // Choose maximum possible items per thread
+    struct cudaFuncAttributes funcAttrib;
+    gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                    calculateL2EntriesKernel<ThreadsPerL2>));
+
+    auto max_block_size =
+        std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+    max_block_size = findLargestDivisor(kMaxTPB, max_block_size);
+
+    auto const prop = getDeviceProperties();
+
+#pragma omp parallel for num_threads(num_arrays)
+    for (uint32_t i = 0; i < num_arrays; i++) {
+      auto const num_l1_blocks = num_l1_blocks_[i];
+      auto const num_l2_blocks =
+          i == (num_arrays - 1)
+              ? total_num_l2_blocks_ - num_l2_blocks_per_arr[i]
+              : num_l2_blocks_per_arr[i + 1] - num_l2_blocks_per_arr[i];
+      if (num_l2_blocks == 1) {
+        continue;
+      }
+
+      if (num_l1_blocks == 1) {
+        uint32_t block_size =
+            std::min(max_block_size,
+                     static_cast<uint32_t>(num_l2_blocks * ThreadsPerL2));
+
+        // Round up to next WS
+        block_size += (WS - block_size % WS);
+
+        calculateL2EntriesKernel<ThreadsPerL2><<<1, block_size>>>(
+            *this, i, num_l2_blocks, num_l1_blocks, block_size / ThreadsPerL2);
+        kernelStreamCheck(cudaStreamPerThread);
+      } else {
+        auto const threads_per_block = std::min(
+            max_block_size,
+            static_cast<uint32_t>(ThreadsPerL2 * RSConfig::NUM_L2_PER_L1));
+        // calculate L2 entries for all L1 blocks
+        calculateL2EntriesKernel<ThreadsPerL2>
+            <<<num_l1_blocks, threads_per_block>>>(
+                *this, i, num_last_l2_blocks[i], num_l1_blocks,
+                threads_per_block / ThreadsPerL2);
+        kernelStreamCheck(cudaStreamPerThread);
+
+        RSConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
+
+#pragma omp critical
+        {  // Run inclusive prefix sum
+          gpuErrchk(cub::DeviceScan::InclusiveSum(
+              d_temp_storage, temp_storage_bytes, d_data, num_l1_blocks));
+          kernelCheck();
+        }
+      }
+    }
+    // Get the number of ones per bit array
+    std::vector<size_t> num_ones_samples_per_array(num_arrays);
+    std::vector<size_t> num_zeros_samples_per_array(num_arrays);
+    for (uint8_t i = 0; i < num_arrays; i++) {
+      size_t last_l1_index;
+      RSConfig::L2_TYPE last_l2_index;
+      size_t const remaining_bits =
+          bit_array_.sizeHost(i) % RSConfig::L2_BIT_SIZE;
+      gpuErrchk(cudaMemcpy(
+          &last_l1_index, d_l1_indices_ + l1_offsets[i] + num_l1_blocks_[i] - 1,
+          sizeof(size_t), cudaMemcpyDeviceToHost));
+      gpuErrchk(
+          cudaMemcpy(&last_l2_index,
+                     d_l2_indices_ + num_l2_blocks_per_arr[i] +
+                         (bit_array_.sizeHost(i) + RSConfig::L2_BIT_SIZE - 1) /
+                             RSConfig::L2_BIT_SIZE -
+                         1,
+                     sizeof(RSConfig::L2_TYPE), cudaMemcpyDeviceToHost));
+      size_t const num_ones = last_l1_index + last_l2_index + remaining_bits;
+      size_t const num_zeros =
+          bit_array_.sizeHost(i) - last_l1_index - last_l2_index;
+      num_ones_samples_per_array[i] = num_ones / RSConfig::SELECT_SAMPLE_RATE;
+      num_zeros_samples_per_array[i] = num_zeros / RSConfig::SELECT_SAMPLE_RATE;
+    }
+    size_t const total_ones_samples =
+        std::accumulate(num_ones_samples_per_array.begin(),
+                        num_ones_samples_per_array.end(), 0);
+    std::exclusive_scan(num_ones_samples_per_array.begin(),
+                        num_ones_samples_per_array.end(),
+                        num_ones_samples_per_array.begin(), 0);
+    gpuErrchk(
+        cudaMalloc(&d_select_samples_1_, total_ones_samples * sizeof(size_t)));
+    gpuErrchk(
+        cudaMalloc(&d_select_samples_1_offsets_, num_arrays * sizeof(size_t)));
+    gpuErrchk(cudaMemcpy(d_select_samples_1_offsets_,
+                         num_ones_samples_per_array.data(),
+                         num_arrays * sizeof(size_t), cudaMemcpyHostToDevice));
+
+    size_t const total_zeros_samples =
+        std::accumulate(num_zeros_samples_per_array.begin(),
+                        num_zeros_samples_per_array.end(), 0);
+    std::exclusive_scan(num_zeros_samples_per_array.begin(),
+                        num_zeros_samples_per_array.end(),
+                        num_zeros_samples_per_array.begin(), 0);
+    gpuErrchk(
+        cudaMalloc(&d_select_samples_0_, total_zeros_samples * sizeof(size_t)));
+    gpuErrchk(
+        cudaMalloc(&d_select_samples_0_offsets_, num_arrays * sizeof(size_t)));
+    gpuErrchk(cudaMemcpy(d_select_samples_0_offsets_,
+                         num_zeros_samples_per_array.data(),
+                         num_arrays * sizeof(size_t), cudaMemcpyHostToDevice));
+
+    gpuErrchk(cudaMalloc(&d_total_num_ones_, num_arrays * sizeof(size_t)));
+#pragma omp parallel for num_threads(num_arrays)
+    for (uint8_t i = 0; i < num_arrays; i++) {
+      size_t const total_l2_blocks =
+          (bit_array_.sizeHost(i) + RSConfig::L2_BIT_SIZE - 1) /
+          RSConfig::L2_BIT_SIZE;
+      auto const num_blocks = (total_l2_blocks + WS - 1) / WS;
+      calculateSelectSamplesKernel<WS>
+          <<<num_blocks, kMaxTPB, sizeof(size_t) * kMaxTPB / WS>>>(
+              *this, i, num_blocks * (kMaxTPB / WS), total_l2_blocks,
+              (bit_array_.sizeHost(i) + sizeof(uint32_t) * 8 - 1) /
+                  (sizeof(uint32_t) * 8),
+              &d_total_num_ones_[i]);
+      kernelStreamCheck(cudaStreamPerThread);
+    }
+    gpuErrchk(cudaFree(d_temp_storage));
+    kernelCheck();
+  }
 
   /*!
    * \brief Copy constructor.
@@ -404,8 +652,7 @@ class RankSelect {
         RSConfig::L2_TYPE cum_vals = 0;
 
         // inclusive prefix sum
-        warpInclusiveSum<RSConfig::L2_TYPE, NumThreads>(num_vals, cum_vals,
-                                                        mask);
+        warpSum<RSConfig::L2_TYPE, NumThreads, true>(num_vals, cum_vals, mask);
 
         // Check if the i-th zero/one is in the current word
         RSConfig::L2_TYPE const vals_at_start = cum_vals - num_vals;
@@ -596,8 +843,8 @@ class RankSelect {
     return val;
   }
 
-  template <typename T, int NumThreads>
-  __device__ void warpInclusiveSum(T& input, T& output, uint32_t const mask) {
+  template <typename T, int NumThreads, bool IsInclusive>
+  __device__ void warpSum(T& input, T& output, uint32_t const mask) {
     T val = input;
     uint8_t const lane = threadIdx.x % NumThreads;
 
@@ -609,7 +856,11 @@ class RankSelect {
       }
     }
 
-    output = val;
+    if constexpr (IsInclusive) {
+      output = val;
+    } else {
+      output = val - input;
+    }
   }
 
   /*!
@@ -702,35 +953,39 @@ class RankSelect {
  */
 // TODO: reoptimize and retune kernel
 // TODO: fuse bothe kernels together
-template <int ItemsPerThread>
+template <int ThreadsPerL2>
 __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
     RankSelect rank_select, uint32_t const array_index,
-    uint16_t const num_last_l2_blocks) {
+    uint16_t const num_last_l2_blocks, size_t const num_l1_blocks,
+    uint32_t const num_groups) {
   assert(blockDim.x % WS == 0);
-  static_assert(ItemsPerThread > 0, "ItemsPerThread must be greater than 0.");
-  int constexpr kNeededThreads = RSConfig::NUM_L2_PER_L1 / ItemsPerThread;
+  static_assert(RSConfig::NUM_L2_PER_L1 % WS == 0);
   __shared__ RSConfig::L2_TYPE l2_entries[RSConfig::NUM_L2_PER_L1];
-  __shared__ RSConfig::L1_TYPE next_l1_entry;
 
-  __shared__
-      typename cub::BlockScan<RSConfig::L2_TYPE, kNeededThreads>::TempStorage
-          scan_storage;
-
+  uint32_t const group_id = threadIdx.x / ThreadsPerL2;
   uint32_t const warp_id = threadIdx.x / WS;
-  uint32_t const local_t_id = threadIdx.x % WS;
-  uint32_t const num_warps = blockDim.x / WS;
+  uint32_t const local_t_id = threadIdx.x % ThreadsPerL2;
+  uint32_t mask;
+  if constexpr (ThreadsPerL2 > 1) {
+    mask = ~0;
+    if constexpr (ThreadsPerL2 < WS) {
+      mask = ((1 << ThreadsPerL2) - 1)
+             << (ThreadsPerL2 * ((threadIdx.x % WS) / ThreadsPerL2));
+    }
+  }
   if (blockIdx.x < gridDim.x - 1) {
     size_t const offset = rank_select.bit_array_.getOffset(array_index);
     // find L1 block index
-    uint32_t const l1_index = blockIdx.x;
+    auto const l1_index = blockIdx.x;
 
-    for (uint32_t i = warp_id; i < RSConfig::NUM_L2_PER_L1; i += num_warps) {
+    for (uint32_t i = group_id; i < RSConfig::NUM_L2_PER_L1; i += num_groups) {
       RSConfig::L2_TYPE num_ones = 0;
       size_t const start_word =
           l1_index * RSConfig::L1_WORD_SIZE + i * RSConfig::L2_WORD_SIZE;
 
       size_t const end_word = start_word + RSConfig::L2_WORD_SIZE;
-      for (size_t j = start_word + 2 * local_t_id; j < end_word; j += 2 * WS) {
+      for (size_t j = start_word + 2 * local_t_id; j < end_word;
+           j += 2 * ThreadsPerL2) {
         // Global memory load
         // load as 64 bits.
         uint64_t const word =
@@ -738,10 +993,11 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
         num_ones += __popcll(word);
       }
 
-      // Warp reduction
-      RSConfig::L2_TYPE const total_ones =
-          rank_select.warpReduce<RSConfig::L2_TYPE, WS>(~0, num_ones);
-      __syncwarp();
+      RSConfig::L2_TYPE total_ones = num_ones;
+      if constexpr (ThreadsPerL2 > 1) {
+        total_ones =
+            warpReduce<RSConfig::L2_TYPE, ThreadsPerL2>(mask, num_ones);
+      }
 
       if (local_t_id == 0) {
         l2_entries[i] = total_ones;
@@ -749,32 +1005,30 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
     }
 
     __syncthreads();
-    // perform block exclusive sum of l2 entries
-    if (threadIdx.x < kNeededThreads) {
-      RSConfig::L2_TYPE l2_entries_t[ItemsPerThread];
-      for (uint32_t i = 0; i < ItemsPerThread; i++) {
-        l2_entries_t[i] = l2_entries[threadIdx.x * ItemsPerThread + i];
+    RSConfig::L2_TYPE l2_entry_sum, l2_entry;
+    if (warp_id < RSConfig::NUM_L2_PER_L1 / WS) {
+      l2_entry = l2_entries[threadIdx.x];
+      rank_select.warpSum<RSConfig::L2_TYPE, WS, false>(l2_entry, l2_entry_sum,
+                                                        ~0);
+      __syncwarp();
+      // Last thread in warp writes aggregated value to shmem
+      if (threadIdx.x % WS == WS - 1) {
+        l2_entries[warp_id] = l2_entry_sum + l2_entry;
       }
-
-      // last thread writes it's entry to the following L1 block
-      if (threadIdx.x == kNeededThreads - 1) {
-        next_l1_entry = l2_entries_t[ItemsPerThread - 1];
+    }
+    __syncthreads();
+    if (warp_id < RSConfig::NUM_L2_PER_L1 / WS) {
+      // Get aggregates from previous warps and sum them to own result
+      for (uint32_t i = 0; i < warp_id; i++) {
+        l2_entry_sum += l2_entries[i];
       }
-      cub::BlockScan<RSConfig::L2_TYPE, kNeededThreads>(scan_storage)
-          .ExclusiveSum(l2_entries_t, l2_entries_t);
-
-      // last thread adds it's entry to the following L1 block
-      if (threadIdx.x == kNeededThreads - 1) {
-        next_l1_entry += l2_entries_t[ItemsPerThread - 1];
-        rank_select.writeL1Index(array_index, l1_index + 1, next_l1_entry);
-      }
-      // All threads write their result to global memory
-      // Possibly uncoalesced global memory store
-      for (uint32_t i = 0; i < ItemsPerThread; i++) {
-        rank_select.writeL2Index(array_index,
-                                 l1_index * RSConfig::NUM_L2_PER_L1 +
-                                     threadIdx.x * ItemsPerThread + i,
-                                 l2_entries_t[i]);
+      // Write result to global memory
+      rank_select.writeL2Index(array_index,
+                               l1_index * RSConfig::NUM_L2_PER_L1 + threadIdx.x,
+                               l2_entry_sum);
+      if (threadIdx.x == RSConfig::NUM_L2_PER_L1 - 1) {
+        rank_select.writeL1Index(array_index, l1_index + 1,
+                                 l2_entry_sum + l2_entry);
       }
     }
   }
@@ -790,53 +1044,62 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
     auto const l1_start_word =
         (rank_select.getNumL1Blocks(array_index) - 1) * RSConfig::L1_WORD_SIZE;
 
-    for (uint32_t i = warp_id; i < num_last_l2_blocks; i += num_warps) {
+    for (uint32_t i = group_id; i < num_last_l2_blocks; i += num_groups) {
       RSConfig::L2_TYPE num_ones = 0;
       size_t const start_word = l1_start_word + i * RSConfig::L2_WORD_SIZE;
 
       size_t const end_word =
           min(rank_select.bit_array_.sizeInWords(array_index),
               start_word + RSConfig::L2_WORD_SIZE);
-      for (size_t j = start_word + local_t_id; j < end_word; j += WS) {
+      for (size_t j = start_word + local_t_id; j < end_word;
+           j += ThreadsPerL2) {
         uint32_t const word = rank_select.bit_array_.word(array_index, j);
 
         // Compute num ones even of last word, since it will not be saved.
         num_ones += __popc(word);
       }
 
-      // Warp reduction
-      RSConfig::L2_TYPE const total_ones =
-          rank_select.warpReduce<RSConfig::L2_TYPE, WS>(~0, num_ones);
-      __syncwarp();
+      RSConfig::L2_TYPE total_ones = num_ones;
+      if constexpr (ThreadsPerL2 > 1) {
+        total_ones =
+            warpReduce<RSConfig::L2_TYPE, ThreadsPerL2>(mask, num_ones);
+      }
+
       if (local_t_id == 0) {
         l2_entries[i] = total_ones;
       }
     }
 
     __syncthreads();
-    // perform block exclusive sum of l2 entries
-    if (threadIdx.x < kNeededThreads) {
-      RSConfig::L2_TYPE l2_entries_t[ItemsPerThread];
-      for (uint32_t i = 0; i < ItemsPerThread; i++) {
-        if (threadIdx.x * ItemsPerThread + i < num_last_l2_blocks) {
-          l2_entries_t[i] = l2_entries[threadIdx.x * ItemsPerThread + i];
-        } else {
-          l2_entries_t[i] = 0;
-        }
+    RSConfig::L2_TYPE l2_entry_sum, l2_entry;
+    uint8_t needed_warps = (num_last_l2_blocks + WS - 1) / WS;
+    if (warp_id < needed_warps) {
+      l2_entry = 0;
+      if (threadIdx.x < num_last_l2_blocks) {
+        l2_entry = l2_entries[threadIdx.x];
       }
-
-      cub::BlockScan<RSConfig::L2_TYPE, kNeededThreads>(scan_storage)
-          .ExclusiveSum(l2_entries_t, l2_entries_t);
-
-      // All threads write their result to global memory
-      for (uint32_t i = 0; i < ItemsPerThread; i++) {
-        if (threadIdx.x * ItemsPerThread + i < num_last_l2_blocks) {
-          rank_select.writeL2Index(array_index,
-                                   (rank_select.getNumL1Blocks(array_index) -
-                                    1) * RSConfig::NUM_L2_PER_L1 +
-                                       threadIdx.x * ItemsPerThread + i,
-                                   l2_entries_t[i]);
-        }
+      rank_select.warpSum<RSConfig::L2_TYPE, WS, false>(l2_entry, l2_entry_sum,
+                                                        ~0);
+      __syncwarp();
+      // Last thread in warp writes aggregated value to shmem
+      if (threadIdx.x < num_last_l2_blocks and
+          (threadIdx.x % WS == WS - 1 or
+           threadIdx.x == num_last_l2_blocks - 1)) {
+        l2_entries[warp_id] = l2_entry_sum + l2_entry;
+      }
+    }
+    __syncthreads();
+    if (warp_id < needed_warps) {
+      // Get aggregates from previous warps and sum them to own result
+      for (uint32_t i = 0; i < warp_id; i++) {
+        l2_entry_sum += l2_entries[i];
+      }
+      // Write result to global memory
+      if (threadIdx.x < num_last_l2_blocks) {
+        rank_select.writeL2Index(
+            array_index,
+            (num_l1_blocks - 1) * RSConfig::NUM_L2_PER_L1 + threadIdx.x,
+            l2_entry_sum);
       }
     }
   }

@@ -209,7 +209,9 @@ class RankSelect {
                      static_cast<uint32_t>(num_l2_blocks * ThreadsPerL2));
 
         // Round up to next WS
-        block_size += (WS - block_size % WS);
+        if (block_size % WS != 0) {
+          block_size += (WS - block_size % WS);
+        }
 
         calculateL2EntriesKernel<ThreadsPerL2><<<1, block_size>>>(
             *this, i, num_l2_blocks, num_l1_blocks, block_size / ThreadsPerL2);
@@ -993,14 +995,13 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
         num_ones += __popcll(word);
       }
 
-      RSConfig::L2_TYPE total_ones = num_ones;
       if constexpr (ThreadsPerL2 > 1) {
-        total_ones =
-            warpReduce<RSConfig::L2_TYPE, ThreadsPerL2>(mask, num_ones);
+        num_ones = rank_select.warpReduce<RSConfig::L2_TYPE, ThreadsPerL2>(
+            mask, num_ones);
       }
 
       if (local_t_id == 0) {
-        l2_entries[i] = total_ones;
+        l2_entries[i] = num_ones;
       }
     }
 
@@ -1059,14 +1060,13 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
         num_ones += __popc(word);
       }
 
-      RSConfig::L2_TYPE total_ones = num_ones;
       if constexpr (ThreadsPerL2 > 1) {
-        total_ones =
-            warpReduce<RSConfig::L2_TYPE, ThreadsPerL2>(mask, num_ones);
+        num_ones = rank_select.warpReduce<RSConfig::L2_TYPE, ThreadsPerL2>(
+            mask, num_ones);
       }
 
       if (local_t_id == 0) {
-        l2_entries[i] = total_ones;
+        l2_entries[i] = num_ones;
       }
     }
 

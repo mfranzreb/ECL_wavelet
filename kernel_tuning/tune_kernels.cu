@@ -157,6 +157,67 @@ void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
     gpuErrchk(cudaHostUnregister(select_queries.data()));
   }
 }
+
+void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
+  uint8_t const num_iters = 100;
+  auto const prop = getDeviceProperties();
+  struct cudaFuncAttributes funcAttrib;
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
+  uint32_t max_size =
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  size_t const data_size = prop.totalGlobalMem / 10;
+
+  auto const GPU_name = prop.name;
+
+  // Write column names to CSV
+  std::string out_file = out_dir + "/calculateL2EntriesKernel_TPB.csv";
+  std::ofstream file(out_file);
+  file << "tpb,time,GPU_name" << std::endl;
+  file.close();
+
+  std::vector<size_t> threads_per_block_vec;
+  for (size_t i = max_size; i >= kMinTPB; i /= 2) {
+    threads_per_block_vec.push_back(i);
+  }
+  BitArray bit_array = createRandomBitArray(data_size, 1);
+  RankSelect rs(std::move(bit_array), GPU_index);
+  auto const num_last_l2_blocks =
+      (data_size % RSConfig::L1_BIT_SIZE + RSConfig::L2_BIT_SIZE - 1) /
+      RSConfig::L2_BIT_SIZE;
+  auto const num_l1_blocks =
+      (data_size + RSConfig::L1_BIT_SIZE - 1) / RSConfig::L1_BIT_SIZE;
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  for (auto const tpb : threads_per_block_vec) {
+    // Warmup
+    for (uint8_t i = 0; i < 2; ++i) {
+      calculateL2EntriesKernel<<<num_l1_blocks, tpb>>>(
+          rs, 0, num_last_l2_blocks, num_l1_blocks, tpb,
+          (RSConfig::NUM_L2_PER_L1 + tpb - 1) / tpb, data_size);
+      kernelCheck();
+    }
+
+    std::vector<float> times(num_iters);
+    for (uint8_t i = 0; i < num_iters; ++i) {
+      cudaEventRecord(start);
+      calculateL2EntriesKernel<<<num_l1_blocks, tpb>>>(
+          rs, 0, num_last_l2_blocks, num_l1_blocks, tpb,
+          (RSConfig::NUM_L2_PER_L1 + tpb - 1) / tpb, data_size);
+      cudaEventRecord(stop);
+      kernelCheck();
+      cudaEventSynchronize(stop);
+      cudaEventElapsedTime(&times[i], start, stop);
+    }
+    // Write median time to CSV
+    std::nth_element(times.begin(), times.begin() + times.size() / 2,
+                     times.end());
+    std::ofstream file(out_file, std::ios_base::app);
+    file << tpb << "," << times[num_iters / 2] << "," << GPU_name << std::endl;
+    file.close();
+  }
+}
 }  // namespace ecl
 
 int main(int argc, char* argv[]) {
@@ -164,5 +225,6 @@ int main(int argc, char* argv[]) {
   auto const GPU_index = std::stoi(argv[2]);
   ecl::checkWarpSize(GPU_index);
   ecl::tuneQueries(std::string(parent_dir), GPU_index);
+  ecl::tuneL2entriesKernel(std::string(parent_dir), GPU_index);
   return 0;
 }

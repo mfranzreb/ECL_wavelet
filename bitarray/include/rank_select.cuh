@@ -229,10 +229,15 @@ class RankSelect {
             bit_array_.sizeHost(i));
         kernelStreamCheck(cudaStreamPerThread);
       } else {
+        auto const& ideal_configs = getIdealConfigs(prop.name);
+        uint32_t const block_size =
+            ideal_configs.ideal_TPB_calculateL2EntriesKernel != 0
+                ? ideal_configs.ideal_TPB_calculateL2EntriesKernel
+                : min_block_size;
         // calculate L2 entries for all L1 blocks
-        calculateL2EntriesKernel<<<num_l1_blocks, min_block_size>>>(
-            *this, i, num_last_l2_blocks[i], num_l1_blocks, min_block_size,
-            (RSConfig::NUM_L2_PER_L1 + min_block_size - 1) / min_block_size,
+        calculateL2EntriesKernel<<<num_l1_blocks, block_size>>>(
+            *this, i, num_last_l2_blocks[i], num_l1_blocks, block_size,
+            (RSConfig::NUM_L2_PER_L1 + block_size - 1) / block_size,
             bit_array_.sizeHost(i));
         kernelStreamCheck(cudaStreamPerThread);
 

@@ -47,21 +47,16 @@ class RankSelect;
  * \param num_last_l2_blocks Number of L2 blocks in the last L1 block.
  */
 // TODO: retune kernel
-template <int ThreadsPerL2>
-__global__ void calculateL2EntriesKernel(RankSelect rank_select,
-                                         uint32_t const array_index,
-                                         uint16_t const num_last_l2_blocks,
-                                         size_t const num_l1_blocks,
-                                         uint32_t const num_groups,
-                                         uint32_t const num_iters,
-                                         size_t const bit_array_size);
+__global__ static void calculateL2EntriesKernel(
+    RankSelect rank_select, uint32_t const array_index,
+    uint16_t const num_last_l2_blocks, size_t const num_l1_blocks,
+    uint32_t const num_threads, uint32_t const num_iters,
+    size_t const bit_array_size);
 
-template <int ThreadsPerQuery>
-__global__ void calculateSelectSamplesKernel(RankSelect rank_select,
-                                             uint32_t const array_index,
-                                             size_t const num_groups,
-                                             size_t const num_ones_samples,
-                                             size_t const num_zeros_samples);
+__global__ static void calculateSelectSamplesKernel(
+    RankSelect rank_select, uint32_t const array_index,
+    size_t const num_threads, size_t const num_ones_samples,
+    size_t const num_zeros_samples);
 
 __global__ static void addNumOnesKernel(RankSelect rank_select,
                                         uint32_t const num_arrays);
@@ -193,11 +188,9 @@ class RankSelect {
     gpuErrchk(cudaMallocAsync(&d_temp_storage, temp_storage_bytes,
                               cudaStreamDefault));
 
-    uint8_t constexpr ThreadsPerL2 = 1;
     // Choose maximum possible items per thread
     struct cudaFuncAttributes funcAttrib;
-    gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
-                                    calculateL2EntriesKernel<ThreadsPerL2>));
+    gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
 
     auto max_block_size =
         std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
@@ -223,27 +216,24 @@ class RankSelect {
 
       if (num_l1_blocks == 1) {
         uint32_t block_size =
-            std::min(max_block_size,
-                     static_cast<uint32_t>(num_l2_blocks * ThreadsPerL2));
+            std::min(max_block_size, static_cast<uint32_t>(num_l2_blocks));
 
         // Round up to next WS
         if (block_size % WS != 0) {
           block_size += (WS - block_size % WS);
         }
 
-        calculateL2EntriesKernel<ThreadsPerL2><<<1, block_size>>>(
-            *this, i, num_l2_blocks, num_l1_blocks, block_size / ThreadsPerL2,
+        calculateL2EntriesKernel<<<1, block_size>>>(
+            *this, i, num_l2_blocks, num_l1_blocks, block_size,
             (RSConfig::NUM_L2_PER_L1 + block_size - 1) / block_size,
             bit_array_.sizeHost(i));
         kernelStreamCheck(cudaStreamPerThread);
       } else {
         // calculate L2 entries for all L1 blocks
-        calculateL2EntriesKernel<ThreadsPerL2>
-            <<<num_l1_blocks, min_block_size>>>(
-                *this, i, num_last_l2_blocks[i], num_l1_blocks,
-                min_block_size / ThreadsPerL2,
-                (RSConfig::NUM_L2_PER_L1 + min_block_size - 1) / min_block_size,
-                bit_array_.sizeHost(i));
+        calculateL2EntriesKernel<<<num_l1_blocks, min_block_size>>>(
+            *this, i, num_last_l2_blocks[i], num_l1_blocks, min_block_size,
+            (RSConfig::NUM_L2_PER_L1 + min_block_size - 1) / min_block_size,
+            bit_array_.sizeHost(i));
         kernelStreamCheck(cudaStreamPerThread);
 
         RSConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
@@ -306,7 +296,6 @@ class RankSelect {
                          num_arrays * sizeof(size_t), cudaMemcpyHostToDevice));
     kernelCheck();
 
-    uint8_t constexpr TPQ = 1;
     if (total_ones_samples > 0 or total_zeros_samples > 0) {
 #pragma omp parallel for num_threads(num_arrays)
       for (uint8_t i = 0; i < num_arrays; i++) {
@@ -327,13 +316,12 @@ class RankSelect {
                                                 prop.multiProcessorCount +
                                             WS - 1) /
                                            WS),
-                       (num_ones_samples + num_zeros_samples + TPQ - 1) / TPQ);
+                       num_ones_samples + num_zeros_samples);
           auto const [blocks, threads] =
               getLaunchConfig(num_warps, kMinTPB, kMaxTPB);
 
-          calculateSelectSamplesKernel<TPQ>
-              <<<blocks, threads>>>(*this, i, (blocks * threads) / TPQ,
-                                    num_ones_samples, num_zeros_samples);
+          calculateSelectSamplesKernel<<<blocks, threads>>>(
+              *this, i, blocks * threads, num_ones_samples, num_zeros_samples);
           kernelStreamCheck(cudaStreamPerThread);
         }
       }
@@ -995,56 +983,35 @@ class RankSelect {
  * \param array_index Index of the bit array to be used.
  * \param num_last_l2_blocks Number of L2 blocks in the last L1 block.
  */
-// TODO: reoptimize and retune kernel
-// TODO: fuse bothe kernels together
-template <int ThreadsPerL2>
-__global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
+__global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
     RankSelect rank_select, uint32_t const array_index,
     uint16_t const num_last_l2_blocks, size_t const num_l1_blocks,
-    uint32_t const num_groups, uint32_t const num_iters,
+    uint32_t const num_threads, uint32_t const num_iters,
     size_t const bit_array_size) {
   assert(blockDim.x % WS == 0);
   static_assert(RSConfig::NUM_L2_PER_L1 % WS == 0);
   __shared__ RSConfig::L2_TYPE l2_entries[RSConfig::NUM_L2_PER_L1];
 
-  uint32_t const group_id = threadIdx.x / ThreadsPerL2;
-  uint32_t const local_t_id = threadIdx.x % ThreadsPerL2;
-  uint32_t mask;
-  if constexpr (ThreadsPerL2 > 1) {
-    mask = ~0;
-    if constexpr (ThreadsPerL2 < WS) {
-      mask = ((1 << ThreadsPerL2) - 1)
-             << (ThreadsPerL2 * ((threadIdx.x % WS) / ThreadsPerL2));
-    }
-  }
+  auto const t_id = threadIdx.x;
   if (blockIdx.x < gridDim.x - 1) {
     size_t const offset = rank_select.bit_array_.getOffset(array_index);
     // find L1 block index
     auto const l1_index = blockIdx.x;
 
-    for (uint32_t i = group_id; i < RSConfig::NUM_L2_PER_L1; i += num_groups) {
+    for (uint32_t i = t_id; i < RSConfig::NUM_L2_PER_L1; i += num_threads) {
       RSConfig::L2_TYPE num_ones = 0;
       size_t const start_word =
           l1_index * RSConfig::L1_WORD_SIZE + i * RSConfig::L2_WORD_SIZE;
 
       size_t const end_word = start_word + RSConfig::L2_WORD_SIZE;
-      for (size_t j = start_word + 2 * local_t_id; j < end_word;
-           j += 2 * ThreadsPerL2) {
+      for (size_t j = start_word; j < end_word; j += 2) {
         // Global memory load
         // load as 64 bits.
         uint64_t const word =
             rank_select.bit_array_.twoWords(array_index, j, offset);
         num_ones += __popcll(word);
       }
-
-      if constexpr (ThreadsPerL2 > 1) {
-        num_ones = rank_select.warpReduce<RSConfig::L2_TYPE, ThreadsPerL2>(
-            mask, num_ones);
-      }
-
-      if (local_t_id == 0) {
-        l2_entries[i] = num_ones;
-      }
+      l2_entries[i] = num_ones;
     }
 
     __syncthreads();
@@ -1090,15 +1057,14 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
     auto const l1_start_word =
         (rank_select.getNumL1Blocks(array_index) - 1) * RSConfig::L1_WORD_SIZE;
 
-    for (uint32_t i = group_id; i < num_last_l2_blocks; i += num_groups) {
+    for (uint32_t i = t_id; i < num_last_l2_blocks; i += num_threads) {
       RSConfig::L2_TYPE num_ones = 0;
       size_t const start_word = l1_start_word + i * RSConfig::L2_WORD_SIZE;
 
       size_t const end_word =
           min(rank_select.bit_array_.sizeInWords(array_index),
               start_word + RSConfig::L2_WORD_SIZE);
-      for (size_t j = start_word + local_t_id; j < end_word;
-           j += ThreadsPerL2) {
+      for (size_t j = start_word; j < end_word; j++) {
         uint32_t word = rank_select.bit_array_.word(array_index, j);
 
         if (j == (bit_array_size + sizeof(uint32_t) * 8 - 1) /
@@ -1111,15 +1077,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
         }
         num_ones += __popc(word);
       }
-
-      if constexpr (ThreadsPerL2 > 1) {
-        num_ones = rank_select.warpReduce<RSConfig::L2_TYPE, ThreadsPerL2>(
-            mask, num_ones);
-      }
-
-      if (local_t_id == 0) {
-        l2_entries[i] = num_ones;
-      }
+      l2_entries[i] = num_ones;
     }
 
     __syncthreads();
@@ -1164,34 +1122,29 @@ __global__ LB(MAX_TPB, MIN_BPM) void calculateL2EntriesKernel(
   return;
 }
 
-template <int ThreadsPerQuery>
-__global__ LB(MAX_TPB, MIN_BPM) void calculateSelectSamplesKernel(
-    RankSelect rank_select, uint32_t const array_index, size_t const num_groups,
-    size_t const num_ones_samples, size_t const num_zeros_samples) {
+__global__ LB(MAX_TPB, MIN_BPM) static void calculateSelectSamplesKernel(
+    RankSelect rank_select, uint32_t const array_index,
+    size_t const num_threads, size_t const num_ones_samples,
+    size_t const num_zeros_samples) {
   assert(blockDim.x % WS == 0);
 
-  size_t const global_group_id =
-      (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerQuery;
+  size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
   size_t const offset = rank_select.bit_array_.getOffset(array_index);
   // 0-th sample not taken
-  for (size_t i = global_group_id; i < num_ones_samples; i += num_groups) {
-    size_t const pos = rank_select.select<1, ThreadsPerQuery, false>(
+  for (size_t i = global_t_id; i < num_ones_samples; i += num_threads) {
+    size_t const pos = rank_select.select<1, 1, false>(
         array_index, (i + 1) * RSConfig::SELECT_SAMPLE_RATE, offset);
 
     assert(pos < rank_select.bit_array_.size(array_index));
-    if (threadIdx.x % ThreadsPerQuery == 0) {
-      rank_select.writeSelectSample<1>(array_index, i, pos);
-    }
+    rank_select.writeSelectSample<1>(array_index, i, pos);
   }
 
-  for (size_t i = global_group_id; i < num_zeros_samples; i += num_groups) {
-    size_t const pos = rank_select.select<0, ThreadsPerQuery, false>(
+  for (size_t i = global_t_id; i < num_zeros_samples; i += num_threads) {
+    size_t const pos = rank_select.select<0, 1, false>(
         array_index, (i + 1) * RSConfig::SELECT_SAMPLE_RATE, offset);
 
     assert(pos < rank_select.bit_array_.size(array_index));
-    if (threadIdx.x % ThreadsPerQuery == 0) {
-      rank_select.writeSelectSample<0>(array_index, i, pos);
-    }
+    rank_select.writeSelectSample<0>(array_index, i, pos);
   }
 }
 

@@ -46,8 +46,7 @@ class RankSelect;
  * \param array_index Index of the bit array to be used.
  * \param num_last_l2_blocks Number of L2 blocks in the last L1 block.
  */
-// TODO: reoptimize and retune kernel
-// TODO: fuse bothe kernels together
+// TODO: retune kernel
 template <int ThreadsPerL2>
 __global__ void calculateL2EntriesKernel(RankSelect rank_select,
                                          uint32_t const array_index,
@@ -98,11 +97,12 @@ class RankSelect {
                           RSConfig::L1_BIT_SIZE;
     }
     // transfer to device
-    gpuErrchk(
-        cudaMalloc(&d_num_l1_blocks_, num_l1_blocks_.size() * sizeof(size_t)));
-    gpuErrchk(cudaMemcpy(d_num_l1_blocks_, num_l1_blocks_.data(),
-                         num_l1_blocks_.size() * sizeof(size_t),
-                         cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMallocAsync(&d_num_l1_blocks_,
+                              num_l1_blocks_.size() * sizeof(size_t),
+                              cudaStreamDefault));
+    gpuErrchk(cudaMemcpyAsync(d_num_l1_blocks_, num_l1_blocks_.data(),
+                              num_l1_blocks_.size() * sizeof(size_t),
+                              cudaMemcpyHostToDevice, cudaStreamDefault));
     size_t total_l1_blocks = 0;
     for (auto const& num_blocks : num_l1_blocks_) {
       total_l1_blocks += num_blocks;
@@ -110,19 +110,22 @@ class RankSelect {
     // Allocate memory for the L1 index.
     // For convenience, first entry is for the first block, which is
     // always 0.
-    gpuErrchk(cudaMalloc(&d_l1_indices_,
-                         total_l1_blocks * sizeof(RSConfig::L1_TYPE)));
-    gpuErrchk(cudaMemset(d_l1_indices_, 0,
-                         total_l1_blocks * sizeof(RSConfig::L1_TYPE)));
+    gpuErrchk(cudaMallocAsync(&d_l1_indices_,
+                              total_l1_blocks * sizeof(RSConfig::L1_TYPE),
+                              cudaStreamDefault));
+    gpuErrchk(cudaMemsetAsync(d_l1_indices_, 0,
+                              total_l1_blocks * sizeof(RSConfig::L1_TYPE),
+                              cudaStreamDefault));
 
     std::vector<size_t> l1_offsets(num_l1_blocks_.size());
 
     std::exclusive_scan(num_l1_blocks_.begin(), num_l1_blocks_.end(),
                         l1_offsets.begin(), 0);
-    gpuErrchk(cudaMalloc(&d_l1_offsets_, l1_offsets.size() * sizeof(size_t)));
-    gpuErrchk(cudaMemcpy(d_l1_offsets_, l1_offsets.data(),
-                         l1_offsets.size() * sizeof(size_t),
-                         cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMallocAsync(
+        &d_l1_offsets_, l1_offsets.size() * sizeof(size_t), cudaStreamDefault));
+    gpuErrchk(cudaMemcpyAsync(d_l1_offsets_, l1_offsets.data(),
+                              l1_offsets.size() * sizeof(size_t),
+                              cudaMemcpyHostToDevice, cudaStreamDefault));
 
     // Get how many l2 blocks each last L1 block has
     std::vector<uint16_t> num_last_l2_blocks(num_arrays);
@@ -135,11 +138,12 @@ class RankSelect {
       }
     }
     // transfer to device
-    gpuErrchk(cudaMalloc(&d_num_last_l2_blocks_,
-                         num_last_l2_blocks.size() * sizeof(uint16_t)));
-    gpuErrchk(cudaMemcpy(d_num_last_l2_blocks_, num_last_l2_blocks.data(),
-                         num_last_l2_blocks.size() * sizeof(uint16_t),
-                         cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMallocAsync(&d_num_last_l2_blocks_,
+                              num_last_l2_blocks.size() * sizeof(uint16_t),
+                              cudaStreamDefault));
+    gpuErrchk(cudaMemcpyAsync(d_num_last_l2_blocks_, num_last_l2_blocks.data(),
+                              num_last_l2_blocks.size() * sizeof(uint16_t),
+                              cudaMemcpyHostToDevice, cudaStreamDefault));
 
     std::vector<size_t> num_l2_blocks_per_arr(num_arrays);
     for (size_t i = 0; i < num_arrays; ++i) {
@@ -156,20 +160,23 @@ class RankSelect {
     // Allocate memory for the L2 index.
     // For convenience, right now first entry is for the first block, which is
     // always 0.
-    gpuErrchk(cudaMalloc(&d_l2_indices_,
-                         total_num_l2_blocks_ * sizeof(RSConfig::L2_TYPE)));
-    gpuErrchk(cudaMemset(d_l2_indices_, 0,
-                         total_num_l2_blocks_ * sizeof(RSConfig::L2_TYPE)));
+    gpuErrchk(cudaMallocAsync(&d_l2_indices_,
+                              total_num_l2_blocks_ * sizeof(RSConfig::L2_TYPE),
+                              cudaStreamDefault));
+    gpuErrchk(cudaMemsetAsync(d_l2_indices_, 0,
+                              total_num_l2_blocks_ * sizeof(RSConfig::L2_TYPE),
+                              cudaStreamDefault));
 
     std::exclusive_scan(num_l2_blocks_per_arr.begin(),
                         num_l2_blocks_per_arr.end(),
                         num_l2_blocks_per_arr.begin(), 0);
 
-    gpuErrchk(cudaMalloc(&d_l2_offsets_,
-                         num_l2_blocks_per_arr.size() * sizeof(size_t)));
-    gpuErrchk(cudaMemcpy(d_l2_offsets_, num_l2_blocks_per_arr.data(),
-                         num_l2_blocks_per_arr.size() * sizeof(size_t),
-                         cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMallocAsync(&d_l2_offsets_,
+                              num_l2_blocks_per_arr.size() * sizeof(size_t),
+                              cudaStreamDefault));
+    gpuErrchk(cudaMemcpyAsync(d_l2_offsets_, num_l2_blocks_per_arr.data(),
+                              num_l2_blocks_per_arr.size() * sizeof(size_t),
+                              cudaMemcpyHostToDevice, cudaStreamDefault));
 
     // TODO loop unnecessary for wavelet tree
     // Get maximum storage needed for device sums
@@ -183,7 +190,8 @@ class RankSelect {
       temp_storage_bytes = std::max(temp_storage_bytes, prev_storage_bytes);
     }
     void* d_temp_storage = nullptr;
-    gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+    gpuErrchk(cudaMallocAsync(&d_temp_storage, temp_storage_bytes,
+                              cudaStreamDefault));
 
     uint8_t constexpr ThreadsPerL2 = 1;
     // Choose maximum possible items per thread
@@ -204,6 +212,7 @@ class RankSelect {
       min_block_size += kMinTPB;
     }
     gpuErrchk(cudaMalloc(&d_total_num_ones_, num_arrays * sizeof(size_t)));
+    kernelCheck();
 #pragma omp parallel for num_threads(num_arrays)
     for (uint32_t i = 0; i < num_arrays; i++) {
       auto const num_l1_blocks = num_l1_blocks_[i];
@@ -247,16 +256,17 @@ class RankSelect {
         }
       }
     }
-    addNumOnesKernel<<<1,
-                       std::min(kMaxTPB, static_cast<uint32_t>(num_arrays))>>>(
-        *this, num_arrays);
-    kernelCheck();
+    gpuErrchk(cudaFreeAsync(d_temp_storage, cudaStreamDefault));
+    addNumOnesKernel<<<1, std::min(kMaxTPB, static_cast<uint32_t>(num_arrays)),
+                       0, cudaStreamDefault>>>(*this, num_arrays);
     // Get the number of ones per bit array
     std::vector<size_t> num_ones_per_array(num_arrays);
-    gpuErrchk(cudaMemcpy(num_ones_per_array.data(), d_total_num_ones_,
-                         num_arrays * sizeof(size_t), cudaMemcpyDeviceToHost));
+    gpuErrchk(cudaMemcpyAsync(num_ones_per_array.data(), d_total_num_ones_,
+                              num_arrays * sizeof(size_t),
+                              cudaMemcpyDeviceToHost, cudaStreamDefault));
     std::vector<size_t> num_ones_samples_per_array(num_arrays);
     std::vector<size_t> num_zeros_samples_per_array(num_arrays);
+    kernelCheck();
     for (uint8_t i = 0; i < num_arrays; i++) {
       num_ones_samples_per_array[i] =
           num_ones_per_array[i] / RSConfig::SELECT_SAMPLE_RATE;
@@ -270,13 +280,15 @@ class RankSelect {
     std::exclusive_scan(num_ones_samples_per_array.begin(),
                         num_ones_samples_per_array.end(),
                         num_ones_samples_per_array.begin(), 0);
-    gpuErrchk(
-        cudaMalloc(&d_select_samples_1_, total_ones_samples * sizeof(size_t)));
-    gpuErrchk(
-        cudaMalloc(&d_select_samples_1_offsets_, num_arrays * sizeof(size_t)));
-    gpuErrchk(cudaMemcpy(d_select_samples_1_offsets_,
-                         num_ones_samples_per_array.data(),
-                         num_arrays * sizeof(size_t), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMallocAsync(&d_select_samples_1_,
+                              total_ones_samples * sizeof(size_t),
+                              cudaStreamDefault));
+    gpuErrchk(cudaMallocAsync(&d_select_samples_1_offsets_,
+                              num_arrays * sizeof(size_t), cudaStreamDefault));
+    gpuErrchk(cudaMemcpyAsync(d_select_samples_1_offsets_,
+                              num_ones_samples_per_array.data(),
+                              num_arrays * sizeof(size_t),
+                              cudaMemcpyHostToDevice, cudaStreamDefault));
 
     size_t const total_zeros_samples =
         std::accumulate(num_zeros_samples_per_array.begin(),
@@ -284,13 +296,15 @@ class RankSelect {
     std::exclusive_scan(num_zeros_samples_per_array.begin(),
                         num_zeros_samples_per_array.end(),
                         num_zeros_samples_per_array.begin(), 0);
-    gpuErrchk(
-        cudaMalloc(&d_select_samples_0_, total_zeros_samples * sizeof(size_t)));
-    gpuErrchk(
-        cudaMalloc(&d_select_samples_0_offsets_, num_arrays * sizeof(size_t)));
+    gpuErrchk(cudaMallocAsync(&d_select_samples_0_,
+                              total_zeros_samples * sizeof(size_t),
+                              cudaStreamDefault));
+    gpuErrchk(cudaMallocAsync(&d_select_samples_0_offsets_,
+                              num_arrays * sizeof(size_t), cudaStreamDefault));
     gpuErrchk(cudaMemcpy(d_select_samples_0_offsets_,
                          num_zeros_samples_per_array.data(),
                          num_arrays * sizeof(size_t), cudaMemcpyHostToDevice));
+    kernelCheck();
 
     uint8_t constexpr TPQ = 1;
     if (total_ones_samples > 0 or total_zeros_samples > 0) {
@@ -324,7 +338,6 @@ class RankSelect {
         }
       }
     }
-    gpuErrchk(cudaFree(d_temp_storage));
     kernelCheck();
   }
 

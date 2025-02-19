@@ -73,7 +73,6 @@ void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
   while (not stop.load()) {
     gpuErrchk(cudaMemGetInfo(&free_bytes, &total_bytes));
     max_memory_usage = std::max(max_memory_usage, total_bytes - free_bytes);
-    std::this_thread::sleep_for(std::chrono::microseconds(1));
   }
   max_memory_usage -= start_bytes;
 }

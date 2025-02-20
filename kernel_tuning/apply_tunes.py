@@ -41,6 +41,20 @@ def apply_l2kernel_tunes(tune_files):
     return ".ideal_TPB_calculateL2EntriesKernel = " + str(int(best_tpb))
 
 
+def apply_samples_kernel_tunes(tune_files):
+    for file in tune_files:
+        with open(file, "r") as f:
+            df = pd.read_csv(f)
+        if "tpb" in file.lower():
+            # Get "tpb" that minimizes "time"
+            best_tpb = df.loc[df["time"].idxmin()]["tpb"]
+        elif "tot_threads" in file.lower():
+            # Get "tot_threads" that minimizes "time"
+            best_tot_threads = df.loc[df["time"].idxmin()]["tot_threads"]
+    tune_string = f".ideal_TPB_calculateSelectSamplesKernel = {int(best_tpb)}, .ideal_tot_threads_calculateSelectSamplesKernel = {int(best_tot_threads)}"
+    return tune_string
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("tune_file", type=str)
@@ -57,12 +71,18 @@ if __name__ == "__main__":
     l2kernel_tunes = [
         f for f in tune_csvs if f.split("/")[-1].startswith("calculateL2EntriesKernel")
     ]
+    samples_tunes = [
+        f
+        for f in tune_csvs
+        if f.split("/")[-1].startswith("calculateSelectSamplesKernel")
+    ]
     GPU_name = pd.read_csv(access_tunes[0])["GPU_name"][0]
     tune_string = '{"' + GPU_name + '"' + ", IdealConfigs {"
     tune_string += apply_queries_tunes(access_tunes, "access") + ","
     tune_string += apply_queries_tunes(rank_tunes, "rank") + ","
     tune_string += apply_queries_tunes(select_tunes, "select") + ","
-    tune_string += apply_l2kernel_tunes(l2kernel_tunes)
+    tune_string += apply_l2kernel_tunes(l2kernel_tunes) + ","
+    tune_string += apply_samples_kernel_tunes(samples_tunes)
     tune_string += "}}"
 
     with open(args.tune_file, "r") as f:

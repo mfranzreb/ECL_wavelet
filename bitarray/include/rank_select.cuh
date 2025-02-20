@@ -46,7 +46,6 @@ class RankSelect;
  * \param array_index Index of the bit array to be used.
  * \param num_last_l2_blocks Number of L2 blocks in the last L1 block.
  */
-// TODO: retune kernel
 __global__ static void calculateL2EntriesKernel(
     RankSelect rank_select, uint32_t const array_index,
     uint16_t const num_last_l2_blocks, size_t const num_l1_blocks,
@@ -302,6 +301,7 @@ class RankSelect {
     kernelCheck();
 
     if (total_ones_samples > 0 or total_zeros_samples > 0) {
+      auto const& ideal_configs = getIdealConfigs(prop.name);
 #pragma omp parallel for num_threads(num_arrays)
       for (uint8_t i = 0; i < num_arrays; i++) {
         size_t const num_ones_samples =
@@ -317,13 +317,25 @@ class RankSelect {
 
         if (num_ones_samples > 0 or num_zeros_samples > 0) {
           size_t const num_warps =
-              std::min(static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
-                                                prop.multiProcessorCount +
-                                            WS - 1) /
-                                           WS),
-                       num_ones_samples + num_zeros_samples);
+              ideal_configs.ideal_tot_threads_calculateSelectSamplesKernel != 0
+                  ? std::min(
+                        num_ones_samples + num_zeros_samples,
+                        ideal_configs
+                                .ideal_tot_threads_calculateSelectSamplesKernel /
+                            WS)
+                  : std::min(
+                        static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
+                                                 prop.multiProcessorCount +
+                                             WS - 1) /
+                                            WS),
+                        num_ones_samples + num_zeros_samples);
           auto const [blocks, threads] =
-              getLaunchConfig(num_warps, kMinTPB, kMaxTPB);
+              ideal_configs.ideal_TPB_calculateSelectSamplesKernel != 0
+                  ? getLaunchConfig(
+                        num_warps,
+                        ideal_configs.ideal_TPB_calculateSelectSamplesKernel,
+                        ideal_configs.ideal_TPB_calculateSelectSamplesKernel)
+                  : getLaunchConfig(num_warps, kMinTPB, kMaxTPB);
 
           calculateSelectSamplesKernel<<<blocks, threads>>>(
               *this, i, blocks * threads, num_ones_samples, num_zeros_samples);

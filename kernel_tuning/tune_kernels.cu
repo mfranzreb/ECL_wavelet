@@ -218,6 +218,132 @@ void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
     file.close();
   }
 }
+
+__global__ static void getTotalNumValsKernel(RankSelect rank_select,
+                                             uint32_t array_index,
+                                             size_t* output, bool const val) {
+  if (val) {
+    *output = rank_select.getTotalNumVals<1>(array_index);
+  } else {
+    *output = rank_select.getTotalNumVals<0>(array_index);
+  }
+}
+
+void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
+  uint8_t const num_iters = 100;
+  auto const prop = getDeviceProperties();
+  struct cudaFuncAttributes funcAttrib;
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateSelectSamplesKernel));
+  uint32_t max_size =
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  size_t const data_size = prop.totalGlobalMem / 10;
+
+  auto const GPU_name = prop.name;
+
+  // Write column names to CSV
+  std::string out_file = out_dir + "/calculateSelectSamplesKernel_TPB.csv";
+  std::ofstream file(out_file);
+  file << "tpb,time,GPU_name" << std::endl;
+  file.close();
+
+  std::vector<size_t> threads_per_block_vec;
+  for (size_t i = max_size; i >= kMinTPB; i /= 2) {
+    threads_per_block_vec.push_back(i);
+  }
+  auto const num_warps =
+      (prop.maxThreadsPerBlock * prop.multiProcessorCount + WS - 1) / WS;
+  auto bit_array = createRandomBitArray(data_size, 1);
+  RankSelect rs(std::move(bit_array), GPU_index);
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+
+  size_t* num_ones;
+  gpuErrchk(cudaMallocManaged(&num_ones, sizeof(size_t)));
+  getTotalNumValsKernel<<<1, 1>>>(rs, 0, num_ones, true);
+  kernelCheck();
+  size_t const num_ones_samples = *num_ones / RSConfig::SELECT_SAMPLE_RATE;
+  size_t const num_zeros_samples =
+      (data_size - *num_ones) / RSConfig::SELECT_SAMPLE_RATE;
+  gpuErrchk(cudaFree(num_ones));
+  for (auto const tpb : threads_per_block_vec) {
+    auto const [num_blocks, block_size] = getLaunchConfig(num_warps, tpb, tpb);
+
+    if (num_blocks == -1 or block_size == -1) {
+      continue;
+    }
+    // Warmup
+    for (uint8_t i = 0; i < 2; ++i) {
+      calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
+          rs, 0, num_blocks * block_size, num_ones_samples, num_zeros_samples);
+      kernelCheck();
+    }
+
+    std::vector<float> times(num_iters);
+    for (uint8_t i = 0; i < num_iters; ++i) {
+      cudaEventRecord(start);
+      calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
+          rs, 0, num_blocks * block_size, num_ones_samples, num_zeros_samples);
+      cudaEventRecord(stop);
+      kernelCheck();
+      cudaEventSynchronize(stop);
+      cudaEventElapsedTime(&times[i], start, stop);
+    }
+    // Write median time to CSV
+    std::nth_element(times.begin(), times.begin() + times.size() / 2,
+                     times.end());
+    std::ofstream file(out_file, std::ios_base::app);
+    file << tpb << "," << times[num_iters / 2] << "," << GPU_name << std::endl;
+    file.close();
+  }
+
+  // tune tot_threads
+  out_file = out_dir + "/calculateSelectSamplesKernel_tot_threads.csv";
+  file = std::ofstream(out_file);
+  file << "tot_threads,time,GPU_name" << std::endl;
+  file.close();
+
+  size_t const max_occ = prop.maxThreadsPerBlock * prop.multiProcessorCount;
+  std::vector<size_t> tot_threads_vec{max_occ / 5, 2 * max_occ / 5,
+                                      3 * max_occ / 5, 4 * max_occ / 5};
+  // go from 100% to 500% occupancy
+  for (size_t i = 1; i <= 5; ++i) {
+    tot_threads_vec.push_back(max_occ * i);
+  }
+  for (auto const tot_threads : tot_threads_vec) {
+    auto const [num_blocks, block_size] =
+        getLaunchConfig(tot_threads / WS, max_size, max_size);
+    if (num_blocks == -1 or block_size == -1) {
+      continue;
+    }
+    // Warmup
+    for (uint8_t i = 0; i < 2; ++i) {
+      calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
+          rs, 0, num_blocks * block_size, num_ones_samples, num_zeros_samples);
+      kernelCheck();
+    }
+
+    std::vector<float> times(num_iters);
+    for (uint8_t i = 0; i < num_iters; ++i) {
+      cudaEventRecord(start);
+      calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
+          rs, 0, num_blocks * block_size, num_ones_samples, num_zeros_samples);
+      cudaEventRecord(stop);
+      kernelCheck();
+      cudaEventSynchronize(stop);
+      cudaEventElapsedTime(&times[i], start, stop);
+    }
+    // Write median time to CSV
+    std::nth_element(times.begin(), times.begin() + times.size() / 2,
+                     times.end());
+    std::ofstream file(out_file, std::ios_base::app);
+    file << tot_threads << "," << times[num_iters / 2] << "," << GPU_name
+         << std::endl;
+    file.close();
+  }
+}
+
 }  // namespace ecl
 
 int main(int argc, char* argv[]) {
@@ -226,5 +352,6 @@ int main(int argc, char* argv[]) {
   ecl::checkWarpSize(GPU_index);
   ecl::tuneQueries(std::string(parent_dir), GPU_index);
   ecl::tuneL2entriesKernel(std::string(parent_dir), GPU_index);
+  ecl::tuneSamplesKernel(std::string(parent_dir), GPU_index);
   return 0;
 }

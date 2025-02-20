@@ -240,6 +240,9 @@ struct IdealConfigs {
 
   uint32_t ideal_TPB_calculateL2EntriesKernel = 0;
 
+  uint32_t ideal_TPB_calculateSelectSamplesKernel = 0;
+  size_t ideal_tot_threads_calculateSelectSamplesKernel = 0;
+
   uint32_t ideal_TPB_computeGlobalHistogramKernel = 0;
   size_t ideal_tot_threads_computeGlobalHistogramKernel = 0;
 

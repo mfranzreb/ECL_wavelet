@@ -502,18 +502,30 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   gpuErrchk(cudaMalloc(&d_sorted_data, data_size * sizeof(T)));
 
   // Find necessary storage for CUB exclusive sum and radix sort
-  cub::DoubleBuffer<T> d_data_buffer(d_data, d_sorted_data);
+  cub::DoubleBuffer<T> d_data_buffer;
+  ;
 
   void* d_temp_storage = nullptr;
-  size_t temp_storage_bytes = 0;
-  cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_counts_,
-                                d_counts_, alphabet_size_);
+  size_t temp_storage_bytes_sum = 0;
+  cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes_sum,
+                                d_counts_, d_counts_, alphabet_size_);
 
   size_t temp_storage_bytes_radix = 0;
   cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes_radix,
-                                 d_data_buffer, data_size);
+                                 d_data, d_sorted_data, data_size);
 
-  temp_storage_bytes = std::max(temp_storage_bytes, temp_storage_bytes_radix);
+  auto temp_storage_bytes =
+      std::max(temp_storage_bytes_sum, temp_storage_bytes_radix);
+  auto result = cudaMalloc(&d_temp_storage, temp_storage_bytes);
+  bool const use_reduced_radix_sort = result == cudaErrorMemoryAllocation;
+  if (use_reduced_radix_sort) {
+    d_data_buffer = cub::DoubleBuffer<T>(d_data, d_sorted_data);
+    d_temp_storage = nullptr;
+    cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes_radix,
+                                   d_data_buffer, data_size);
+    temp_storage_bytes =
+        std::max(temp_storage_bytes_sum, temp_storage_bytes_radix);
+  }
   gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
 
   T* d_alphabet;
@@ -532,13 +544,15 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   // Copy coded data to host
   std::span<T> coded_data;
   std::vector<T> coded_data_vec;
-  if (is_pow_two and is_min_alphabet_) {
-    coded_data = std::span<T>(data, data_size);
-  } else {
-    coded_data_vec.resize(data_size);
-    coded_data = std::span<T>(coded_data_vec.data(), data_size);
-    gpuErrchk(cudaMemcpy(coded_data.data(), d_data, data_size * sizeof(T),
-                         cudaMemcpyDeviceToHost));
+  if (use_reduced_radix_sort) {
+    if (is_pow_two and is_min_alphabet_) {
+      coded_data = std::span<T>(data, data_size);
+    } else {
+      coded_data_vec.resize(data_size);
+      coded_data = std::span<T>(coded_data_vec.data(), data_size);
+      gpuErrchk(cudaMemcpy(coded_data.data(), d_data, data_size * sizeof(T),
+                           cudaMemcpyDeviceToHost));
+    }
   }
 
   // Copy counts to host
@@ -569,20 +583,29 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   BitArray bit_array(bit_array_sizes, false);
 
-  //? bitonic sort
+  //? bitonic sort, LSD radix-sort?
   for (uint32_t l = 0; l < num_levels_; l++) {
     assert(data_size == bit_array_sizes[l]);
 
     if (l > 0) {
       // Perform radix sort
-      cub::DeviceRadixSort::SortKeys(
-          d_temp_storage, temp_storage_bytes, d_data_buffer, data_size,
-          alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
-      //  Fill l-th bit array
-      kernelCheck();
-      fillLevel(bit_array, d_data_buffer.Current(), data_size, l);
-      gpuErrchk(cudaMemcpy(d_data_buffer.Alternate(), coded_data.data(),
-                           data_size * sizeof(T), cudaMemcpyHostToDevice));
+      if (use_reduced_radix_sort) {
+        cub::DeviceRadixSort::SortKeys(
+            d_temp_storage, temp_storage_bytes, d_data_buffer, data_size,
+            alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
+        //  Fill l-th bit array
+        kernelCheck();
+        fillLevel(bit_array, d_data_buffer.Current(), data_size, l);
+        gpuErrchk(cudaMemcpy(d_data_buffer.Alternate(), coded_data.data(),
+                             data_size * sizeof(T), cudaMemcpyHostToDevice));
+      } else {
+        cub::DeviceRadixSort::SortKeys(
+            d_temp_storage, temp_storage_bytes, d_data, d_sorted_data,
+            data_size, alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
+        //  Fill l-th bit array
+        kernelCheck();
+        fillLevel(bit_array, d_sorted_data, data_size, l);
+      }
     } else {
       fillLevel(bit_array, d_data, data_size, l);
     }
@@ -596,21 +619,30 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
             thrust::remove_if(thrust::device, d_data, d_data + data_size,
                               isNotLongEnough<T>(d_code_lens, l, codes_start_));
         data_size = static_cast<size_t>(std::distance(d_data, new_end));
-        gpuErrchk(cudaMemcpy(coded_data.data(), d_data, data_size * sizeof(T),
-                             cudaMemcpyDeviceToHost));
+        if (use_reduced_radix_sort) {
+          gpuErrchk(cudaMemcpy(coded_data.data(), d_data, data_size * sizeof(T),
+                               cudaMemcpyDeviceToHost));
+        }
       } else {
-        new_end =
-            thrust::remove_if(thrust::device, d_data_buffer.Alternate(),
-                              d_data_buffer.Alternate() + data_size,
-                              isNotLongEnough<T>(d_code_lens, l, codes_start_));
-        data_size = static_cast<size_t>(
-            std::distance(d_data_buffer.Alternate(), new_end));
-        gpuErrchk(cudaMemcpy(coded_data.data(), d_data_buffer.Alternate(),
-                             data_size * sizeof(T), cudaMemcpyDeviceToHost));
+        if (use_reduced_radix_sort) {
+          new_end = thrust::remove_if(
+              thrust::device, d_data_buffer.Alternate(),
+              d_data_buffer.Alternate() + data_size,
+              isNotLongEnough<T>(d_code_lens, l, codes_start_));
+          data_size = static_cast<size_t>(
+              std::distance(d_data_buffer.Alternate(), new_end));
+          gpuErrchk(cudaMemcpy(coded_data.data(), d_data_buffer.Alternate(),
+                               data_size * sizeof(T), cudaMemcpyDeviceToHost));
+        } else {
+          T* new_end = thrust::remove_if(
+              thrust::device, d_data, d_data + data_size,
+              isNotLongEnough<T>(d_code_lens, l, codes_start_));
+          data_size = static_cast<size_t>(std::distance(d_data, new_end));
+        }
       }
     }
     // Swap buffers
-    if (l > 0) {
+    if (use_reduced_radix_sort and l > 0) {
       d_data_buffer = cub::DoubleBuffer<T>(d_data_buffer.Alternate(),
                                            d_data_buffer.Current());
     }

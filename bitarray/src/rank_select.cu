@@ -146,4 +146,33 @@ __device__ void RankSelect::writeNumLastL2Blocks(
   d_num_last_l2_blocks_[array_index] = value;
 }
 
+__host__ [[nodiscard]] size_t RankSelect::getNeededGPUMemory(
+    size_t const size, uint8_t const num_arrays) noexcept {
+  size_t total_size = 0;
+  total_size += num_arrays * sizeof(size_t);  // d_num_l1_blocks_
+  size_t const num_l1_blocks_per_arr =
+      (size + RSConfig::L1_BIT_SIZE - 1) / RSConfig::L1_BIT_SIZE;
+  total_size +=
+      num_l1_blocks_per_arr * num_arrays *
+      sizeof(RSConfig::L1_TYPE);  // Upper bound of memory for d_l1_indices_
+  total_size += num_arrays * sizeof(size_t);    // d_l1_offsets_
+  total_size += num_arrays * sizeof(uint16_t);  // d_num_last_l2_blocks_
+  total_size +=
+      ((size + RSConfig::L2_BIT_SIZE - 1) / RSConfig::L2_BIT_SIZE) *
+      num_arrays *
+      sizeof(RSConfig::L2_TYPE);  // Upper bound of memory for d_l2_indices_
+  total_size += num_arrays * sizeof(size_t);  // d_l2_offsets_
+  size_t temp_storage_bytes = 0;
+  RSConfig::L1_TYPE* d_data = nullptr;
+  gpuErrchk(cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes, d_data,
+                                          num_l1_blocks_per_arr));
+  total_size += temp_storage_bytes;
+  total_size += num_arrays * sizeof(size_t);  // d_total_num_ones_
+  total_size += num_arrays * (size / RSConfig::SELECT_SAMPLE_RATE) *
+                sizeof(size_t);  // d_select_samples_0_ and d_select_samples_1_
+  total_size += num_arrays * sizeof(size_t);  // d_select_samples_0_offsets_
+  total_size += num_arrays * sizeof(size_t);  // d_select_samples_1_offsets_
+  return total_size;
+}
+
 }  // namespace ecl

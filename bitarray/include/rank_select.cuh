@@ -962,6 +962,9 @@ class RankSelect {
     return base;
   }
 
+  __host__ [[nodiscard]] static size_t getNeededGPUMemory(
+      size_t const size, uint8_t const num_arrays) noexcept;
+
  private:
   // TODO: num_l1_blocks and l2 blocks not necessary
   RSConfig::L1_TYPE*

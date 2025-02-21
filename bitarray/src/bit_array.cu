@@ -234,6 +234,19 @@ __device__ [[nodiscard]] size_t BitArray::sizeInWords(
 __host__ __device__ [[nodiscard]] uint8_t BitArray::numArrays() const noexcept {
   return num_arrays_;
 }
+
+__host__ [[nodiscard]] size_t BitArray::getNeededGPUMemory(
+    size_t const size, uint8_t const num_arrays) noexcept {
+  size_t total_size = 0;
+  total_size += num_arrays * sizeof(size_t);  // Memory for d_bit_sizes_
+  total_size +=
+      num_arrays *
+      (((size + 7) / 8) +
+       kBankSizeBytes * kBanksPerLine);  // Upper bound of memory for d_data_
+  total_size += num_arrays * sizeof(size_t);  // Memory for d_offsets_
+  return total_size;
+}
+
 }  // namespace ecl
 
 /******************************************************************************/

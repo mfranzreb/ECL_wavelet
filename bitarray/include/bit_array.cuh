@@ -186,6 +186,9 @@ class BitArray {
    */
   __host__ __device__ [[nodiscard]] uint8_t numArrays() const noexcept;
 
+  __host__ [[nodiscard]] static size_t getNeededGPUMemory(
+      size_t const size, uint8_t const num_arrays) noexcept;
+
   // TODO: add counter per copied class
   // TODO template word size
  private:

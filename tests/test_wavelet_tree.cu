@@ -13,6 +13,8 @@ namespace ecl {
 
 static constexpr uint8_t kGPUIndex = 0;
 
+static constexpr uint8_t kMinAlphabetSize = 3;
+
 template <typename T>
 class WaveletTreeTest : public WaveletTree<T> {
  public:
@@ -150,6 +152,13 @@ TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
   {
     data = std::vector<TypeParam>{0, 1, 2, 3};
     std::vector<TypeParam> alphabet{0, 1, 2, 3};
+
+    WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
+                              kGPUIndex);
+  }
+  {
+    data = std::vector<TypeParam>{0, 1, 2};
+    std::vector<TypeParam> alphabet{0, 1, 2};
 
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
@@ -587,9 +596,9 @@ TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
     compareAccessResults<TypeParam, 32>(wt, indices, data);
   }
   if constexpr (sizeof(TypeParam) == 1) {
-    // test alphabet sizes of 4, 32, 128
+    // test alphabet sizes of 3, 4, 32, 128 and 256
     size_t data_size = 1000 + (rand() % 1'000'000);
-    for (auto const alphabet_size : {4, 32, 128}) {
+    for (auto const alphabet_size : {kMinAlphabetSize, 4, 32, 128, 256}) {
       auto [alphabet, data] = generateRandomAlphabetAndData<TypeParam>(
           alphabet_size, data_size, true);
 
@@ -607,9 +616,8 @@ TYPED_TEST(WaveletTreeTestFixture, accessRandom) {
       compareAccessResults<TypeParam, 32>(wt, indices, data);
     }
   } else if (sizeof(TypeParam) == 2) {
-    // test alphabet sizes of 4, 32, 128
     size_t data_size = 100'000 + (rand() % 1'000'000);
-    size_t alphabet_size = 16384;
+    size_t alphabet_size = std::numeric_limits<uint16_t>::max();
     auto [alphabet, data] = generateRandomAlphabetAndData<TypeParam>(
         alphabet_size, data_size, true);
 
@@ -668,6 +676,7 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
     auto [alphabet, data] =
         generateRandomAlphabetAndData<TypeParam>(alphabet_size, data_size);
     alphabet_size = alphabet.size();
+
     auto alphabet_copy = alphabet;
 
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
@@ -680,6 +689,7 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
                                                         alphabet_copy);
 
     std::vector<size_t> results_should(queries.size());
+#pragma omp parallel for
     for (size_t j = 0; j < queries.size(); ++j) {
       results_should[j] = std::count(
           data.begin(), data.begin() + queries[j].index_, queries[j].symbol_);
@@ -692,9 +702,9 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
     compareRankResults<TypeParam, 32>(wt, queries, results_should);
   }
   if constexpr (sizeof(TypeParam) == 1) {
-    // test alphabet sizes of 4, 32, 128
+    // test alphabet sizes of 3, 4, 32, 128
     size_t data_size = 1000 + (rand() % 1'000'000);
-    for (auto const alphabet_size : {4, 32, 128}) {
+    for (auto const alphabet_size : {kMinAlphabetSize, 4, 32, 128, 256}) {
       auto [alphabet, data] = generateRandomAlphabetAndData<TypeParam>(
           alphabet_size, data_size, true);
       auto alphabet_copy = alphabet;
@@ -707,6 +717,7 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
           data_size, num_queries, alphabet_copy);
 
       std::vector<size_t> results_should(queries.size());
+#pragma omp parallel for
       for (size_t j = 0; j < queries.size(); ++j) {
         results_should[j] = std::count(
             data.begin(), data.begin() + queries[j].index_, queries[j].symbol_);
@@ -720,9 +731,8 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
       compareRankResults<TypeParam, 32>(wt, queries, results_should);
     }
   } else if (sizeof(TypeParam) == 2) {
-    // test alphabet sizes of 4, 32, 128
     size_t data_size = 100'000 + (rand() % 1'000'000);
-    size_t alphabet_size = 16384;
+    size_t alphabet_size = std::numeric_limits<uint16_t>::max();
     auto [alphabet, data] = generateRandomAlphabetAndData<TypeParam>(
         alphabet_size, data_size, true);
     auto alphabet_copy = alphabet;
@@ -735,6 +745,7 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
                                                         alphabet_copy);
 
     std::vector<size_t> results_should(queries.size());
+#pragma omp parallel for
     for (size_t j = 0; j < queries.size(); ++j) {
       results_should[j] = std::count(
           data.begin(), data.begin() + queries[j].index_, queries[j].symbol_);
@@ -824,9 +835,9 @@ TYPED_TEST(WaveletTreeTestFixture, selectRandom) {
     compareSelectResults<TypeParam, 32>(wt, queries, results_should);
   }
   if constexpr (sizeof(TypeParam) == 1) {
-    // test alphabet sizes of 4, 32, 128
+    // test alphabet sizes of 3, 4, 32, 128
     size_t data_size = 1000 + (rand() % 1'000'000);
-    for (auto const alphabet_size : {4, 32, 128}) {
+    for (auto const alphabet_size : {kMinAlphabetSize, 4, 32, 128, 256}) {
       std::vector<TypeParam> alphabet(alphabet_size);
       std::iota(alphabet.begin(), alphabet.end(), 0);
       auto [data, hist] =
@@ -860,9 +871,8 @@ TYPED_TEST(WaveletTreeTestFixture, selectRandom) {
       compareSelectResults<TypeParam, 32>(wt, queries, results_should);
     }
   } else if (sizeof(TypeParam) == 2) {
-    // test alphabet sizes of 4, 32, 128
     size_t data_size = 100'000 + (rand() % 1'000'000);
-    size_t alphabet_size = 16384;
+    size_t alphabet_size = std::numeric_limits<uint16_t>::max();
     std::vector<TypeParam> alphabet(alphabet_size);
     std::iota(alphabet.begin(), alphabet.end(), 0);
     auto [data, hist] =

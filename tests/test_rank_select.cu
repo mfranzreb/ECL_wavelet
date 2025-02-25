@@ -371,9 +371,12 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesContent) {
   std::vector<size_t> BA_sizes{
       1,
       RSConfig::SELECT_SAMPLE_RATE - 1,
+      RSConfig::SELECT_SAMPLE_RATE,
       RSConfig::SELECT_SAMPLE_RATE + 1,
       2 * RSConfig::SELECT_SAMPLE_RATE - 1,
+      2 * RSConfig::SELECT_SAMPLE_RATE,
       2 * RSConfig::SELECT_SAMPLE_RATE + 1,
+      6 * RSConfig::SELECT_SAMPLE_RATE,
       6 * RSConfig::L2_BIT_SIZE + RSConfig::L2_BIT_SIZE / 5};
   for (bool const val : {true, false}) {
     BitArray bit_array(BA_sizes, val);
@@ -555,7 +558,8 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
         std::vector<size_t>{
             RSConfig::L2_BIT_SIZE + 1, 2 * RSConfig::L2_BIT_SIZE - 1,
             RSConfig::L1_BIT_SIZE - 1, RSConfig::L1_BIT_SIZE + 1,
-            2 * RSConfig::L1_BIT_SIZE - 1, 2 * RSConfig::L1_BIT_SIZE + 1},
+            2 * RSConfig::L1_BIT_SIZE - 1, 2 * RSConfig::L1_BIT_SIZE + 1,
+            3 * RSConfig::L1_BIT_SIZE},
         val);
     auto num_arrays = bit_array.numArrays();
 
@@ -600,9 +604,9 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
           kernelCheck();
           EXPECT_EQ(*result, 0);
           rank1Kernel<NumThreads>
-              <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
+              <<<1, NumThreads>>>(rank_select, i, bit_size, result);
           kernelCheck();
-          EXPECT_EQ(*result, bit_size - 1);
+          EXPECT_EQ(*result, bit_size);
           select1Kernel<NumThreads>
               <<<1, NumThreads>>>(rank_select, i, 1, result);
           kernelCheck();
@@ -613,7 +617,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
           EXPECT_EQ(*result, bit_size - 1);
 
           rank0Kernel<NumThreads>
-              <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
+              <<<1, NumThreads>>>(rank_select, i, bit_size, result);
           kernelCheck();
           EXPECT_EQ(*result, 0);
           select0Kernel<NumThreads>
@@ -625,9 +629,9 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
           kernelCheck();
           EXPECT_EQ(*result, 0);
           rank0Kernel<NumThreads>
-              <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
+              <<<1, NumThreads>>>(rank_select, i, bit_size, result);
           kernelCheck();
-          EXPECT_EQ(*result, bit_size - 1);
+          EXPECT_EQ(*result, bit_size);
           select0Kernel<NumThreads>
               <<<1, NumThreads>>>(rank_select, i, 1, result);
           kernelCheck();
@@ -638,7 +642,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
           EXPECT_EQ(*result, bit_size - 1);
 
           rank1Kernel<NumThreads>
-              <<<1, NumThreads>>>(rank_select, i, bit_size - 1, result);
+              <<<1, NumThreads>>>(rank_select, i, bit_size, result);
           kernelCheck();
           EXPECT_EQ(*result, 0);
           select1Kernel<NumThreads>

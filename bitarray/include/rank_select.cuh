@@ -380,6 +380,20 @@ class RankSelect {
       } else {
         return size_t(0);
       }
+    } else if (index == bit_array_.size(array_index)) {
+      if constexpr (Value == 0) {
+        if constexpr (GetBit) {
+          return RankResult{index - d_total_num_ones_[array_index], false};
+        } else {
+          return index - d_total_num_ones_[array_index];
+        }
+      } else {
+        if constexpr (GetBit) {
+          return RankResult{d_total_num_ones_[array_index], false};
+        } else {
+          return d_total_num_ones_[array_index];
+        }
+      }
     }
     uint8_t t_id = 0;
     if constexpr (NumThreads > 1) {
@@ -1066,6 +1080,7 @@ __global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
       }
       warp_id += blockDim.x / WS;
       t_id += blockDim.x;
+      __syncthreads();
     }
   }
 
@@ -1137,6 +1152,7 @@ __global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
       }
       warp_id += blockDim.x / WS;
       t_id += blockDim.x;
+      __syncthreads();
     }
   }
   return;

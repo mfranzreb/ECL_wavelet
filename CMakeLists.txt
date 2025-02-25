@@ -17,10 +17,13 @@ set(CMAKE_CUDA_STANDARD 20)
 
 set(CMAKE_CUDA_ARCHITECTURES native)
 
+set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "Flags used by the compiler during Release with Debug Info builds." FORCE)
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "Flags used by the compiler during Release with Debug Info builds." FORCE)
+
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --default-stream per-thread -Xcompiler=-fopenmp")
 
 #if in Debug mode, enable CUDA debugging
-if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G --maxrregcount=20")  # enable cuda-gdb
 endif()
 

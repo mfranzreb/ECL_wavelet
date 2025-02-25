@@ -25,7 +25,7 @@ trap 'error_handler ${LINENO}' ERR
 
 # Build project with tests
 print_status "Building project"
-cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DPROFILE=ON -S . -B ${BUILD_DIR}
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTS=ON -DPROFILE=ON -S . -B ${BUILD_DIR}
 cmake --build ${BUILD_DIR} --target ${TEST_BINARY}
 
 # Run tests

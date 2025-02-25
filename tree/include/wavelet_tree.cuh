@@ -211,9 +211,9 @@ class WaveletTree {
       // All node lens are equal
       node_lens = 1ULL << (num_levels_ - level);
     } else {
-      T remaining_symbols = alphabet_size_;
+      size_t remaining_symbols = alphabet_size_;
       for (int16_t i = level - 1; i >= 0; --i) {
-        auto const subtree_size = getPrevPowTwo<T>(remaining_symbols);
+        auto const subtree_size = getPrevPowTwo<size_t>(remaining_symbols);
         node_lens = subtree_size >> i;
         if (symbol <= subtree_size) {
           break;
@@ -234,6 +234,7 @@ class WaveletTree {
   }
 
   __device__ T getNumNodesAtLevel(uint8_t const level) const {
+    assert(level < num_levels_ - 1);
     return d_num_nodes_at_level_[level];
   }
 
@@ -251,11 +252,12 @@ class WaveletTree {
     auto const symbol_len = static_cast<uint8_t>(ceilLog2Host(alphabet_size));
 
     std::vector<Code> alphabet_codes(alphabet_size);
-    for (T i = 0; i < alphabet_size; ++i) {
+    for (size_t i = 0; i < alphabet_size; ++i) {
       if (i < alphabet_size - codes.size()) {
-        alphabet_codes[i] = {symbol_len, i};
+        alphabet_codes[i] = {symbol_len, static_cast<T>(i)};
       } else {
-        alphabet_codes[i] = codes[i - (alphabet_size - codes.size())];
+        alphabet_codes[i] =
+            codes[i - static_cast<T>(alphabet_size - codes.size())];
       }
     }
 
@@ -313,7 +315,7 @@ class WaveletTree {
   static size_t select_mem_pool_size_;
 
   T num_nodes_until_last_level_;
-  size_t* d_ranks_;
+  size_t* d_ranks_ = nullptr;
   T* d_num_nodes_at_level_ =
       nullptr; /*!< Number of nodes at each level, without counting nodes that
                   start at 0*/
@@ -452,7 +454,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     node_starts = getNodeInfos(alphabet_, codes);
   }
 
-  num_levels_ = ceilLog2Host<T>(alphabet_size_);
+  num_levels_ = ceilLog2Host(alphabet_size_);
   alphabet_start_bit_ = num_levels_ - 1;
   codes_start_ = alphabet_size_ - codes.size();
 
@@ -1577,7 +1579,7 @@ WaveletTree<T>::createMinimalCodes(std::vector<T> const& alphabet) {
   }
   size_t total_num_codes = 0;
   std::vector<Code> codes(alphabet_size);
-  uint8_t const total_num_bits = ceilLog2Host<T>(alphabet_size);
+  uint8_t const total_num_bits = ceilLog2Host<size_t>(alphabet_size);
   uint8_t const alphabet_start_bit = total_num_bits - 1;
 #pragma omp parallel for
   for (size_t i = 0; i < alphabet_size; ++i) {
@@ -1611,7 +1613,7 @@ WaveletTree<T>::createMinimalCodes(std::vector<T> const& alphabet) {
     } else {
       code_len = ceilLog2Host<T>(num_codes);
 #pragma omp parallel for
-      for (int i = alphabet_size - num_codes; i < alphabet_size; i++) {
+      for (size_t i = alphabet_size - num_codes; i < alphabet_size; i++) {
         // Code of local subtree
         T code = i - start_i;
         // Shift code to start at start_bit
@@ -2116,7 +2118,9 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
 #pragma nv_diag_default 174
       size_t const pos = result.rank;
       bool const bit_at_index = result.bit;
-      T const diff = getPrevPowTwo<T>(char_end - char_start + 1);
+      // To avoid overflow if alphabet size is the maximum value of T
+      T const diff =
+          getPrevPowTwo<size_t>(static_cast<size_t>(char_end - char_start) + 1);
       if (bit_at_index == false) {
         index = pos - start;
         char_end = char_start + (diff - 1);
@@ -2166,6 +2170,12 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
       (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerQuery;
   for (size_t i = global_group_id; i < num_queries; i += num_groups) {
     RankSelectQuery<T> query = queries[i];
+    if (tree.getTotalAppearances(query.symbol_) == 0) {
+      if (local_t_id == 0) {
+        ranks[i] = 0;
+      }
+      continue;
+    }
 
     T char_start = 0;
     T char_end = alphabet_size - 1;
@@ -2204,7 +2214,9 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
       pos = tree.rank_select_.template rank<ThreadsPerQuery, false, 0>(
           l, char_counts + query.index_, offset);
 #pragma nv_diag_default 174
-      char_split = char_start + getPrevPowTwo<T>(char_end - char_start + 1);
+      char_split =
+          char_start +
+          getPrevPowTwo<size_t>(static_cast<size_t>(char_end - char_start) + 1);
       if (query.symbol_ < char_split) {
         query.index_ = pos - start;
         char_end = char_split - 1;
@@ -2212,7 +2224,10 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
         query.index_ -= pos - start;
         char_start = char_split;
       }
-      ranks_start += is_pow_two ? powTwo<T>(l) - 1 : tree.getNumNodesAtLevel(l);
+      if (l < num_levels - 1) {
+        ranks_start +=
+            is_pow_two ? powTwo<T>(l) - 1 : tree.getNumNodesAtLevel(l);
+      }
     }
     if (local_t_id == 0) {
       ranks[i] = query.index_;
@@ -2270,7 +2285,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
       continue;
     }
     typename WaveletTree<T>::Code code{alphabet_num_bits, query.symbol_};
-    if (query.symbol_ >= codes_start) {
+    if (not is_pow_two and query.symbol_ >= codes_start) {
       code = tree.encode(query.symbol_);
     }
 

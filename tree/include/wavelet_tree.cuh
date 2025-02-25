@@ -20,6 +20,8 @@
 
 // TODO: add restricts
 // TODO: check if shmem helpful for all kernels
+// TODO: improve SDSL BMs
+// TODO: Improve funcGetAttr calls
 namespace ecl {
 
 template <typename T>
@@ -243,7 +245,7 @@ class WaveletTree {
                                        size_t const data_size, T* d_data,
                                        T* d_alphabet, size_t* d_histogram);
 
-  __host__ void fillLevel(BitArray bit_array, T* const data,
+  __host__ void fillLevel(BitArray& bit_array, T* const data,
                           size_t const data_size, uint32_t const level);
 
   __host__ static std::vector<NodeInfo<T>> getNodeInfos(
@@ -447,10 +449,14 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   if (not is_min_alphabet_) {
     auto min_alphabet = std::vector<T>(alphabet_size_);
     std::iota(min_alphabet.begin(), min_alphabet.end(), 0);
-    codes = createMinimalCodes(min_alphabet);
+    if (not is_pow_two) {
+      codes = createMinimalCodes(min_alphabet);
+    }
     node_starts = getNodeInfos(min_alphabet, codes);
   } else {
-    codes = createMinimalCodes(alphabet_);
+    if (not is_pow_two) {
+      codes = createMinimalCodes(alphabet_);
+    }
     node_starts = getNodeInfos(alphabet_, codes);
   }
 
@@ -621,7 +627,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
   BitArray bit_array(bit_array_sizes, false);
 
-  //? bitonic sort, LSD radix-sort?
   for (uint32_t l = 0; l < num_levels_; l++) {
     assert(data_size == bit_array_sizes[l]);
 
@@ -630,22 +635,24 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
       if (use_reduced_radix_sort) {
         cub::DeviceRadixSort::SortKeys(
             d_temp_storage, temp_storage_bytes, d_data_buffer, data_size,
-            alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
+            alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1,
+            cudaStreamDefault);
         //  Fill l-th bit array
-        kernelCheck();
-        fillLevel(bit_array, d_data_buffer.Current(), data_size, l);
-        gpuErrchk(cudaMemcpy(d_data_buffer.Alternate(), coded_data.data(),
-                             data_size * sizeof(T), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpyAsync(d_data_buffer.Alternate(), coded_data.data(),
+                                  data_size * sizeof(T), cudaMemcpyHostToDevice,
+                                  cudaStreamDefault));
+        fillLevel(bit_array, d_data_buffer.Current(), data_size,
+                  l);  // synchronous
       } else {
         cub::DeviceRadixSort::SortKeys(
             d_temp_storage, temp_storage_bytes, d_data, d_sorted_data,
-            data_size, alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1);
+            data_size, alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1,
+            cudaStreamDefault);
         //  Fill l-th bit array
-        kernelCheck();
-        fillLevel(bit_array, d_sorted_data, data_size, l);
+        fillLevel(bit_array, d_sorted_data, data_size, l);  // synchronous
       }
     } else {
-      fillLevel(bit_array, d_data, data_size, l);
+      fillLevel(bit_array, d_data, data_size, l);  // synchronous
     }
 
     if (l != (num_levels_ - 1) and
@@ -658,8 +665,9 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
                               isNotLongEnough<T>(d_code_lens, l, codes_start_));
         data_size = static_cast<size_t>(std::distance(d_data, new_end));
         if (use_reduced_radix_sort) {
-          gpuErrchk(cudaMemcpy(coded_data.data(), d_data, data_size * sizeof(T),
-                               cudaMemcpyDeviceToHost));
+          gpuErrchk(cudaMemcpyAsync(coded_data.data(), d_data,
+                                    data_size * sizeof(T),
+                                    cudaMemcpyDeviceToHost, cudaStreamDefault));
         }
       } else {
         if (use_reduced_radix_sort) {
@@ -669,9 +677,12 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
               isNotLongEnough<T>(d_code_lens, l, codes_start_));
           data_size = static_cast<size_t>(
               std::distance(d_data_buffer.Alternate(), new_end));
-          gpuErrchk(cudaMemcpy(coded_data.data(), d_data_buffer.Alternate(),
-                               data_size * sizeof(T), cudaMemcpyDeviceToHost));
+          gpuErrchk(cudaMemcpyAsync(coded_data.data(),
+                                    d_data_buffer.Alternate(),
+                                    data_size * sizeof(T),
+                                    cudaMemcpyDeviceToHost, cudaStreamDefault));
         } else {
+          //?How to know how much mem alloced?
           T* new_end = thrust::remove_if(
               thrust::device, d_data, d_data + data_size,
               isNotLongEnough<T>(d_code_lens, l, codes_start_));
@@ -686,28 +697,40 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     }
   }
 
+  if (alphabet_size_ * sizeof(T) > temp_storage_bytes) {
+    gpuErrchk(cudaFreeAsync(d_alphabet, cudaStreamDefault));
+  }
+  gpuErrchk(cudaFreeAsync(d_code_lens, cudaStreamDefault));
   gpuErrchk(cudaFree(d_data));
   gpuErrchk(cudaFree(d_sorted_data));
-  if (alphabet_size_ * sizeof(T) > temp_storage_bytes) {
-    gpuErrchk(cudaFree(d_alphabet));
-  }
   gpuErrchk(cudaFree(d_temp_storage));
-  gpuErrchk(cudaFree(d_code_lens));
 
   // build rank and select structures from bit-vectors
   rank_select_ = RankSelect(std::move(bit_array), GPU_index);
 
-  NodeInfo<T>* d_node_starts = nullptr;
-  gpuErrchk(cudaMalloc(&d_node_starts, num_ranks_ * sizeof(NodeInfo<T>)));
-  gpuErrchk(cudaMemcpy(d_node_starts, node_starts.data(),
-                       num_ranks_ * sizeof(NodeInfo<T>),
-                       cudaMemcpyHostToDevice));
-  // TODO: optimize
-  precomputeRanksKernel<T><<<1, 256>>>(*this, d_node_starts, num_ranks_);
-  gpuErrchk(cudaFree(d_node_starts));
-  kernelCheck();
+  if (num_ranks_ > 0) {
+    NodeInfo<T>* d_node_starts = nullptr;
+    gpuErrchk(cudaMallocAsync(&d_node_starts, num_ranks_ * sizeof(NodeInfo<T>),
+                              cudaStreamDefault));
+    gpuErrchk(cudaMemcpyAsync(d_node_starts, node_starts.data(),
+                              num_ranks_ * sizeof(NodeInfo<T>),
+                              cudaMemcpyHostToDevice, cudaStreamDefault));
+    cudaFuncAttributes attr;
+    cudaFuncGetAttributes(&attr, precomputeRanksKernel<T>);
 
-  //? WHat size?
+    auto const prop = getDeviceProperties();
+    auto const num_warps =
+        std::min(static_cast<size_t>((num_ranks_ + WS - 1) / WS),
+                 static_cast<size_t>(prop.multiProcessorCount *
+                                     prop.maxThreadsPerMultiProcessor / WS));
+    auto const [blocks, threads] = getLaunchConfig(
+        num_warps, kMinTPB,
+        std::min(kMaxTPB, static_cast<uint32_t>(attr.maxThreadsPerBlock)));
+    precomputeRanksKernel<T><<<blocks, threads, 0, cudaStreamDefault>>>(
+        *this, d_node_starts, num_ranks_);
+    gpuErrchk(cudaFreeAsync(d_node_starts, cudaStreamDefault));
+  }
+
   gpuErrchk(cudaHostAlloc(&access_pinned_mem_pool_,
                           access_mem_pool_size_ * sizeof(T),
                           cudaHostAllocPortable));
@@ -719,6 +742,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   gpuErrchk(cudaHostAlloc(&select_pinned_mem_pool_,
                           select_mem_pool_size_ * sizeof(size_t),
                           cudaHostAllocPortable));
+  kernelCheck();
 }
 
 template <typename T>
@@ -1790,7 +1814,7 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
 }
 
 template <typename T>
-__host__ void WaveletTree<T>::fillLevel(BitArray bit_array, T* const data,
+__host__ void WaveletTree<T>::fillLevel(BitArray& bit_array, T* const data,
                                         size_t const data_size,
                                         uint32_t const level) {
   struct cudaFuncAttributes funcAttrib;

@@ -353,7 +353,8 @@ template <typename T, bool UseShmemPerThread>
 __global__ void fillLevelKernel(BitArray bit_array, T* const data,
                                 size_t const data_size,
                                 uint8_t const alphabet_start_bit,
-                                uint32_t const level);
+                                uint32_t const level, size_t const num_threads,
+                                uint32_t const warps_per_block);
 
 template <typename T>
 __global__ void precomputeRanksKernel(WaveletTree<T> tree,
@@ -1884,11 +1885,13 @@ __host__ void WaveletTree<T>::fillLevel(BitArray& bit_array, T* const data,
   if (enough_shmem) {
     fillLevelKernel<T, true><<<num_blocks, threads_per_block,
                                shmem_per_thread * threads_per_block>>>(
-        bit_array, data, data_size, alphabet_start_bit_, level);
+        bit_array, data, data_size, alphabet_start_bit_, level,
+        num_blocks * threads_per_block, threads_per_block / WS);
   } else {
     fillLevelKernel<T, false><<<num_blocks, threads_per_block,
                                 sizeof(uint32_t) * (threads_per_block / WS)>>>(
-        bit_array, data, data_size, alphabet_start_bit_, level);
+        bit_array, data, data_size, alphabet_start_bit_, level,
+        num_blocks * threads_per_block, threads_per_block / WS);
   }
   kernelCheck();
 }
@@ -1952,13 +1955,11 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
   }
 }
 
-// TODO reduce register usage
 template <typename T, bool UseShmemPerThread>
-__global__ LB(MAX_TPB,
-              MIN_BPM) void fillLevelKernel(BitArray bit_array, T* const data,
-                                            size_t const data_size,
-                                            uint8_t const alphabet_start_bit,
-                                            uint32_t const level) {
+__global__ LB(MAX_TPB, MIN_BPM) void fillLevelKernel(
+    BitArray bit_array, T* const data, size_t const data_size,
+    uint8_t const alphabet_start_bit, uint32_t const level,
+    size_t const num_threads, uint32_t const warps_per_block) {
   assert(blockDim.x % WS == 0);
   size_t const offset = bit_array.getOffset(level);
 
@@ -2008,10 +2009,7 @@ __global__ LB(MAX_TPB,
     size_t const data_size_rounded =
         ((data_size + (blockDim.x - 1)) / blockDim.x) * blockDim.x;
     size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t const num_threads = gridDim.x * blockDim.x;
     uint8_t const local_t_id = threadIdx.x % WS;
-    uint32_t const warps_per_block = blockDim.x / WS;
-    size_t const bit_array_size = bit_array.size(level);
     // Each warp processes a block of data
     for (size_t i = global_t_id; i < data_size_rounded; i += num_threads) {
       T code = 0;
@@ -2029,7 +2027,7 @@ __global__ LB(MAX_TPB,
       __syncthreads();
       if (threadIdx.x < warps_per_block) {
         size_t const index = (i - threadIdx.x) + WS * threadIdx.x;
-        if (index < bit_array_size) {
+        if (index < data_size) {
           bit_array.writeWordAtBit(level, index, shared_words[threadIdx.x],
                                    offset);
         }

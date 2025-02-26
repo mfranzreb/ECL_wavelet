@@ -1,5 +1,7 @@
 #pragma once
 
+#include <omp.h>
+
 #include <algorithm>
 #include <bit_array.cuh>
 #include <utils.cuh>
@@ -33,6 +35,9 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
   if (alphabet_size < 3) {
     throw std::invalid_argument("Alphabet size must be at least 3");
   }
+
+  // Part 1: Generate alphabet - this part is hard to parallelize due to its
+  // sequential nature
   std::vector<T> alphabet(alphabet_size);
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -54,10 +59,21 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
     }
   } while (filled != alphabet_size);
 
+  // Part 2: Generate data - this part can be parallelized
   std::vector<T> data(data_size);
-  std::uniform_int_distribution<size_t> dis2(0, filled - 1);
-  std::generate(data.begin(), data.end(),
-                [&]() { return alphabet[dis2(gen)]; });
+
+#pragma omp parallel
+  {
+    // Create thread-local random generator
+    std::random_device thread_rd;
+    std::mt19937 thread_gen(thread_rd() + omp_get_thread_num());
+    std::uniform_int_distribution<size_t> thread_dis(0, filled - 1);
+
+#pragma omp for
+    for (size_t i = 0; i < data_size; i++) {
+      data[i] = alphabet[thread_dis(thread_gen)];
+    }
+  }
 
   return std::make_pair(alphabet, data);
 }
@@ -65,12 +81,20 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
 template <typename T>
 std::vector<T> generateRandomData(std::vector<T> const& alphabet,
                                   size_t const data_size) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> dis(0, alphabet.size() - 1);
-
   std::vector<T> data(data_size);
-  std::generate(data.begin(), data.end(), [&]() { return alphabet[dis(gen)]; });
+#pragma omp parallel
+  {
+    // Create a thread-local random number generator
+    std::random_device rd;
+    std::mt19937 gen(rd() + omp_get_thread_num());  // Add thread number to seed
+                                                    // for better randomness
+    std::uniform_int_distribution<size_t> dis(0, alphabet.size() - 1);
+
+#pragma omp for
+    for (size_t i = 0; i < data_size; i++) {
+      data[i] = alphabet[dis(gen)];
+    }
+  }
 
   return data;
 }

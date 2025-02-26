@@ -616,9 +616,11 @@ class RankSelect {
         i -= d_l1_indices_[l1_offset + num_l1_blocks - 1];
       }
     }
+
+    bool const is_last_l1_block = has_i_before == 0;
     RSConfig::L2_TYPE const l1_block_length =
-        has_i_before == 0 ? d_num_last_l2_blocks_[array_index]
-                          : RSConfig::NUM_L2_PER_L1;
+        is_last_l1_block ? d_num_last_l2_blocks_[array_index]
+                         : RSConfig::NUM_L2_PER_L1;
     size_t const l1_block_start =
         (result / RSConfig::L1_BIT_SIZE) * RSConfig::NUM_L2_PER_L1;
     RSConfig::L2_TYPE const l2_blocks_per_thread =
@@ -680,9 +682,10 @@ class RankSelect {
     }
 
     RSConfig::L2_TYPE const l2_block_length =
-        has_i_before == 0 ? bit_array_.sizeInWords(array_index) -
-                                (result / (sizeof(uint32_t) * 8))
-                          : RSConfig::L2_WORD_SIZE;
+        (has_i_before == 0 and is_last_l1_block)
+            ? bit_array_.sizeInWords(array_index) -
+                  (result / (sizeof(uint32_t) * 8))
+            : RSConfig::L2_WORD_SIZE;
 
     size_t const word_start = result / (sizeof(uint32_t) * 8);
     result = 0;  // 0 signalizes that nothing was found
@@ -1026,7 +1029,7 @@ __global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
   static_assert(RSConfig::NUM_L2_PER_L1 % WS == 0);
   __shared__ RSConfig::L2_TYPE l2_entries[RSConfig::NUM_L2_PER_L1];
 
-  auto const t_id = threadIdx.x;
+  auto t_id = threadIdx.x;
   if (blockIdx.x < gridDim.x - 1) {
     size_t const offset = rank_select.bit_array_.getOffset(array_index);
     // find L1 block index
@@ -1050,7 +1053,6 @@ __global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
 
     __syncthreads();
     auto warp_id = threadIdx.x / WS;
-    auto t_id = threadIdx.x;
     RSConfig::L2_TYPE l2_entry_sum, l2_entry;
     for (auto i = 0; i < num_iters; i++) {
       if (warp_id < RSConfig::NUM_L2_PER_L1 / WS) {
@@ -1058,12 +1060,15 @@ __global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
         rank_select.warpSum<RSConfig::L2_TYPE, WS, false>(l2_entry,
                                                           l2_entry_sum, ~0);
         __syncwarp();
+      }
+      __syncthreads();
+      if (warp_id < RSConfig::NUM_L2_PER_L1 / WS) {
         // Last thread in warp writes aggregated value to shmem
         if (t_id % WS == WS - 1) {
           l2_entries[warp_id] = l2_entry_sum + l2_entry;
         }
       }
-      __syncthreads();
+      __syncthreads();  //? threadfence?
       if (warp_id < RSConfig::NUM_L2_PER_L1 / WS) {
         // Get aggregates from previous warps and sum them to own result
         for (auto j = 0; j < warp_id; j++) {
@@ -1080,7 +1085,6 @@ __global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
       }
       warp_id += blockDim.x / WS;
       t_id += blockDim.x;
-      __syncthreads();
     }
   }
 
@@ -1117,7 +1121,6 @@ __global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
 
     __syncthreads();
     auto warp_id = threadIdx.x / WS;
-    auto t_id = threadIdx.x;
     RSConfig::L2_TYPE l2_entry_sum, l2_entry;
     uint32_t const needed_iters =
         (num_last_l2_blocks + blockDim.x - 1) / blockDim.x;
@@ -1128,6 +1131,9 @@ __global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
         rank_select.warpSum<RSConfig::L2_TYPE, WS, false>(l2_entry,
                                                           l2_entry_sum, ~0);
         __syncwarp();
+      }
+      __syncthreads();
+      if (warp_id < needed_warps) {
         // Last thread in warp writes aggregated value to shmem
         if (t_id < num_last_l2_blocks and
             (t_id % WS == WS - 1 or t_id == num_last_l2_blocks - 1)) {
@@ -1152,7 +1158,6 @@ __global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
       }
       warp_id += blockDim.x / WS;
       t_id += blockDim.x;
-      __syncthreads();
     }
   }
   return;

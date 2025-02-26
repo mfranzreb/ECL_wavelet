@@ -21,6 +21,7 @@ class WaveletTreeTest : public WaveletTree<T> {
   using WaveletTree<T>::WaveletTree;
   using WaveletTree<T>::computeGlobalHistogram;
   using WaveletTree<T>::getNodeInfos;
+  using WaveletTree<T>::alphabet_;
 };
 
 template <typename T>
@@ -788,7 +789,7 @@ TYPED_TEST(WaveletTreeTestFixture, rankRandom) {
     }
   } else if (sizeof(TypeParam) == 2) {
     size_t data_size = 100'000 + (rand() % 1'000'000);
-    size_t alphabet_size = std::numeric_limits<uint16_t>::max();
+    size_t alphabet_size = std::numeric_limits<uint16_t>::max() + 1;
     auto alphabet = std::vector<TypeParam>(alphabet_size);
     std::iota(alphabet.begin(), alphabet.end(), 0);
     auto data = generateRandomData<TypeParam>(alphabet, data_size);
@@ -998,43 +999,26 @@ TYPED_TEST(WaveletTreeTestFixture, selectRandom) {
   }
 }
 
-/*
-TYPED_TEST(WaveletTreeTestFixture, fillLevelRandom) {
-  for (int i = 0; i < 100; i++) {
-    // Random data size between 100 and 1'000'000
-    size_t data_size = 100 + (rand() % 1'000'000);
-
-    // Fill a vector with random data
-    std::vector<TypeParam> data(data_size);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<TypeParam> dis(
-        0, std::numeric_limits<TypeParam>::max());
-    std::generate(data.begin(), data.end(), [&]() { return dis(gen); });
-
-    // Copy the data to the device
-    TypeParam* d_data;
-    gpuErrchk(cudaMalloc(&d_data, sizeof(TypeParam) * data_size));
-    gpuErrchk(cudaMemcpy(d_data, data.data(), sizeof(TypeParam) * data_size,
-                         cudaMemcpyHostToDevice));
-
-    // CHoose a random alphabet start bit
-    uint8_t num_bits = 8 * sizeof(TypeParam);
-    uint8_t start_bit = rand() % num_bits;
-    // Fill all levels from start_bit to 0
-    std::vector<size_t> sizes(start_bit + 1, data_size);
-    BitArray ba(sizes, false);
-    for (uint8_t level = 0; level <= start_bit; ++level) {
-      fillLevelKernel<TypeParam><<<1, 32>>>(ba, d_data, data_size, level);
-      kernelCheck();
-
-      // Check that the level is correctly filled
-      std::vector<bool> level_should(data_size);
-      for (size_t i = 0; i < data_size; ++i) {
-        level_should[i] = getBit(start_bit - level, data[i]);
-      }
+TYPED_TEST(WaveletTreeTestFixture, genAlphabetRandom) {
+  uint8_t constexpr kNumIters = 100;
+  for (uint8_t i = 0; i < kNumIters; ++i) {
+    size_t const alphabet_size =
+        3 +
+        (rand() %
+         (std::min(static_cast<size_t>(std::numeric_limits<TypeParam>::max()),
+                   size_t(100'000)) -
+          3));
+    std::vector<TypeParam> alphabet(alphabet_size);
+    std::iota(alphabet.begin(), alphabet.end(), 0);
+    auto data = generateRandomData<TypeParam>(alphabet, 10'000'000);
+    // Add alphabet at the end to make sure all symbols are present
+    data.insert(data.end(), alphabet.begin(), alphabet.end());
+    WaveletTreeTest<TypeParam> wt(data.data(), data.size(),
+                                  std::vector<TypeParam>{}, kGPUIndex);
+#pragma omp parallel for
+    for (size_t j = 0; j < alphabet_size; ++j) {
+      EXPECT_EQ(alphabet[j], wt.alphabet_[j]);
     }
-    cudaFree(d_data);
   }
-*/
+}
 }  // namespace ecl

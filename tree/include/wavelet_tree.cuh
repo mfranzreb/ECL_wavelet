@@ -1,5 +1,6 @@
 #pragma once
 
+#include <omp.h>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
@@ -11,8 +12,10 @@
 #include <cmath>
 #include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_scan.cuh>
+#include <execution>
 #include <numeric>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "rank_select.cuh"
@@ -241,6 +244,8 @@ class WaveletTree {
   }
 
  protected:
+  std::vector<T> alphabet_; /*!< Alphabet of the wavelet tree*/
+
   __host__ void computeGlobalHistogram(bool const is_pow_two,
                                        size_t const data_size, T* d_data,
                                        T* d_alphabet, size_t* d_histogram);
@@ -297,7 +302,6 @@ class WaveletTree {
   }
 
  private:
-  std::vector<T> alphabet_;    /*!< Alphabet of the wavelet tree*/
   size_t alphabet_size_;       /*!< Size of the alphabet*/
   uint8_t alphabet_start_bit_; /*!< Bit where the alphabet starts, 0 is the
                                   least significant bit*/
@@ -431,11 +435,38 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type");
   assert(data_size > 0);
-  assert(alphabet_.size() > 2);
-  assert(std::is_sorted(alphabet_.begin(), alphabet_.end()));
+  assert(alphabet_.size() > 2 or alphabet_.size() == 0);
+  assert(alphabet_.size() == 0 or
+         std::is_sorted(alphabet_.begin(), alphabet_.end()));
 
   checkWarpSize(GPU_index);
   alphabet_size_ = alphabet_.size();
+
+  bool const create_alphabet = alphabet_size_ == 0;
+  if (create_alphabet) {
+    std::unordered_set<T> alphabet_set;
+#pragma omp parallel
+    {
+      auto const t_id = omp_get_thread_num();
+      auto const num_threads = omp_get_num_threads();
+      size_t const start = t_id * data_size / num_threads;
+      size_t const end = t_id == num_threads - 1
+                             ? data_size
+                             : (t_id + 1) * data_size / num_threads;
+      auto local_set = std::unordered_set<T>();
+      for (size_t i = start; i < end; ++i) {
+        local_set.insert(data[i]);
+      }
+#pragma omp critical
+      {
+        alphabet_set.insert(local_set.begin(), local_set.end());
+      }
+    }
+    alphabet_.assign(alphabet_set.begin(), alphabet_set.end());
+    std::sort(std::execution::par, alphabet_.begin(), alphabet_.end());
+    alphabet_size_ = alphabet_.size();
+    assert(alphabet_size_ > 2);
+  }
 
   bool const is_pow_two = isPowTwo(alphabet_size_);
 
@@ -1738,13 +1769,10 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
     // Make the minimum block size a multiple of WS
     min_block_size = ((min_block_size + WS - 1) / WS) * WS;
     // Compute global_histogram and change text to min_alphabet
-    size_t num_warps = (data_size + WS - 1) / WS;
-    if (hists_per_SM >= kMinBPM) {
-      num_warps = std::min(
-          num_warps,
-          static_cast<size_t>(
-              (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
-    }
+    size_t num_warps = std::min(
+        (data_size + WS - 1) / WS,
+        static_cast<size_t>(
+            (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
 
     std::tie(num_blocks, threads_per_block) =
         getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockHist);

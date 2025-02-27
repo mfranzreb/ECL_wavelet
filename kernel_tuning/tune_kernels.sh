@@ -14,6 +14,18 @@ for i in $@; do
     fi
 done
 
+# Check if Python is installed
+if ! command -v python3 &> /dev/null; then
+    echo "Python3 is not installed. Please install it to continue."
+    exit 1
+fi
+
+# Check if Pandas is installed
+if ! python3 -c "import pandas" &> /dev/null; then
+    echo "Pandas is not installed. Please install it to continue."
+    exit 1
+fi
+
 # Set path of directory containing this script
 DIR=$(dirname $0)
 

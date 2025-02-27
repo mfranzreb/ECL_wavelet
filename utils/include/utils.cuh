@@ -243,11 +243,7 @@ struct IdealConfigs {
   uint32_t ideal_TPB_calculateSelectSamplesKernel = 0;
   size_t ideal_tot_threads_calculateSelectSamplesKernel = 0;
 
-  uint32_t ideal_TPB_computeGlobalHistogramKernel = 0;
-  size_t ideal_tot_threads_computeGlobalHistogramKernel = 0;
-
   uint32_t ideal_TPB_fillLevelKernel = 0;
-  size_t ideal_tot_threads_fillLevelKernel = 0;
 };
 
 __host__ IdealConfigs &getIdealConfigs(const std::string &GPU_name);

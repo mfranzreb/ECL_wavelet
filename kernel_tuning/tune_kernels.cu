@@ -10,6 +10,15 @@
 
 namespace ecl {
 
+template <typename T>
+class WaveletTreeTest : public WaveletTree<T> {
+ public:
+  using WaveletTree<T>::WaveletTree;
+  using WaveletTree<T>::computeGlobalHistogram;
+  using WaveletTree<T>::fillLevel;
+  using WaveletTree<T>::alphabet_;
+};
+
 void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
   auto const prop = getDeviceProperties();
@@ -219,6 +228,70 @@ void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
   }
 }
 
+void tuneFillLevelKernel(std::string out_dir, uint32_t const GPU_index) {
+  uint8_t const num_iters = 100;
+  auto const prop = getDeviceProperties();
+  struct cudaFuncAttributes funcAttrib;
+  gpuErrchk(
+      cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<uint16_t, true>));
+  uint32_t max_size =
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  size_t const data_size = prop.totalGlobalMem / 10;
+
+  auto const GPU_name = prop.name;
+
+  // Write column names to CSV
+  std::string out_file_tpb = out_dir + "/fillLevelKernel_TPB.csv";
+  std::ofstream file(out_file_tpb);
+  file << "tpb,alphabet_size,time,GPU_name" << std::endl;
+  file.close();
+
+  std::vector<size_t> threads_per_block_vec;
+  for (size_t i = max_size; i >= kMinTPB; i /= 2) {
+    threads_per_block_vec.push_back(i);
+  }
+
+  size_t const alphabet_size = 4;
+  IdealConfigs& ideal_configs = getIdealConfigs(GPU_name);
+
+  BitArray bit_array(std::vector<size_t>{data_size}, false);
+
+  using T = uint8_t;
+  std::vector<T> alphabet(alphabet_size);
+  std::iota(alphabet.begin(), alphabet.end(), 0);
+  auto data = generateRandomData(alphabet, data_size);
+  WaveletTreeTest<T> wt(data.data(), data_size, std::move(alphabet), GPU_index);
+  T* d_data;
+  gpuErrchk(cudaMalloc(&d_data, data_size * sizeof(T)));
+  gpuErrchk(cudaMemcpy(d_data, data.data(), data_size * sizeof(T),
+                       cudaMemcpyHostToDevice));
+  for (auto const tpb : threads_per_block_vec) {
+    ideal_configs.ideal_TPB_fillLevelKernel = tpb;
+    // Warmup
+    for (uint8_t i = 0; i < 2; ++i) {
+      wt.fillLevel(bit_array, d_data, data_size, 0);
+    }
+
+    std::vector<size_t> times(num_iters);
+    for (uint8_t i = 0; i < num_iters; ++i) {
+      auto start = std::chrono::high_resolution_clock::now();
+      wt.fillLevel(bit_array, d_data, data_size, 0);
+      auto end = std::chrono::high_resolution_clock::now();
+      times[i] =
+          std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+              .count();
+    }
+    // Write median time to CSV
+    std::nth_element(times.begin(), times.begin() + times.size() / 2,
+                     times.end());
+    std::ofstream file(out_file_tpb, std::ios_base::app);
+    file << tpb << "," << alphabet_size << "," << times[num_iters / 2] << ","
+         << GPU_name << std::endl;
+    file.close();
+  }
+  gpuErrchk(cudaFree(d_data));
+}
+
 __global__ static void getTotalNumValsKernel(RankSelect rank_select,
                                              uint32_t array_index,
                                              size_t* output, bool const val) {
@@ -352,6 +425,7 @@ int main(int argc, char* argv[]) {
   ecl::checkWarpSize(GPU_index);
   ecl::tuneQueries(std::string(parent_dir), GPU_index);
   ecl::tuneL2entriesKernel(std::string(parent_dir), GPU_index);
+  ecl::tuneFillLevelKernel(std::string(parent_dir), GPU_index);
   ecl::tuneSamplesKernel(std::string(parent_dir), GPU_index);
   return 0;
 }

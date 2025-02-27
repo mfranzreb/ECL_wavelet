@@ -55,6 +55,14 @@ def apply_samples_kernel_tunes(tune_files):
     return tune_string
 
 
+def apply_FLK_tune(tune_file):
+    with open(tune_file, "r") as f:
+        df = pd.read_csv(f)
+    # Get "tpb" that minimizes "time"
+    best_tpb = df.loc[df["time"].idxmin()]["tpb"]
+    return ".ideal_TPB_fillLevelKernel = " + str(int(best_tpb))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("tune_file", type=str)
@@ -76,13 +84,15 @@ if __name__ == "__main__":
         for f in tune_csvs
         if f.split("/")[-1].startswith("calculateSelectSamplesKernel")
     ]
+    FLK_tunes = [f for f in tune_csvs if f.split("/")[-1].startswith("fillLevelKernel")]
     GPU_name = pd.read_csv(access_tunes[0])["GPU_name"][0]
     tune_string = '{"' + GPU_name + '"' + ", IdealConfigs {"
     tune_string += apply_queries_tunes(access_tunes, "access") + ","
     tune_string += apply_queries_tunes(rank_tunes, "rank") + ","
     tune_string += apply_queries_tunes(select_tunes, "select") + ","
     tune_string += apply_l2kernel_tunes(l2kernel_tunes) + ","
-    tune_string += apply_samples_kernel_tunes(samples_tunes)
+    tune_string += apply_samples_kernel_tunes(samples_tunes) + ","
+    tune_string += apply_FLK_tune(FLK_tunes[0])
     tune_string += "}}"
 
     with open(args.tune_file, "r") as f:

@@ -1888,24 +1888,18 @@ __host__ void WaveletTree<T>::fillLevel(BitArray& bit_array, T* const data,
 
   int num_blocks, threads_per_block;
 
-  auto ideal_configs = getIdealConfigs(prop.name);
+  IdealConfigs const& ideal_configs = getIdealConfigs(prop.name);
 
-  if (ideal_configs.ideal_TPB_fillLevelKernel > 0 and
-      ideal_configs.ideal_tot_threads_fillLevelKernel > 0) {
-    size_t const num_warps =
-        std::min((data_size + WS - 1) / WS,
-                 ideal_configs.ideal_tot_threads_fillLevelKernel / WS);
-
+  size_t const num_warps = std::min(
+      (data_size + WS - 1) / WS,
+      static_cast<size_t>(
+          (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
+  if (ideal_configs.ideal_TPB_fillLevelKernel > 0) {
     std::tie(num_blocks, threads_per_block) =
         getLaunchConfig(num_warps, ideal_configs.ideal_TPB_fillLevelKernel,
                         ideal_configs.ideal_TPB_fillLevelKernel);
 
   } else {
-    size_t const num_warps = std::min(
-        (data_size + WS - 1) / WS,
-        static_cast<size_t>(
-            (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
-
     std::tie(num_blocks, threads_per_block) =
         getLaunchConfig(num_warps, kMinTPB, maxThreadsPerBlockFillLevel);
   }

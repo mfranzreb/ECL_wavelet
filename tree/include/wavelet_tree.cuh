@@ -1741,42 +1741,28 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
   auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
   size_t const hist_size = sizeof(size_t) * alphabet_size_;
 
-  auto ideal_configs = getIdealConfigs(prop.name);
+  auto maxThreadsPerBlockHist =
+      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  maxThreadsPerBlockHist = findLargestDivisor(kMaxTPB, maxThreadsPerBlockHist);
 
-  int num_blocks, threads_per_block;
-  if (ideal_configs.ideal_tot_threads_computeGlobalHistogramKernel > 0 and
-      ideal_configs.ideal_TPB_computeGlobalHistogramKernel > 0) {
-    std::tie(num_blocks, threads_per_block) = getLaunchConfig(
-        std::min(
-            (data_size + WS - 1) / WS,
-            ideal_configs.ideal_tot_threads_computeGlobalHistogramKernel / WS),
-        ideal_configs.ideal_TPB_computeGlobalHistogramKernel,
-        ideal_configs.ideal_TPB_computeGlobalHistogramKernel);
-  } else {
-    auto maxThreadsPerBlockHist =
-        std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-    maxThreadsPerBlockHist =
-        findLargestDivisor(kMaxTPB, maxThreadsPerBlockHist);
+  auto const hists_per_SM = max_shmem_per_SM / hist_size;
 
-    auto const hists_per_SM = max_shmem_per_SM / hist_size;
+  auto min_block_size =
+      hists_per_SM < kMinBPM
+          ? kMinTPB
+          : std::max(kMinTPB,
+                     static_cast<uint32_t>(max_threads_per_SM / hists_per_SM));
 
-    auto min_block_size =
-        hists_per_SM < kMinBPM
-            ? kMinTPB
-            : std::max(kMinTPB, static_cast<uint32_t>(max_threads_per_SM /
-                                                      hists_per_SM));
+  // Make the minimum block size a multiple of WS
+  min_block_size = ((min_block_size + WS - 1) / WS) * WS;
+  // Compute global_histogram and change text to min_alphabet
+  size_t num_warps = std::min(
+      (data_size + WS - 1) / WS,
+      static_cast<size_t>(
+          (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
 
-    // Make the minimum block size a multiple of WS
-    min_block_size = ((min_block_size + WS - 1) / WS) * WS;
-    // Compute global_histogram and change text to min_alphabet
-    size_t num_warps = std::min(
-        (data_size + WS - 1) / WS,
-        static_cast<size_t>(
-            (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
-
-    std::tie(num_blocks, threads_per_block) =
-        getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockHist);
-  }
+  auto const [num_blocks, threads_per_block] =
+      getLaunchConfig(num_warps, min_block_size, kMaxTPB);
 
   uint16_t const blocks_per_SM = max_threads_per_SM / threads_per_block;
 

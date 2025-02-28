@@ -25,6 +25,7 @@
 // TODO: check if shmem helpful for all kernels
 // TODO: improve SDSL BMs
 // TODO: Improve funcGetAttr calls
+// TODO: change min alphabet to 2
 namespace ecl {
 
 template <typename T>

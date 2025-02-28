@@ -16,6 +16,7 @@ target_link_libraries(${TARGET}
     PRIVATE ecl_bitarray
     PRIVATE ecl_wavelet_tree
     PRIVATE ecl_test_bm_utils
+    OpenMP::OpenMP_CXX
     CUDA::cudart
 )
 

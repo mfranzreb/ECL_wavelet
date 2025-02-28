@@ -12,6 +12,7 @@ target_include_directories(${TARGET}
 
 target_link_libraries(${TARGET}
     CUDA::cudart
+    OpenMP::OpenMP_CXX
 )
 
 target_compile_features(${TARGET} PUBLIC cxx_std_20)
@@ -36,6 +37,7 @@ target_link_libraries(${TARGET}
     PRIVATE ecl_utils
     PRIVATE ecl_bitarray
     CUDA::cudart
+    OpenMP::OpenMP_CXX
 )
 
 target_compile_features(${TARGET} PUBLIC cxx_std_20)

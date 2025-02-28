@@ -1068,7 +1068,7 @@ __global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
           l2_entries[warp_id] = l2_entry_sum + l2_entry;
         }
       }
-      __syncthreads();  //? threadfence?
+      __syncthreads();
       if (warp_id < RSConfig::NUM_L2_PER_L1 / WS) {
         // Get aggregates from previous warps and sum them to own result
         for (auto j = 0; j < warp_id; j++) {

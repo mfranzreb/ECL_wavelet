@@ -69,7 +69,6 @@ target_link_libraries(${TARGET}
     PRIVATE ecl_wavelet_tree
     PRIVATE ecl_utils
     PRIVATE ecl_test_bm_utils
-    PRIVATE nvbio
     OpenMP::OpenMP_CXX
     CUDA::cudart
     benchmark

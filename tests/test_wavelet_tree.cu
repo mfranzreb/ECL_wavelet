@@ -211,8 +211,6 @@ TYPED_TEST(WaveletTreeTestFixture, createMinimalCodes) {
   EXPECT_EQ(codes[74 - 64].len_, 3);
 }
 
-// TODO: weird bug when alphabet_size is 55494 when writing select samples.
-// Memcheck invalid write.
 TYPED_TEST(WaveletTreeTestFixture, getNodePosRandom) {
   if (sizeof(TypeParam) >= 4) {
     return;
@@ -370,7 +368,7 @@ TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogram) {
 }
 
 TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogramRandom) {
-  size_t const data_size = 10000;
+  size_t const data_size = 10000;  // TODO: make random
   TypeParam* d_data;
   gpuErrchk(cudaMalloc(&d_data, sizeof(TypeParam) * data_size));
   for (int i = 0; i < 100; i++) {
@@ -548,6 +546,7 @@ TYPED_TEST(WaveletTreeTestFixture, structure) {
   }
 }
 
+// TODO: test with small sizes for small thread nums
 TYPED_TEST(WaveletTreeTestFixture, access) {
   {
     std::vector<TypeParam> alphabet{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};

@@ -32,8 +32,9 @@ template <typename T>
 std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
     size_t const alphabet_size, size_t const data_size,
     bool enforce_alphabet_size = false) {
-  if (alphabet_size < 3) {
-    throw std::invalid_argument("Alphabet size must be at least 3");
+  if (alphabet_size < kMinAlphabetSize) {
+    throw std::invalid_argument("Alphabet size must be at least " +
+                                std::to_string(kMinAlphabetSize));
   }
 
   // Part 1: Generate alphabet - this part is hard to parallelize due to its
@@ -110,13 +111,21 @@ std::vector<RankSelectQuery<T>> generateRandomRankQueries(
     size_t const data_size, size_t const num_queries,
     std::vector<T> const& alphabet) {
   std::vector<RankSelectQuery<T>> queries(num_queries);
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> dis(0, data_size - 1);
-  std::uniform_int_distribution<T> dis2(0, alphabet.size() - 1);
-  std::generate(queries.begin(), queries.end(), [&]() {
-    return RankSelectQuery<T>(dis(gen), alphabet[dis2(gen)]);
-  });
+
+#pragma omp parallel
+  {
+    // Thread-local random number generators
+    std::random_device rd;
+    std::mt19937 gen(rd() + omp_get_thread_num());  // Add thread ID to seed
+    std::uniform_int_distribution<size_t> dis(0, data_size - 1);
+    std::uniform_int_distribution<size_t> dis2(0, alphabet.size() - 1);
+
+#pragma omp for
+    for (size_t i = 0; i < num_queries; i++) {
+      queries[i] = RankSelectQuery<T>(dis(gen), alphabet[dis2(gen)]);
+    }
+  }
+
   return queries;
 }
 
@@ -125,21 +134,26 @@ std::vector<RankSelectQuery<T>> generateRandomSelectQueries(
     std::unordered_map<T, size_t> const& hist, size_t const num_queries,
     std::vector<T> const& alphabet) {
   std::vector<RankSelectQuery<T>> queries(num_queries);
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<T> dis_alphabet(0, alphabet.size() - 1);
-  std::generate(queries.begin(), queries.end(), [&]() {
-    T symbol;
-    size_t count;
-    do {
-      symbol = alphabet[dis_alphabet(gen)];
-      count = hist.at(symbol);
-    } while (count == 0);
-    std::uniform_int_distribution<size_t> dis_index(1, count);
-    auto index = dis_index(gen);
+#pragma omp parallel
+  {
+    // Thread-local random number generator
+    std::random_device rd;
+    std::mt19937 gen(rd() + omp_get_thread_num());
+    std::uniform_int_distribution<T> dis_alphabet(0, alphabet.size() - 1);
+#pragma omp for
+    for (size_t i = 0; i < num_queries; i++) {
+      T symbol;
+      size_t count;
+      do {
+        symbol = alphabet[dis_alphabet(gen)];
+        count = hist.at(symbol);
+      } while (count == 0);
+      std::uniform_int_distribution<size_t> dis_index(1, count);
+      auto index = dis_index(gen);
 
-    return RankSelectQuery<T>{index, symbol};
-  });
+      queries[i] = RankSelectQuery<T>(index, symbol);
+    }
+  }
   return queries;
 }
 
@@ -167,5 +181,95 @@ generateRandomDataAndHist(std::vector<T> const& alphabet,
 
   return std::make_pair(data, hist);
 }
+
+template <typename T>
+std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetDataAndHist(
+    size_t const alphabet_size, size_t const data_size,
+    std::unordered_map<T, size_t>& hist) {
+  if (alphabet_size < kMinAlphabetSize) {
+    throw std::invalid_argument("Alphabet size must be at least " +
+                                std::to_string(kMinAlphabetSize));
+  }
+  std::vector<T> alphabet(alphabet_size);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<T> dis(0, std::numeric_limits<T>::max());
+  size_t filled = 0;
+  do {
+    std::generate(alphabet.begin() + filled, alphabet.end(),
+                  [&]() { return dis(gen); });
+    // Check that all elements are unique
+    std::sort(alphabet.begin(), alphabet.end());
+    // remove duplicates
+    auto it = std::unique(alphabet.begin(), alphabet.end());
+    filled = std::distance(alphabet.begin(), it);
+    if (filled > 2) {
+      if (filled < alphabet_size) {
+        alphabet.resize(filled);
+      }
+      break;
+    }
+  } while (filled != alphabet_size);
+
+  // Initialize histogram entries for all alphabet symbols
+  for (auto const& symbol : alphabet) {
+    hist[symbol] = 0;
+  }
+
+  // Part 2: Generate data and histogram (parallel with thread-local histograms)
+  std::vector<T> data(data_size);
+
+#pragma omp parallel
+  {
+    // Thread-local random generator
+    std::random_device thread_rd;
+    std::mt19937 thread_gen(thread_rd() + omp_get_thread_num());
+    std::uniform_int_distribution<size_t> thread_dis(0, filled - 1);
+
+    // Thread-local histogram
+    std::unordered_map<T, size_t> local_hist;
+
+#pragma omp for
+    for (size_t i = 0; i < data_size; i++) {
+      auto const symbol = alphabet[thread_dis(thread_gen)];
+      local_hist[symbol]++;
+      data[i] = symbol;
+    }
+
+// Combine thread-local histogram with global histogram
+#pragma omp critical
+    {
+      for (auto const& pair : local_hist) {
+        hist[pair.first] += pair.second;
+      }
+    }
+  }
+
+  return std::make_pair(alphabet, data);
+}
+
+template <typename T>
+std::pair<std::vector<size_t>, std::vector<size_t>>
+generateRandomAlphabetAndDataSizes(size_t const min_data_size,
+                                   size_t const max_data_size,
+                                   size_t const num_sizes) {
+  std::vector<size_t> data_sizes(num_sizes);
+  std::vector<size_t> alphabet_sizes(num_sizes);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<size_t> dis_data(min_data_size, max_data_size);
+  for (size_t i = 0; i < num_sizes; i++) {
+    data_sizes[i] = dis_data(gen);
+    std::uniform_int_distribution<size_t> dis_alphabet(
+        kMinAlphabetSize,
+        std::min(data_sizes[i],
+                 static_cast<size_t>(std::numeric_limits<T>::max()) + 1));
+    alphabet_sizes[i] = dis_alphabet(gen);
+  }
+  return std::make_pair(data_sizes, alphabet_sizes);
+}
+
+std::vector<size_t> generateRandomNums(size_t const min, size_t const max,
+                                       size_t const num);
 
 }  // namespace ecl

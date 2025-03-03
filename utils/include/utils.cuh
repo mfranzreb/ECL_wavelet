@@ -42,16 +42,23 @@ inline uint32_t kMinTPB = 0;
 inline uint32_t kMinBPM = 0;
 constexpr uint8_t kBankSizeBytes = 4;
 constexpr uint8_t kBanksPerLine = 32;
+static constexpr uint8_t kMinAlphabetSize = 3;
 
 #define gpuErrchk(ans)                    \
   {                                       \
     gpuAssert((ans), __FILE__, __LINE__); \
   }
-__host__ inline void gpuAssert(cudaError_t code, const char *file, int line,
-                               bool abort = true) {
+__host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
+                                          int line, bool abort = true) {
   if (code != cudaSuccess) {
     printf("GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-    if (abort) exit(EXIT_FAILURE);
+    if (abort) {
+#ifdef __CUDA_ARCH__
+      asm("trap;");
+#else
+      exit(EXIT_FAILURE);
+#endif
+    }
   }
 }
 
@@ -164,16 +171,16 @@ __host__ void checkWarpSize(uint8_t const GPU_index);
 
 #define kernelCheck() kernelCheckFunc(__FILE__, __LINE__)
 __host__ inline void kernelCheckFunc(const char *file, int line) {
-  gpuErrchkInternal(cudaDeviceSynchronize(), file, line);
   gpuErrchkInternal(cudaPeekAtLastError(), file, line);
+  gpuErrchkInternal(cudaDeviceSynchronize(), file, line);
 }
 
 #define kernelStreamCheck(stream) \
   kernelStreamCheckFunc(stream, __FILE__, __LINE__)
 __host__ inline void kernelStreamCheckFunc(cudaStream_t stream,
                                            const char *file, int line) {
-  gpuErrchkInternal(cudaStreamSynchronize(stream), file, line);
   gpuErrchkInternal(cudaPeekAtLastError(), file, line);
+  gpuErrchkInternal(cudaStreamSynchronize(stream), file, line);
 }
 
 /*!

@@ -21,7 +21,7 @@ class WaveletTreeTest : public WaveletTree<T> {
 
 void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
-  auto const prop = getDeviceProperties();
+  auto const& prop = getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
                                   accessKernel<uint8_t, true, 1, true, true>));
@@ -169,7 +169,7 @@ void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
 
 void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
-  auto const prop = getDeviceProperties();
+  auto const& prop = getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
   uint32_t max_size =
@@ -190,9 +190,12 @@ void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
   }
   BitArray bit_array = createRandomBitArray(data_size, 1);
   RankSelect rs(std::move(bit_array), GPU_index);
-  auto const num_last_l2_blocks =
+  auto num_last_l2_blocks =
       (data_size % RSConfig::L1_BIT_SIZE + RSConfig::L2_BIT_SIZE - 1) /
       RSConfig::L2_BIT_SIZE;
+  if (num_last_l2_blocks == 0) {
+    num_last_l2_blocks = RSConfig::NUM_L2_PER_L1;
+  }
   auto const num_l1_blocks =
       (data_size + RSConfig::L1_BIT_SIZE - 1) / RSConfig::L1_BIT_SIZE;
 
@@ -230,7 +233,7 @@ void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
 
 void tuneFillLevelKernel(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
-  auto const prop = getDeviceProperties();
+  auto const& prop = getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(
       cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<uint16_t, true>));
@@ -304,7 +307,7 @@ __global__ static void getTotalNumValsKernel(RankSelect rank_select,
 
 void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
-  auto const prop = getDeviceProperties();
+  auto const& prop = getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateSelectSamplesKernel));
   uint32_t max_size =

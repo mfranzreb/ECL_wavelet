@@ -172,7 +172,8 @@ class RankSelect {
                               num_l2_blocks_per_arr.size() * sizeof(size_t),
                               cudaMemcpyHostToDevice, cudaStreamDefault));
 
-    // TODO loop unnecessary for wavelet tree
+    // OPT: loop unnecessary for wavelet tree, since array sizes are
+    // monotonically decreasing
     // Get maximum storage needed for device sums
     size_t temp_storage_bytes = 0;
     for (uint32_t i = 0; i < num_arrays; i++) {
@@ -196,7 +197,7 @@ class RankSelect {
 
     max_block_size = findLargestDivisor(kMaxTPB, max_block_size);
 
-    auto const prop = getDeviceProperties();
+    auto const& prop = getDeviceProperties();
 
     auto min_block_size = kMinTPB;
     while (prop.maxBlocksPerMultiProcessor * funcAttrib.sharedSizeBytes >
@@ -984,31 +985,35 @@ class RankSelect {
 
  private:
   // TODO: num_l1_blocks and l2 blocks not necessary
-  RSConfig::L1_TYPE*
-      d_l1_indices_; /*!< Device pointer to L1 indices for all arrays.*/
-  RSConfig::L2_TYPE*
-      d_l2_indices_; /*!< Device pointer to L2 indices for all arrays.*/
+  RSConfig::L1_TYPE* d_l1_indices_ =
+      nullptr; /*!< Device pointer to L1 indices for all arrays.*/
+  RSConfig::L2_TYPE* d_l2_indices_ =
+      nullptr; /*!< Device pointer to L2 indices for all arrays.*/
 
-  size_t* d_l1_offsets_; /*!< Offsets where each L1 index for a bit array
-                            starts.*/
-  size_t* d_l2_offsets_; /*!< Offsets where each L2 index for a bit array
-                            starts.*/
+  size_t* d_l1_offsets_ = nullptr; /*!< Offsets where each L1 index for a bit
+                            array starts.*/
+  size_t* d_l2_offsets_ = nullptr; /*!< Offsets where each L2 index for a bit
+                            array starts.*/
 
-  uint16_t* d_num_last_l2_blocks_; /*!< Number of L2 blocks in the last L1
-                                   block for each bit array.*/
-  size_t* d_num_l1_blocks_; /*!< Number of L1 blocks for each bit array.*/
+  uint16_t* d_num_last_l2_blocks_ = nullptr; /*!< Number of L2 blocks in the
+                                   last L1 block for each bit array.*/
+  size_t* d_num_l1_blocks_ =
+      nullptr; /*!< Number of L1 blocks for each bit array.*/
   std::vector<size_t> num_l1_blocks_; /*!< Number of L1 blocks for all bit
                                       arrays. Not accessible from device.*/
   size_t total_num_l2_blocks_;        /*!< Total number of L2 blocks for all bit
                                          arrays.*/
 
-  size_t* d_select_samples_0_; /*!< Sampled positions for select queries.*/
-  size_t* d_select_samples_0_offsets_; /*!< Offsets where each array's select
-                                    samples start.*/
-  size_t* d_select_samples_1_; /*!< Sampled positions for select queries.*/
-  size_t* d_select_samples_1_offsets_; /*!< Offsets where each array's select
-                                    samples start.*/
-  size_t* d_total_num_ones_; /*!< Total number of ones for each array.*/
+  size_t* d_select_samples_0_ =
+      nullptr; /*!< Sampled positions for select queries.*/
+  size_t* d_select_samples_0_offsets_ = nullptr; /*!< Offsets where each array's
+                                    select samples start.*/
+  size_t* d_select_samples_1_ =
+      nullptr; /*!< Sampled positions for select queries.*/
+  size_t* d_select_samples_1_offsets_ = nullptr; /*!< Offsets where each array's
+                                    select samples start.*/
+  size_t* d_total_num_ones_ =
+      nullptr; /*!< Total number of ones for each array.*/
 
   bool is_copy_; /*!< Flag to signal whether current object is a
                     copy.*/

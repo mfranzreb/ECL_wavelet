@@ -190,17 +190,17 @@ class BitArray {
       size_t const size, uint8_t const num_arrays) noexcept;
 
  private:
-  uint8_t num_arrays_;  /*!< Number of bit arrays stored in the global array.*/
-  size_t total_size_;   /*!< Total size of the global array in words.*/
-  size_t* d_bit_sizes_; /*!< Size of each array in bits.*/
+  uint8_t num_arrays_; /*!< Number of bit arrays stored in the global array.*/
+  size_t total_size_;  /*!< Total size of the global array in words.*/
+  size_t* d_bit_sizes_ = nullptr; /*!< Size of each array in bits.*/
   std::vector<size_t>
       bit_sizes_; /*!< Size of each array in bits. Only acessible from host.*/
 
-  uint32_t* d_data_;  /*!< Array of 32-bit words used to store the content of
-                         the bit array.*/
-  size_t* d_offsets_; /*!< Array of offsets (in words) to the start of each bit
-                         array.*/
-  bool is_copy_;      /*!< Flag to signal whether current object is a copy.*/
+  uint32_t* d_data_ = nullptr;  /*!< Array of 32-bit words used to store the
+                           content of  the bit array.*/
+  size_t* d_offsets_ = nullptr; /*!< Array of offsets (in words) to the start of
+                           each bit array.*/
+  bool is_copy_; /*!< Flag to signal whether current object is a copy.*/
 
 };  // class BitArray
 

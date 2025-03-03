@@ -1,17 +1,18 @@
 #pragma once
 
 #include <omp.h>
+#include <sys/sysinfo.h>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
 #include <thrust/mr/allocator.h>
-#include <thrust/remove.h>
 #include <thrust/system/cuda/memory_resource.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_scan.cuh>
+#include <cub/device/device_select.cuh>
 #include <execution>
 #include <numeric>
 #include <thread>
@@ -57,17 +58,17 @@ struct RankSelectQuery;
  * \brief Helper class for reducing the data with thrust::remove_if.
  */
 template <typename T>
-class isNotLongEnough {
+class isLongEnough {
  public:
-  isNotLongEnough(uint8_t* d_code_lens, uint32_t l, T codes_start)
+  isLongEnough(uint8_t* d_code_lens, uint32_t l, T codes_start)
       : d_code_lens_(d_code_lens), l_(l), codes_start_(codes_start) {}
 
   __device__ bool operator()(T const code) const {
     if (code < codes_start_) {
-      return false;
+      return true;
     }
     assert(d_code_lens_[code - codes_start_] > 0);
-    return d_code_lens_[code - codes_start_] <= l_ + 1;
+    return d_code_lens_[code - codes_start_] > l_ + 1;
   }
 
  private:
@@ -75,6 +76,44 @@ class isNotLongEnough {
   uint32_t l_;
   T codes_start_;
 };
+
+template <typename T>
+__global__ LB(MAX_TPB,
+              MIN_BPM) void compactArrayKernel(size_t* select_results,
+                                               uint16_t const num_chunks,
+                                               T* data,
+                                               size_t const chunk_size) {
+  assert(num_chunks > 1);
+  assert(chunk_size > 0);
+  size_t offset = select_results[0];
+  for (uint16_t i = 1; i < num_chunks; ++i) {
+    if (offset == i * chunk_size) {
+      offset += select_results[i];
+      continue;
+    }
+    size_t const reduce_slice_size = select_results[i];
+    size_t const src_offset = i * chunk_size;
+    assert(src_offset > offset);
+    size_t const max_copy_size = src_offset - offset;
+    size_t const iters =
+        (reduce_slice_size + max_copy_size - 1) / max_copy_size;
+    size_t const last_copy_size = reduce_slice_size % max_copy_size == 0
+                                      ? max_copy_size
+                                      : reduce_slice_size % max_copy_size;
+    assert(max_copy_size * (iters - 1) + last_copy_size == reduce_slice_size);
+    for (size_t j = 0; j < iters; ++j) {
+      T* dst = data + offset + j * max_copy_size;
+      T* src = data + src_offset + j * max_copy_size;
+      assert(dst + max_copy_size <= src);
+      gpuErrchk(cudaMemcpyAsync(dst, src,
+                                j == iters - 1 ? last_copy_size * sizeof(T)
+                                               : max_copy_size * sizeof(T),
+                                cudaMemcpyDeviceToDevice));
+    }
+    offset += reduce_slice_size;
+  }
+  select_results[num_chunks] = offset;
+}
 
 /*!
  * \brief Wavelet tree class.
@@ -302,6 +341,44 @@ class WaveletTree {
     return total_size;
   }
 
+  __host__ static size_t runDeviceSelectIf(void* d_temp_storage,
+                                           size_t& temp_storage_bytes,
+                                           T* d_data, size_t const data_size,
+                                           isLongEnough<T>& pred) {
+    uint16_t const num_chunks = (data_size + INT_MAX - 1) / INT_MAX;
+    size_t const chunk_size = num_chunks == 1 ? data_size : INT_MAX;
+    size_t const last_chunk_size =
+        data_size % INT_MAX == 0 ? INT_MAX : data_size % INT_MAX;
+
+    assert((num_chunks - 1) * chunk_size + last_chunk_size == data_size);
+
+    size_t* d_cub_select_results;
+    // 1 extra element for total offset
+    gpuErrchk(cudaMallocAsync(&d_cub_select_results,
+                              (num_chunks + 1) * sizeof(size_t),
+                              cudaStreamDefault));
+    for (uint16_t i = 0; i < num_chunks; ++i) {
+      gpuErrchk(cub::DeviceSelect::If(
+          d_temp_storage, temp_storage_bytes, d_data + i * chunk_size,
+          d_cub_select_results + i,
+          i == num_chunks - 1 ? last_chunk_size : chunk_size, pred));
+      kernelCheck();
+    }
+    size_t new_size;
+    if (num_chunks > 1) {
+      compactArrayKernel<<<1, 1>>>(d_cub_select_results, num_chunks, d_data,
+                                   chunk_size);
+      kernelCheck();
+      gpuErrchk(cudaMemcpy(&new_size, d_cub_select_results + num_chunks,
+                           sizeof(size_t), cudaMemcpyDeviceToHost));
+    } else {
+      gpuErrchk(cudaMemcpy(&new_size, d_cub_select_results, sizeof(size_t),
+                           cudaMemcpyDeviceToHost));
+    }
+    gpuErrchk(cudaFree(d_cub_select_results));
+    return new_size;
+  }
+
  private:
   size_t alphabet_size_;       /*!< Size of the alphabet*/
   uint8_t alphabet_start_bit_; /*!< Bit where the alphabet starts, 0 is the
@@ -497,8 +574,10 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   alphabet_start_bit_ = num_levels_ - 1;
   codes_start_ = alphabet_size_ - codes.size();
 
-  auto const needed_memory = WaveletTree::getNeededGPUMemory(
-      data_size, alphabet_size_, num_levels_, codes.size());
+  auto const needed_memory =
+      WaveletTree::getNeededGPUMemory(data_size, alphabet_size_, num_levels_,
+                                      codes.size()) +
+      10'000'000 * sizeof(RankSelectQuery<T>);  // Extra memory for queries
 
   size_t free_memory, total_memory;
   gpuErrchk(cudaMemGetInfo(&free_memory, &total_memory));
@@ -506,15 +585,68 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     throw std::runtime_error(
         "Not enough memory available for the wavelet tree.");
   }
-  bool const use_unified_memory =
-      (needed_memory + 2 * data_size * sizeof(T)) > free_memory;
+  free_memory -= needed_memory;
+  bool const use_unified_memory = (2 * data_size * sizeof(T)) > free_memory;
+  free_memory -= use_unified_memory ? 0 : 2 * data_size * sizeof(T);
   size_t radix_sort_bytes = 0;
   gpuErrchk(cub::DeviceRadixSort::SortKeys(nullptr, radix_sort_bytes, data,
                                            data, data_size));
-  bool const use_reduced_radix_sort =
-      (needed_memory + 2 * data_size * sizeof(T) + radix_sort_bytes) >
-          free_memory and
-      not use_unified_memory;
+
+  cub::DoubleBuffer<T> d_data_buffer;
+
+  size_t reduced_radix_sort_bytes = 0;
+  gpuErrchk(cub::DeviceRadixSort::SortKeys(nullptr, reduced_radix_sort_bytes,
+                                           d_data_buffer, data_size));
+
+  size_t exclusive_sum_bytes = 0;
+  gpuErrchk(cub::DeviceScan::ExclusiveSum(nullptr, exclusive_sum_bytes,
+                                          (size_t*)data, alphabet_size_));
+
+  size_t select_if_bytes = 0;
+  gpuErrchk(cub::DeviceSelect::If(
+      nullptr, select_if_bytes, data, data,
+      std::min(data_size, static_cast<size_t>(std::numeric_limits<int>::max())),
+      isLongEnough<T>(nullptr, 0, 0)));
+  kernelCheck();
+  auto max_needed_storage =
+      std::max({radix_sort_bytes, exclusive_sum_bytes, select_if_bytes});
+  bool use_reduced_radix_sort = false;
+  bool use_cub_unified_memory = false;
+  if (not use_unified_memory) {
+    if (max_needed_storage == radix_sort_bytes) {
+      if (radix_sort_bytes > free_memory) {
+        use_reduced_radix_sort = true;
+        max_needed_storage = std::max(
+            {reduced_radix_sort_bytes, exclusive_sum_bytes, select_if_bytes});
+        use_cub_unified_memory = max_needed_storage > free_memory;
+      }
+    } else {
+      use_cub_unified_memory = max_needed_storage > free_memory;
+    }
+  } else {
+    use_cub_unified_memory = true;
+    use_reduced_radix_sort = true;
+    max_needed_storage = std::max(
+        {reduced_radix_sort_bytes, exclusive_sum_bytes, select_if_bytes});
+  }
+
+  if (use_unified_memory or use_cub_unified_memory) {
+    struct sysinfo info;
+    sysinfo(&info);
+    size_t const free_ram = info.freeram;
+    size_t needed_ram = max_needed_storage;  // d_temp_storage
+    if (use_unified_memory) {
+      needed_ram += data_size * sizeof(T);  // d_data
+      needed_ram += data_size * sizeof(T);  // d_sorted_data
+    }
+    if (use_reduced_radix_sort and not(is_pow_two and is_min_alphabet_)) {
+      needed_ram += data_size * sizeof(T);  // coded_data
+    }
+    if (needed_ram > free_ram) {
+      throw std::runtime_error(
+          "Not enough memory available for the wavelet tree.");
+    }
+  }
 
   std::vector<T> num_nodes_at_level(num_levels_ - 1);
   //  create codes and copy to device
@@ -581,32 +713,20 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     gpuErrchk(cudaMalloc(&d_sorted_data, data_size * sizeof(T)));
   }
 
-  // Find necessary storage for CUB exclusive sum and radix sort
-  cub::DoubleBuffer<T> d_data_buffer;
-
-  void* d_temp_storage = nullptr;
-  size_t temp_storage_bytes_sum = 0;
-  cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes_sum,
-                                d_counts_, d_counts_, alphabet_size_);
-
   if (use_reduced_radix_sort) {
     d_data_buffer = cub::DoubleBuffer<T>(d_data, d_sorted_data);
-    cub::DeviceRadixSort::SortKeys(d_temp_storage, radix_sort_bytes,
-                                   d_data_buffer, data_size);
-  } else {
-    cub::DeviceRadixSort::SortKeys(d_temp_storage, radix_sort_bytes, d_data,
-                                   d_sorted_data, data_size);
   }
 
-  auto temp_storage_bytes = std::max(temp_storage_bytes_sum, radix_sort_bytes);
-  if (use_unified_memory) {
-    gpuErrchk(cudaMallocManaged(&d_temp_storage, temp_storage_bytes));
+  void* d_temp_storage = nullptr;
+
+  if (use_cub_unified_memory) {
+    gpuErrchk(cudaMallocManaged(&d_temp_storage, max_needed_storage));
   } else {
-    gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+    gpuErrchk(cudaMalloc(&d_temp_storage, max_needed_storage));
   }
 
   T* d_alphabet;
-  if (alphabet_size_ * sizeof(T) <= temp_storage_bytes) {
+  if (alphabet_size_ * sizeof(T) <= max_needed_storage) {
     // Copy alphabet to device using temp_storage
     d_alphabet = reinterpret_cast<T*>(d_temp_storage);
     gpuErrchk(cudaMemcpy(d_temp_storage, alphabet_.data(),
@@ -655,8 +775,8 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   }
 
   // Perform exclusive sum of counts
-  cub::DeviceScan::ExclusiveSum(d_temp_storage, temp_storage_bytes, d_counts_,
-                                d_counts_, alphabet_size_);
+  gpuErrchk(cub::DeviceScan::ExclusiveSum(d_temp_storage, max_needed_storage,
+                                          d_counts_, alphabet_size_));
 
   BitArray bit_array(bit_array_sizes, false);
 
@@ -666,10 +786,10 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     if (l > 0) {
       // Perform radix sort
       if (use_reduced_radix_sort) {
-        cub::DeviceRadixSort::SortKeys(
-            d_temp_storage, temp_storage_bytes, d_data_buffer, data_size,
+        gpuErrchk(cub::DeviceRadixSort::SortKeys(
+            d_temp_storage, max_needed_storage, d_data_buffer, data_size,
             alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1,
-            cudaStreamDefault);
+            cudaStreamDefault));
         //  Fill l-th bit array
         gpuErrchk(cudaMemcpyAsync(d_data_buffer.Alternate(), coded_data.data(),
                                   data_size * sizeof(T), cudaMemcpyHostToDevice,
@@ -677,10 +797,10 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
         fillLevel(bit_array, d_data_buffer.Current(), data_size,
                   l);  // synchronous
       } else {
-        cub::DeviceRadixSort::SortKeys(
-            d_temp_storage, temp_storage_bytes, d_data, d_sorted_data,
+        gpuErrchk(cub::DeviceRadixSort::SortKeys(
+            d_temp_storage, max_needed_storage, d_data, d_sorted_data,
             data_size, alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1,
-            cudaStreamDefault);
+            cudaStreamDefault));
         //  Fill l-th bit array
         fillLevel(bit_array, d_sorted_data, data_size, l);  // synchronous
       }
@@ -690,36 +810,30 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
 
     if (l != (num_levels_ - 1) and
         bit_array_sizes[l] != bit_array_sizes[l + 1]) {
+      auto pred = isLongEnough<T>(d_code_lens, l, codes_start_);
       //  Reduce text
-      T* new_end;
       if (l == 0) {
-        new_end =
-            thrust::remove_if(thrust::device, d_data, d_data + data_size,
-                              isNotLongEnough<T>(d_code_lens, l, codes_start_));
-        data_size = static_cast<size_t>(std::distance(d_data, new_end));
+        data_size = runDeviceSelectIf(d_temp_storage, max_needed_storage,
+                                      d_data, data_size, pred);
         if (use_reduced_radix_sort) {
-          gpuErrchk(cudaMemcpyAsync(coded_data.data(), d_data,
+          gpuErrchk(cudaMemcpyAsync(coded_data.data(),
+                                    d_data_buffer.Alternate(),
                                     data_size * sizeof(T),
                                     cudaMemcpyDeviceToHost, cudaStreamDefault));
         }
       } else {
         if (use_reduced_radix_sort) {
-          new_end = thrust::remove_if(
-              thrust::device, d_data_buffer.Alternate(),
-              d_data_buffer.Alternate() + data_size,
-              isNotLongEnough<T>(d_code_lens, l, codes_start_));
-          data_size = static_cast<size_t>(
-              std::distance(d_data_buffer.Alternate(), new_end));
+          data_size =
+              runDeviceSelectIf(d_temp_storage, max_needed_storage,
+                                d_data_buffer.Alternate(), data_size, pred);
+
           gpuErrchk(cudaMemcpyAsync(coded_data.data(),
                                     d_data_buffer.Alternate(),
                                     data_size * sizeof(T),
                                     cudaMemcpyDeviceToHost, cudaStreamDefault));
         } else {
-          //?How to know how much mem alloced?
-          T* new_end = thrust::remove_if(
-              thrust::device, d_data, d_data + data_size,
-              isNotLongEnough<T>(d_code_lens, l, codes_start_));
-          data_size = static_cast<size_t>(std::distance(d_data, new_end));
+          data_size = runDeviceSelectIf(d_temp_storage, max_needed_storage,
+                                        d_data, data_size, pred);
         }
       }
     }
@@ -730,7 +844,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     }
   }
 
-  if (alphabet_size_ * sizeof(T) > temp_storage_bytes) {
+  if (alphabet_size_ * sizeof(T) > max_needed_storage) {
     gpuErrchk(cudaFreeAsync(d_alphabet, cudaStreamDefault));
   }
   gpuErrchk(cudaFreeAsync(d_code_lens, cudaStreamDefault));
@@ -751,7 +865,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     cudaFuncAttributes attr;
     cudaFuncGetAttributes(&attr, precomputeRanksKernel<T>);
 
-    auto const prop = getDeviceProperties();
+    auto const& prop = getDeviceProperties();
     auto const num_warps =
         std::min(static_cast<size_t>((num_ranks_ + WS - 1) / WS),
                  static_cast<size_t>(prop.multiProcessorCount *
@@ -874,6 +988,7 @@ __host__ [[nodiscard]] GraphContents createQueriesGraph(
                        copy_results_nodes};
 }
 
+// TODO Add error when not enough memory for indices
 template <typename T>
 template <int NumThreads>
 __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
@@ -953,7 +1068,7 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
 
   size_t const ranks_size = sizeof(size_t) * num_ranks_;
 
-  struct cudaDeviceProp prop = getDeviceProperties();
+  struct cudaDeviceProp& prop = getDeviceProperties();
   gpuErrchk(cudaFuncSetAttribute(
       accessKernel<T, true, NumThreads, true, true>,
       cudaFuncAttributeMaxDynamicSharedMemorySize,
@@ -1207,7 +1322,7 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
 
   size_t const ranks_size = sizeof(size_t) * num_ranks_;
 
-  struct cudaDeviceProp prop = getDeviceProperties();
+  struct cudaDeviceProp& prop = getDeviceProperties();
   gpuErrchk(cudaFuncSetAttribute(
       rankKernel<T, true, NumThreads, true, true>,
       cudaFuncAttributeMaxDynamicSharedMemorySize,
@@ -1477,7 +1592,7 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
 
   maxThreadsPerBlock = findLargestDivisor(kMaxTPB, maxThreadsPerBlock);
 
-  auto prop = getDeviceProperties();
+  auto& prop = getDeviceProperties();
 
   gpuErrchk(cudaFuncSetAttribute(
       selectKernel<T, ThreadsPerQuery, true>,
@@ -1736,7 +1851,7 @@ __host__ void WaveletTree<T>::computeGlobalHistogram(bool const is_pow_two,
           &funcAttrib, computeGlobalHistogramKernel<T, false, false, true>));
     }
   }
-  struct cudaDeviceProp prop = getDeviceProperties();
+  struct cudaDeviceProp& prop = getDeviceProperties();
 
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
   auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
@@ -1845,7 +1960,7 @@ __host__ void WaveletTree<T>::fillLevel(BitArray& bit_array, T* const data,
   maxThreadsPerBlockFillLevel =
       findLargestDivisor(kMaxTPB, maxThreadsPerBlockFillLevel);
 
-  struct cudaDeviceProp prop = getDeviceProperties();
+  struct cudaDeviceProp& prop = getDeviceProperties();
   if (level == 0) {
     gpuErrchk(cudaFuncSetAttribute(
         fillLevelKernel<T, true>, cudaFuncAttributeMaxDynamicSharedMemorySize,

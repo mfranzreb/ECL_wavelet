@@ -1,3 +1,5 @@
+#include <omp.h>
+
 #include <algorithm>
 #include <bit_array.cuh>
 #include <random>
@@ -80,12 +82,31 @@ void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
 std::vector<size_t> generateRandomAccessQueries(size_t const data_size,
                                                 size_t const num_queries) {
   std::vector<size_t> queries(num_queries);
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> dis(0, data_size - 1);
-  std::generate(queries.begin(), queries.end(), [&]() { return dis(gen); });
+
+#pragma omp parallel
+  {
+    // Thread-local random number generator
+    std::random_device rd;
+    // Add thread number to seed for better randomness across threads
+    std::mt19937 gen(rd() + omp_get_thread_num());
+    std::uniform_int_distribution<size_t> dis(0, data_size - 1);
+
+#pragma omp for
+    for (size_t i = 0; i < num_queries; i++) {
+      queries[i] = dis(gen);
+    }
+  }
 
   return queries;
 }
 
+std::vector<size_t> generateRandomNums(size_t const min, size_t const max,
+                                       size_t const num) {
+  std::vector<size_t> nums(num);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<size_t> dis(min, max);
+  std::generate(nums.begin(), nums.end(), [&]() { return dis(gen); });
+  return nums;
+}
 }  // namespace ecl

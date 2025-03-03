@@ -24,7 +24,7 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --default-stream per-thread -Xcompiler
 
 #if in Debug mode, enable CUDA debugging
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G --maxrregcount=20")  # enable cuda-gdb
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G --maxrregcount=32")  # enable cuda-gdb
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)

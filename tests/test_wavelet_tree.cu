@@ -378,7 +378,7 @@ TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogramRandom) {
   uint8_t constexpr kNumIters = 20;
   size_t free_mem, total_mem;
   gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
-  auto [data_sizes, alphabet_sizes] =
+  auto [alphabet_sizes, data_sizes] =
       generateRandomAlphabetAndDataSizes<TypeParam>(
           1000, free_mem / sizeof(TypeParam), kNumIters);
   for (int i = 0; i < kNumIters; i++) {
@@ -693,12 +693,18 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
       }
       std::vector<size_t> results_should(queries.size());
       std::iota(results_should.begin(), results_should.end(), 0);
-      compareSelectResults<TypeParam, 1>(wt, queries, results_should);
-      compareSelectResults<TypeParam, 2>(wt, queries, results_should);
-      compareSelectResults<TypeParam, 4>(wt, queries, results_should);
-      compareSelectResults<TypeParam, 8>(wt, queries, results_should);
-      compareSelectResults<TypeParam, 16>(wt, queries, results_should);
-      compareSelectResults<TypeParam, 32>(wt, queries, results_should);
+      compareSelectResults<TypeParam, 1>(wt, queries, results_should,
+                                         queries.size());
+      compareSelectResults<TypeParam, 2>(wt, queries, results_should,
+                                         queries.size());
+      compareSelectResults<TypeParam, 4>(wt, queries, results_should,
+                                         queries.size());
+      compareSelectResults<TypeParam, 8>(wt, queries, results_should,
+                                         queries.size());
+      compareSelectResults<TypeParam, 16>(wt, queries, results_should,
+                                          queries.size());
+      compareSelectResults<TypeParam, 32>(wt, queries, results_should,
+                                          queries.size());
     }
 
     // Check that if there is no n-th occurrence of a symbol, the result is
@@ -752,7 +758,7 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
   size_t free_mem, total_mem;
   gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
 
-  auto [data_sizes, alphabet_sizes] =
+  auto [alphabet_sizes, data_sizes] =
       generateRandomAlphabetAndDataSizes<TypeParam>(
           1000, free_mem / sizeof(TypeParam), kNumIters);
 
@@ -1015,7 +1021,7 @@ TYPED_TEST(WaveletTreeTestFixture, runDeviceSelectIfRandom) {
   uint8_t constexpr kNumIters = 20;
   size_t free_mem, total_mem;
   gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
-  auto [data_sizes, alphabet_sizes] =
+  auto [alphabet_sizes, data_sizes] =
       generateRandomAlphabetAndDataSizes<TypeParam>(
           1000, free_mem / sizeof(TypeParam), kNumIters);
 

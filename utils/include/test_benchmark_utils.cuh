@@ -349,7 +349,6 @@ std::vector<T> generateRandomDataAndRSQueries(
   return data;
 }
 
-// TODO check correct usage
 template <typename T>
 std::pair<std::vector<size_t>, std::vector<size_t>>
 generateRandomAlphabetAndDataSizes(size_t const min_data_size,
@@ -368,6 +367,6 @@ generateRandomAlphabetAndDataSizes(size_t const min_data_size,
                  static_cast<size_t>(std::numeric_limits<T>::max()) + 1));
     alphabet_sizes[i] = dis_alphabet(gen);
   }
-  return std::make_pair(data_sizes, alphabet_sizes);
+  return std::make_pair(alphabet_sizes, data_sizes);
 }
 }  // namespace ecl

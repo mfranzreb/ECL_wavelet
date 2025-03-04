@@ -485,7 +485,7 @@ template <typename T, int ThreadsPerQuery, bool ShmemRanks>
 __global__ void selectKernel(WaveletTree<T> tree,
                              RankSelectQuery<T>* const queries,
                              size_t const num_queries, size_t* const results,
-                             size_t const num_groups,
+                             uint32_t const num_groups,
                              size_t const alphabet_size,
                              uint8_t const alphabet_num_bits,
                              T const codes_start, bool const is_pow_two,
@@ -1151,7 +1151,8 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
 
   // Change parameters of graph
   void* kernel_params_base[8] = {
-      this,         nullptr,    0, nullptr, &alphabet_size_, (void*)&num_groups,
+      this,         nullptr,         0,
+      nullptr,      &alphabet_size_, (uint32_t*)&num_groups,
       &num_levels_, &num_ranks_};
 
   auto kernel_node_params_base = cudaKernelNodeParams{
@@ -1426,7 +1427,7 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
                                  nullptr,
                                  0,
                                  nullptr,
-                                 (void*)&num_groups,
+                                 (uint32_t*)&num_groups,
                                  &alphabet_size_,
                                  &num_levels_,
                                  &num_ranks_,
@@ -1655,7 +1656,7 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
                                   nullptr,
                                   0,
                                   nullptr,
-                                  (void*)&num_groups,
+                                  (uint32_t*)&num_groups,
                                   &alphabet_size_,
                                   &num_levels_,
                                   &codes_start_,

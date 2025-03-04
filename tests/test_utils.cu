@@ -60,7 +60,7 @@ TYPED_TEST(UtilsTest, ceilLog2) {
 TYPED_TEST(UtilsTest, RSQueriesGenerator) {
   uint8_t constexpr kNumIters = 10;
   uint8_t constexpr kNumQueries = 100;
-  auto [data_sizes, alphabet_sizes] =
+  auto [alphabet_sizes, data_sizes] =
       generateRandomAlphabetAndDataSizes<TypeParam>(
           1000, static_cast<size_t>(5e9) / sizeof(TypeParam), kNumIters);
   std::vector<RankSelectQuery<TypeParam>> rank_queries(kNumQueries);

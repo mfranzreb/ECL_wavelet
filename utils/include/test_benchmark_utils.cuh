@@ -336,6 +336,15 @@ std::vector<T> generateRandomDataAndRSQueries(
     }
   }
   assert(curr_thread == num_threads - 1);
+  assert(std::all_of(
+      rank_queries.data(), rank_queries.data() + num_queries,
+      [&](const RankSelectQuery<T>& s) { return s.index_ < data_size; }));
+  assert(std::all_of(select_queries.data(), select_queries.data() + num_queries,
+                     [](const RankSelectQuery<T>& s) { return s.index_ > 0; }));
+  assert(std::all_of(rank_results.data(), rank_results.data() + num_queries,
+                     [&](const size_t& s) { return s < data_size; }));
+  assert(std::all_of(select_results.data(), select_results.data() + num_queries,
+                     [&](const size_t& s) { return s < data_size; }));
 
   return data;
 }

@@ -2406,7 +2406,7 @@ __device__ T getPrevCharStart(T const char_start, bool const is_rightmost_child,
 template <typename T, int ThreadsPerQuery, bool ShmemRanks>
 __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
     WaveletTree<T> tree, RankSelectQuery<T>* const queries,
-    size_t const num_queries, size_t* const results, size_t const num_groups,
+    size_t const num_queries, size_t* const results, uint32_t const num_groups,
     size_t const alphabet_size, uint8_t const alphabet_num_bits,
     T const codes_start, bool const is_pow_two, T const num_ranks,
     T const num_nodes_at_start) {

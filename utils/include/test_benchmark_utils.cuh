@@ -249,6 +249,99 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetDataAndHist(
 }
 
 template <typename T>
+std::vector<T> generateRandomDataAndRSQueries(
+    std::vector<T> const& alphabet, size_t const data_size,
+    size_t const num_queries, std::vector<RankSelectQuery<T>>& rank_queries,
+    std::vector<RankSelectQuery<T>>& select_queries,
+    std::vector<size_t>& rank_results, std::vector<size_t>& select_results) {
+  if (alphabet.size() < kMinAlphabetSize) {
+    throw std::invalid_argument("Alphabet size must be at least " +
+                                std::to_string(kMinAlphabetSize));
+  }
+
+  std::unordered_map<size_t, std::unordered_map<T, size_t>> thread_hists;
+
+  // Part 2: Generate data and histogram (parallel with thread-local histograms)
+  std::vector<T> data(data_size);
+
+#pragma omp parallel
+  {
+    // Thread-local random generator
+    std::random_device thread_rd;
+    std::mt19937 thread_gen(thread_rd() + omp_get_thread_num());
+    std::uniform_int_distribution<size_t> thread_dis(0, alphabet.size() - 1);
+
+    auto const thread_id = omp_get_thread_num();
+    auto const num_threads = omp_get_num_threads();
+    assert(thread_id < num_threads and thread_id >= 0);
+
+    std::unordered_map<T, size_t> local_hist;
+    size_t const queries_to_generate =
+        thread_id == num_threads - 1
+            ? num_queries / num_threads + num_queries % num_threads
+            : num_queries / num_threads;
+    size_t const start_query = thread_id * (num_queries / num_threads);
+    size_t curr_query = start_query;
+
+    size_t const elements_to_generate =
+        thread_id == num_threads - 1
+            ? data_size / num_threads + data_size % num_threads
+            : data_size / num_threads;
+
+    size_t const start_element = thread_id * (data_size / num_threads);
+    size_t const end_element = start_element + elements_to_generate;
+
+    assert(elements_to_generate > queries_to_generate);
+    size_t const iters_per_query = elements_to_generate / queries_to_generate;
+    assert(end_element <= data_size);
+
+    // Initialize histogram entries for all alphabet symbols
+    for (auto const& symbol : alphabet) {
+      local_hist[symbol] = 0;
+    }
+    for (size_t i = 0; i < elements_to_generate; i++) {
+      size_t const curr_index = start_element + i;
+      auto const symbol = alphabet[thread_dis(thread_gen)];
+
+      local_hist[symbol]++;
+      data[curr_index] = symbol;
+      if (i % iters_per_query == 0 and
+          (curr_query - start_query < queries_to_generate)) {
+        rank_queries[curr_query] = RankSelectQuery<T>(curr_index, symbol);
+        select_queries[curr_query] =
+            RankSelectQuery<T>(local_hist[symbol], symbol);
+        rank_results[curr_query] = local_hist[symbol] - 1;
+        select_results[curr_query] = curr_index;
+        curr_query++;
+      }
+    }
+    assert(curr_query == start_query + queries_to_generate);
+#pragma omp critical
+    {
+      thread_hists[thread_id] = local_hist;
+    }
+  }
+
+  size_t const num_threads = thread_hists.size();
+  size_t const num_queries_per_thread = num_queries / num_threads;
+  size_t curr_thread = 0;
+  // Add hist rsults of previous threads to the queries after
+  for (size_t i = num_queries_per_thread; i < num_queries; i++) {
+    if (i % num_queries_per_thread == 0 and curr_thread < num_threads - 1) {
+      curr_thread++;
+    }
+    for (size_t j = 0; j < curr_thread; j++) {
+      select_queries[i].index_ += thread_hists[j][select_queries[i].symbol_];
+      rank_results[i] += thread_hists[j][rank_queries[i].symbol_];
+    }
+  }
+  assert(curr_thread == num_threads - 1);
+
+  return data;
+}
+
+// TODO check correct usage
+template <typename T>
 std::pair<std::vector<size_t>, std::vector<size_t>>
 generateRandomAlphabetAndDataSizes(size_t const min_data_size,
                                    size_t const max_data_size,
@@ -268,8 +361,4 @@ generateRandomAlphabetAndDataSizes(size_t const min_data_size,
   }
   return std::make_pair(data_sizes, alphabet_sizes);
 }
-
-std::vector<size_t> generateRandomNums(size_t const min, size_t const max,
-                                       size_t const num);
-
 }  // namespace ecl

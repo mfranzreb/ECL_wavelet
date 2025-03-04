@@ -99,14 +99,4 @@ std::vector<size_t> generateRandomAccessQueries(size_t const data_size,
 
   return queries;
 }
-
-std::vector<size_t> generateRandomNums(size_t const min, size_t const max,
-                                       size_t const num) {
-  std::vector<size_t> nums(num);
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> dis(min, max);
-  std::generate(nums.begin(), nums.end(), [&]() { return dis(gen); });
-  return nums;
-}
 }  // namespace ecl

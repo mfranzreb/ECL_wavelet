@@ -22,11 +22,9 @@
 #include "rank_select.cuh"
 #include "utils.cuh"
 
-// TODO: add restricts
 // TODO: check if shmem helpful for all kernels
-// TODO: improve SDSL BMs
-// TODO: Improve funcGetAttr calls
 // TODO: change min alphabet to 2
+// TODO. check if data needs to be kept original
 namespace ecl {
 
 template <typename T>
@@ -987,8 +985,7 @@ __host__ [[nodiscard]] GraphContents createQueriesGraph(
   return GraphContents{graph_exec, copy_indices_nodes, kernel_nodes,
                        copy_results_nodes};
 }
-
-// TODO Add error when not enough memory for indices
+// TODO: remove tmeplate
 template <typename T>
 template <int NumThreads>
 __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
@@ -996,6 +993,18 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   assert(num_indices > 0);
   IdealConfigs const& ideal_configs =
       getIdealConfigs(getDeviceProperties().name);
+  size_t free_mem, total_mem;
+  gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
+
+  size_t constexpr kMaxNumChunks = 40;
+  size_t const needed_memory =
+      num_indices * sizeof(T) +
+      3 * (num_indices / kMaxNumChunks + num_indices % kMaxNumChunks) *
+          sizeof(size_t);  // 3 instead of two for having a small buffer
+  if (needed_memory > free_mem) {
+    throw std::runtime_error(
+        "Not enough memory available for the access queries.");
+  }
 
   // CHeck if indices ptr points to pinned memory
   cudaPointerAttributes attr;
@@ -1036,6 +1045,15 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   } else {
     num_chunks = num_indices < 10 ? 1 : 10;
   }
+  while (num_chunks < kMaxNumChunks and
+         num_indices * sizeof(T) +
+                 std::min(num_chunks, 2U) *
+                     (num_indices / num_chunks + num_indices % num_chunks) *
+                     sizeof(size_t) >
+             free_mem) {
+    num_chunks++;
+  }
+  assert(num_chunks <= kMaxNumChunks);
   uint8_t const num_buffers = std::min(num_chunks, 2U);
   size_t const chunk_size = num_indices / num_chunks;
   size_t const last_chunk_size = chunk_size + num_indices % num_chunks;
@@ -1043,11 +1061,18 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   size_t* d_indices;
   T* d_results;
 
+  bool alloc_failed = false;
   std::thread gpu_alloc_thread([&]() {
-    gpuErrchk(
-        cudaMalloc(&d_indices, last_chunk_size * num_buffers * sizeof(size_t)));
+    auto res =
+        cudaMalloc(&d_indices, last_chunk_size * num_buffers * sizeof(size_t));
+    if (res != cudaSuccess) {
+      alloc_failed = true;
+    }
 
-    gpuErrchk(cudaMalloc(&d_results, num_indices * sizeof(T)));
+    res = cudaMalloc(&d_results, num_indices * sizeof(T));
+    if (res != cudaSuccess) {
+      alloc_failed = true;
+    }
   });
 
   T* results = access_pinned_mem_pool_;
@@ -1187,6 +1212,13 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   if (not is_pinned_mem) {
     cpu_mem_thread.join();
   }
+  if (alloc_failed) {
+    if (not is_pinned_mem) {
+      gpuErrchk(cudaHostUnregister(indices));
+    }
+    throw std::runtime_error(
+        "Not enough memory available for the access queries.");
+  }
   for (uint16_t i = 0; i < num_chunks; ++i) {
     auto const current_chunk_size =
         i == num_chunks - 1 ? last_chunk_size : chunk_size;
@@ -1254,6 +1286,20 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   IdealConfigs const& ideal_configs =
       getIdealConfigs(getDeviceProperties().name);
 
+  size_t free_mem, total_mem;
+  gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
+
+  size_t constexpr kMaxNumChunks = 40;
+  size_t const needed_memory =
+      num_queries * sizeof(size_t) +
+      3 * (num_queries / kMaxNumChunks + num_queries % kMaxNumChunks) *
+          sizeof(RankSelectQuery<T>);  // 3 instead of two for having a small
+                                       // buffer
+  if (needed_memory > free_mem) {
+    throw std::runtime_error(
+        "Not enough memory available for the rank queries.");
+  }
+
   cudaPointerAttributes attr;
   gpuErrchk(cudaPointerGetAttributes(&attr, queries));
   bool const is_pinned_mem = attr.type == cudaMemoryTypeHost;
@@ -1293,6 +1339,15 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   } else {
     num_chunks = num_queries < 10 ? 1 : 10;
   }
+  while (num_chunks < kMaxNumChunks and
+         num_queries * sizeof(size_t) +
+                 std::min(num_chunks, 2U) *
+                     (num_queries / num_chunks + num_queries % num_chunks) *
+                     sizeof(RankSelectQuery<T>) >
+             free_mem) {
+    num_chunks++;
+  }
+  assert(num_chunks <= kMaxNumChunks);
   uint8_t const num_buffers = std::min(num_chunks, 2U);
   size_t const chunk_size = num_queries / num_chunks;
   size_t const last_chunk_size = chunk_size + num_queries % num_chunks;
@@ -1300,11 +1355,18 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   RankSelectQuery<T>* d_queries;
   size_t* d_results;
 
+  bool alloc_failed = false;
   std::thread gpu_alloc_thread([&]() {
-    gpuErrchk(cudaMalloc(&d_queries, last_chunk_size * num_buffers *
-                                         sizeof(RankSelectQuery<T>)));
+    auto res = cudaMalloc(
+        &d_queries, last_chunk_size * num_buffers * sizeof(RankSelectQuery<T>));
+    if (res != cudaSuccess) {
+      alloc_failed = true;
+    }
 
-    gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(size_t)));
+    res = cudaMalloc(&d_results, num_queries * sizeof(size_t));
+    if (res != cudaSuccess) {
+      alloc_failed = true;
+    }
   });
 
   size_t* results = rank_pinned_mem_pool_;
@@ -1470,6 +1532,13 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   if (not is_pinned_mem) {
     cpu_mem_thread.join();
   }
+  if (alloc_failed) {
+    if (not is_pinned_mem) {
+      gpuErrchk(cudaHostUnregister(queries));
+    }
+    throw std::runtime_error(
+        "Not enough memory available for the rank queries.");
+  }
   for (uint16_t i = 0; i < num_chunks; ++i) {
     auto const current_chunk_size =
         i == num_chunks - 1 ? last_chunk_size : chunk_size;
@@ -1530,6 +1599,20 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
   IdealConfigs const& ideal_configs =
       getIdealConfigs(getDeviceProperties().name);
 
+  size_t free_mem, total_mem;
+  gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
+
+  size_t constexpr kMaxNumChunks = 40;
+  size_t const needed_memory =
+      num_queries * sizeof(size_t) +
+      3 * (num_queries / kMaxNumChunks + num_queries % kMaxNumChunks) *
+          sizeof(RankSelectQuery<T>);  // 3 instead of two for having a small
+                                       // buffer
+  if (needed_memory > free_mem) {
+    throw std::runtime_error(
+        "Not enough memory available for the select queries.");
+  }
+
   cudaPointerAttributes attr;
   gpuErrchk(cudaPointerGetAttributes(&attr, queries));
   bool const is_pinned_mem = attr.type == cudaMemoryTypeHost;
@@ -1569,6 +1652,14 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
   } else {
     num_chunks = num_queries < 10 ? 1 : 10;
   }
+  while (num_chunks < kMaxNumChunks and
+         num_queries * sizeof(size_t) +
+                 std::min(num_chunks, 2U) *
+                     (num_queries / num_chunks + num_queries % num_chunks) *
+                     sizeof(RankSelectQuery<T>) >
+             free_mem) {
+    num_chunks++;
+  }
   uint8_t const num_buffers = std::min(num_chunks, 2U);
   size_t const chunk_size = num_queries / num_chunks;
   size_t const last_chunk_size = chunk_size + num_queries % num_chunks;
@@ -1576,11 +1667,18 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
   RankSelectQuery<T>* d_queries;
   size_t* d_results;
 
+  bool alloc_failed = false;
   std::thread gpu_alloc_thread([&]() {
-    gpuErrchk(cudaMalloc(&d_queries, last_chunk_size * num_buffers *
-                                         sizeof(RankSelectQuery<T>)));
+    auto res = cudaMalloc(
+        &d_queries, last_chunk_size * num_buffers * sizeof(RankSelectQuery<T>));
+    if (res != cudaSuccess) {
+      alloc_failed = true;
+    }
 
-    gpuErrchk(cudaMalloc(&d_results, num_queries * sizeof(size_t)));
+    res = cudaMalloc(&d_results, num_queries * sizeof(size_t));
+    if (res != cudaSuccess) {
+      alloc_failed = true;
+    }
   });
 
   size_t* results = select_pinned_mem_pool_;
@@ -1683,6 +1781,13 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
   gpu_alloc_thread.join();
   if (not is_pinned_mem) {
     cpu_mem_thread.join();
+  }
+  if (alloc_failed) {
+    if (not is_pinned_mem) {
+      gpuErrchk(cudaHostUnregister(queries));
+    }
+    throw std::runtime_error(
+        "Not enough memory available for the select queries.");
   }
   for (uint16_t i = 0; i < num_chunks; ++i) {
     auto const current_chunk_size =

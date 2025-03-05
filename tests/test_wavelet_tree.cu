@@ -771,14 +771,7 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
     size_t alphabet_size = alphabet_sizes[i];
     size_t const num_queries = std::min(data_size / 2, kNumQueries);
 
-    std::vector<TypeParam> alphabet(alphabet_size);
-    generateRandomNums<TypeParam>(alphabet, 0,
-                                  std::numeric_limits<TypeParam>::max());
-    // remove duplicates
-    std::sort(alphabet.begin(), alphabet.end());
-    alphabet.erase(std::unique(alphabet.begin(), alphabet.end()),
-                   alphabet.end());
-    alphabet_size = alphabet.size();
+    auto alphabet = generateRandomAlphabet<TypeParam>(alphabet_size);
     auto data = generateRandomDataAndRSQueries<TypeParam>(
         alphabet, data_size, num_queries, rank_queries, select_queries,
         rank_results, select_results);
@@ -927,7 +920,7 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
 
 TYPED_TEST(WaveletTreeTestFixture, genAlphabetRandom) {
   uint8_t constexpr kNumIters = 20;
-  std::vector<size_t> alphabet_sizes;
+  std::vector<size_t> alphabet_sizes(kNumIters);
   generateRandomNums<size_t>(
       alphabet_sizes, kMinAlphabetSize,
       std::min(static_cast<size_t>(std::numeric_limits<TypeParam>::max()),

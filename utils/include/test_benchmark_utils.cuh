@@ -20,6 +20,29 @@ void generateRandomNums(std::vector<T>& nums_vec, T const min, T const max) {
   std::generate(nums_vec.begin(), nums_vec.end(), [&]() { return dis(gen); });
 }
 
+template <typename T>
+std::vector<T> generateRandomAlphabet(size_t const alphabet_size) {
+  std::vector<T> alphabet(alphabet_size);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<T> dis(0, std::numeric_limits<T>::max());
+  if constexpr (sizeof(T) < 4) {
+    std::vector<T> tmp(static_cast<size_t>(std::numeric_limits<T>::max()) + 1);
+    std::iota(tmp.begin(), tmp.end(), 0);
+    std::shuffle(tmp.begin(), tmp.end(), gen);
+    std::copy(tmp.begin(), tmp.begin() + alphabet_size, alphabet.begin());
+  } else {
+    std::unordered_set<T> unique_alphabet;
+    while (unique_alphabet.size() < alphabet_size) {
+      unique_alphabet.insert(dis(gen));
+    }
+    std::copy(unique_alphabet.begin(), unique_alphabet.end(), alphabet.begin());
+  }
+  std::sort(alphabet.begin(), alphabet.end());
+  assert(alphabet.size() == alphabet_size);
+  return alphabet;
+}
+
 /*!
  * \brief Create a random bit array with a given size and percentage of ones.
  * \param size Size of the bit array at each level.

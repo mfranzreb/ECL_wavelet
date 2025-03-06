@@ -511,7 +511,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type");
   assert(data_size > 0);
-  assert(alphabet_.size() > 2 or alphabet_.size() == 0);
+  assert(alphabet_.size() >= kMinAlphabetSize or alphabet_.size() == 0);
   assert(alphabet_.size() == 0 or
          std::is_sorted(alphabet_.begin(), alphabet_.end()));
 
@@ -541,7 +541,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     alphabet_.assign(alphabet_set.begin(), alphabet_set.end());
     std::sort(std::execution::par, alphabet_.begin(), alphabet_.end());
     alphabet_size_ = alphabet_.size();
-    assert(alphabet_size_ > 2);
+    assert(alphabet_size_ >= kMinAlphabetSize);
   }
 
   bool const is_pow_two = isPowTwo(alphabet_size_);
@@ -605,7 +605,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
       nullptr, select_if_bytes, data, data,
       std::min(data_size, static_cast<size_t>(std::numeric_limits<int>::max())),
       isLongEnough<T>(nullptr, 0, 0)));
-  kernelCheck();
   auto max_needed_storage =
       std::max({radix_sort_bytes, exclusive_sum_bytes, select_if_bytes});
   bool use_reduced_radix_sort = false;
@@ -814,8 +813,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
         data_size = runDeviceSelectIf(d_temp_storage, max_needed_storage,
                                       d_data, data_size, pred);
         if (use_reduced_radix_sort) {
-          gpuErrchk(cudaMemcpyAsync(coded_data.data(),
-                                    d_data_buffer.Alternate(),
+          gpuErrchk(cudaMemcpyAsync(coded_data.data(), d_data,
                                     data_size * sizeof(T),
                                     cudaMemcpyDeviceToHost, cudaStreamDefault));
         }

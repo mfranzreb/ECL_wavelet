@@ -775,7 +775,6 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
     auto data = generateRandomDataAndRSQueries<TypeParam>(
         alphabet, data_size, num_queries, rank_queries, select_queries,
         rank_results, select_results);
-    auto alphabet_copy = alphabet;
 
     try {
       WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
@@ -830,7 +829,6 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
       auto data = generateRandomDataAndRSQueries<TypeParam>(
           alphabet, data_size, num_queries, rank_queries, select_queries,
           rank_results, select_results);
-      auto alphabet_copy = alphabet;
 
       WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                                 kGPUIndex);
@@ -878,7 +876,6 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
     auto data = generateRandomDataAndRSQueries<TypeParam>(
         alphabet, data_size, num_queries, rank_queries, select_queries,
         rank_results, select_results);
-    auto alphabet_copy = alphabet;
 
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);

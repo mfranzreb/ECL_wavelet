@@ -26,6 +26,14 @@
       "problemMatcher": []
     },
     {
+      "label": "build RS benchmark",
+      "type": "shell",
+      "command": "cmake",
+      "dependsOn": ["CMake Configure", "Build target RS benchmark"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
       "label": "build WT profile",
       "type": "shell",
       "command": "cmake",
@@ -46,6 +54,14 @@
       "type": "shell",
       "command": "cmake",
       "dependsOn": ["CMake Configure", "Build target tree tests"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "build utils tests",
+      "type": "shell",
+      "command": "cmake",
+      "dependsOn": ["CMake Configure", "Build target utils tests"],
       "dependsOrder": "sequence",
       "problemMatcher": []
     },
@@ -153,10 +169,30 @@
       }
     },
     {
+      "label": "Build target RS benchmark",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "./build", "--target", "ecl_RS_benchmarks"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
       "label": "Build target tree tests",
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "./build", "--target", "ecl_WT_tests"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Build target utils tests",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "./build", "--target", "ecl_utils_tests"],
       "group": {
         "kind": "build",
         "isDefault": true

@@ -342,11 +342,10 @@ std::vector<T> generateRandomDataAndRSQueries(
             : data_size / num_threads;
 
     size_t const start_element = thread_id * (data_size / num_threads);
-    size_t const end_element = start_element + elements_to_generate;
 
     assert(elements_to_generate > queries_to_generate);
     size_t const iters_per_query = elements_to_generate / queries_to_generate;
-    assert(end_element <= data_size);
+    assert(start_element + elements_to_generate <= data_size);
 
     // Initialize histogram entries for all alphabet symbols
     for (auto const& symbol : alphabet) {

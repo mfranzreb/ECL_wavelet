@@ -579,7 +579,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   // Check if alphabet is already minimal
   is_min_alphabet_ =
       std::all_of(alphabet_.begin(), alphabet_.end(),
-                  [i = 0](unsigned value) mutable { return value == i++; });
+                  [i = 0u](unsigned value) mutable { return value == i++; });
 
   std::vector<Code> codes;
   std::vector<NodeInfo<T>> node_starts;
@@ -684,7 +684,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
       counter++;
     }
     num_nodes_until_last_level_ = 0;
-    for (int i = 0; i < num_nodes_at_level.size(); ++i) {
+    for (uint32_t i = 0; i < num_nodes_at_level.size(); ++i) {
       num_nodes_until_last_level_ += num_nodes_at_level[i];
     }
     gpuErrchk(
@@ -788,7 +788,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     fillLevel(bit_array, d_data_buffer.Current(), data_size,
               l);  // synchronous
 
-    if (l != (num_levels_ - 1) and
+    if (l != (num_levels_ - 1u) and
         bit_array_sizes[l] != bit_array_sizes[l + 1]) {
       auto pred = isLongEnough<T>(d_code_lens, l, codes_start_);
       //  Reduce text

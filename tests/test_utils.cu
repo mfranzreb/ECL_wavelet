@@ -70,9 +70,7 @@ TYPED_TEST(UtilsTest, RSQueriesGenerator) {
   for (uint8_t i = 0; i < kNumIters; ++i) {
     size_t const data_size = data_sizes[i];
     size_t const alphabet_size = alphabet_sizes[i];
-    std::vector<TypeParam> alphabet(alphabet_size);
-    generateRandomNums<TypeParam>(alphabet, 0,
-                                  std::numeric_limits<TypeParam>::max());
+    auto alphabet = generateRandomAlphabet<TypeParam>(alphabet_size);
     auto data = generateRandomDataAndRSQueries<TypeParam>(
         alphabet, data_size, kNumQueries, rank_queries, select_queries,
         rank_results, select_results);

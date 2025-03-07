@@ -54,7 +54,7 @@ __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
   while (warps_per_sm % max_block_size != 0) {
     max_block_size -= 1;
   }
-  if (num_warps <= max_block_size) {
+  if (num_warps <= static_cast<size_t>(max_block_size)) {
     return {1, num_warps * WS};
   }
   std::pair<int, int> best_match = {-1, -1};

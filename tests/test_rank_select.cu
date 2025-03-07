@@ -178,7 +178,7 @@ using RankSelectBoolTest = RankSelectTest<bool>;
 TEST_F(RankSelectBoolTest, RankSelectConstructor) {
   std::vector<size_t> sizes;
   uint32_t num_arrays = 10;
-  for (int i = 0; i < num_arrays; ++i) {
+  for (uint32_t i = 0; i < num_arrays; ++i) {
     size_t rand_1 = rand() % 1000;
     size_t rand_2 = rand() % (sizeof(uint32_t) * 8);
     sizes.push_back(8 * sizeof(uint32_t) * rand_1 + rand_2);
@@ -403,7 +403,7 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesContent) {
 }
 
 TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
-  int num_arrays = 5;
+  uint32_t num_arrays = 5;
   std::vector<size_t> sizes(num_arrays);
   std::vector<RankSelectHelper> helpers;
   // Sizes are random between 2000 and 10^6
@@ -411,7 +411,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
   generateRandomNums<uint32_t>(random_nums, 2000, 1e6);
 
   size_t max_size = 0;
-  for (int i = 0; i < num_arrays; ++i) {
+  for (uint32_t i = 0; i < num_arrays; ++i) {
     sizes[i] = random_nums[i];
     max_size = std::max(max_size, sizes[i]);
     helpers.emplace_back(random_nums[i]);
@@ -477,7 +477,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
 }
 
 TEST_F(RankSelectBlocksTest, RankSelectSamplesRandom) {
-  int num_arrays = 10;
+  uint32_t num_arrays = 10;
   for (int _ = 0; _ < 10; _++) {
     std::vector<size_t> sizes(num_arrays);
     std::vector<RankSelectHelper> helpers;
@@ -486,7 +486,7 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesRandom) {
     generateRandomNums<uint32_t>(random_nums, 200, 1e6);
 
     size_t max_size = 0;
-    for (int i = 0; i < num_arrays; ++i) {
+    for (uint32_t i = 0; i < num_arrays; ++i) {
       sizes[i] = random_nums[i];
       max_size = std::max(max_size, sizes[i]);
       helpers.emplace_back(random_nums[i]);
@@ -759,7 +759,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
 }
 
 TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
-  int num_arrays = 10;
+  uint32_t num_arrays = 10;
   for (int _ = 0; _ < 5; _++) {
     std::vector<size_t> sizes(num_arrays);
     std::vector<RankSelectHelper> helpers;
@@ -768,7 +768,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
     generateRandomNums<uint32_t>(random_nums, 2000, 1e6);
 
     size_t max_size = 0;
-    for (int i = 0; i < num_arrays; ++i) {
+    for (uint32_t i = 0; i < num_arrays; ++i) {
       sizes[i] = random_nums[i];
       max_size = std::max(max_size, sizes[i]);
       helpers.emplace_back(random_nums[i]);

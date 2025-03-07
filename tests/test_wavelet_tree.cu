@@ -570,7 +570,7 @@ TYPED_TEST(WaveletTreeTestFixture, access) {
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
 
-    for (int i = 1; i < data.size(); i++) {
+    for (uint32_t i = 1; i < data.size(); i++) {
       std::vector<size_t> indices(i);
       std::iota(indices.begin(), indices.end(), 0);
       compareAccessResults<TypeParam, 1>(wt, indices, data);
@@ -591,7 +591,7 @@ TYPED_TEST(WaveletTreeTestFixture, access) {
     }
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
-    for (int i = 1; i < data.size(); i++) {
+    for (uint32_t i = 1; i < data.size(); i++) {
       std::vector<size_t> indices(i);
       std::iota(indices.begin(), indices.end(), 0);
       compareAccessResults<TypeParam, 1>(wt, indices, data);
@@ -614,7 +614,7 @@ TYPED_TEST(WaveletTreeTestFixture, rank) {
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
 
-    for (int i = 1; i < data.size(); i++) {
+    for (uint32_t i = 1; i < data.size(); i++) {
       std::vector<RankSelectQuery<TypeParam>> queries;
       for (size_t j = 0; j < i; ++j) {
         queries.push_back({j, data[j]});
@@ -650,7 +650,7 @@ TYPED_TEST(WaveletTreeTestFixture, rank) {
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
 
-    for (int i = 1; i < data.size(); i++) {
+    for (uint32_t i = 1; i < data.size(); i++) {
       std::vector<RankSelectQuery<TypeParam>> queries;
       for (size_t j = 0; j < i; ++j) {
         queries.push_back({j, data[j]});
@@ -686,7 +686,7 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
 
-    for (int i = 1; i < data.size(); i++) {
+    for (uint32_t i = 1; i < data.size(); i++) {
       std::vector<RankSelectQuery<TypeParam>> queries;
       for (size_t j = 0; j < data.size(); ++j) {
         queries.push_back({j / 10 + 1, data[j]});
@@ -766,7 +766,7 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
   std::vector<RankSelectQuery<TypeParam>> select_queries(kNumQueries);
   std::vector<size_t> rank_results(kNumQueries);
   std::vector<size_t> select_results(kNumQueries);
-  for (int i = 0; i < kNumIters; i++) {
+  for (size_t i = 0; i < kNumIters; i++) {
     size_t const data_size = data_sizes[i];
     size_t alphabet_size = alphabet_sizes[i];
     size_t const num_queries = std::min(data_size / 2, kNumQueries);

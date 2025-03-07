@@ -240,7 +240,7 @@ class RankSelect {
     for (uint32_t i = 0; i < num_arrays; i++) {
       auto const num_l1_blocks = num_l1_blocks_[i];
       auto const num_l2_blocks =
-          i == (num_arrays - 1)
+          i == (num_arrays - 1u)
               ? total_num_l2_blocks_ - num_l2_blocks_per_arr[i]
               : num_l2_blocks_per_arr[i + 1] - num_l2_blocks_per_arr[i];
 

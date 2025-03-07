@@ -96,7 +96,7 @@ TEST_F(BitArrayBoolTest, AccessAndWriteBits) {
       std::vector<size_t>{32 * (num_words - 1) + bits_in_last_word}, false);
   // for each word in the bit array, set a random bit, and check that
   // accessing it works.
-  for (int i = 0; i < num_words; ++i) {
+  for (uint32_t i = 0; i < num_words; ++i) {
     uint8_t bit;
     if (i == num_words - 1) {
       bit = rand() % bits_in_last_word;
@@ -110,7 +110,7 @@ TEST_F(BitArrayBoolTest, AccessAndWriteBits) {
     kernelCheck();
     EXPECT_TRUE(*result);
     // check that all other bits are unchanged
-    for (int j = 32 * i; j < 32 * (i + 1); ++j) {
+    for (uint32_t j = 32 * i; j < 32 * (i + 1); ++j) {
       if (j != 32 * i + bit and j < bit_array.sizeHost(0)) {
         accessKernel<<<1, 1>>>(bit_array, 0, j, result);
         kernelCheck();

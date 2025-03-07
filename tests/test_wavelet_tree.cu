@@ -124,7 +124,9 @@ TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
     size_t free_mem, total_mem;
     gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
 
-    size_t const max_data_size = free_mem / sizeof(TypeParam);
+    size_t const max_data_size = std::min(
+        free_mem / sizeof(TypeParam),
+        size_t(10'000'000'000));  // 10 GB should be enough to test all cases
     std::vector<TypeParam> data(max_data_size);
     // Test big data sizes
     {
@@ -133,8 +135,16 @@ TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
       for (size_t i = 0; i < max_data_size; ++i) {
         data[i] = i % alphabet.size();
       }
-      std::vector<size_t> data_sizes(20);
-      generateRandomNums(data_sizes, size_t(1000), max_data_size);
+      std::vector<size_t> data_sizes(1000);
+      generateRandomNums<size_t, true>(data_sizes, size_t(1000), max_data_size);
+      std::cout << "Testing big data sizes" << std::endl;
+      std::string file_name = "big_data_sizes.csv";
+      std::ofstream file(file_name);
+      file << "x, y" << std::endl;
+      for (size_t i = 0; i < data_sizes.size(); ++i) {
+        file << i << ", " << data_sizes[i] << std::endl;
+      }
+      file.close();
       for (size_t data_size : data_sizes) {
         auto alphabet_copy = alphabet;
         try {
@@ -155,7 +165,7 @@ TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
       for (size_t i = 0; i < max_data_size; ++i) {
         data[i] = i % alphabet.size();
       }
-      std::vector<size_t> data_sizes(20);
+      std::vector<size_t> data_sizes(1000);
       generateRandomNums(data_sizes, size_t(1000), max_data_size);
       for (size_t data_size : data_sizes) {
         auto alphabet_copy = alphabet;
@@ -375,12 +385,12 @@ TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogram) {
 }
 
 TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogramRandom) {
-  uint8_t constexpr kNumIters = 20;
+  uint8_t constexpr kNumIters = 1000;
   size_t free_mem, total_mem;
   gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
   auto [alphabet_sizes, data_sizes] =
-      generateRandomAlphabetAndDataSizes<TypeParam>(
-          1000, free_mem / sizeof(TypeParam), kNumIters);
+      generateRandomAlphabetAndDataSizes<TypeParam, true>(
+          1000, free_mem / (3 * sizeof(TypeParam)), kNumIters);
   for (int i = 0; i < kNumIters; i++) {
     size_t const data_size = data_sizes[i];
     size_t alphabet_size = alphabet_sizes[i];
@@ -753,13 +763,13 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
 }
 
 TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
-  size_t constexpr kNumIters = 20;
+  size_t constexpr kNumIters = 1000;
   size_t constexpr kNumQueries = 100'000;
   size_t free_mem, total_mem;
   gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
 
   auto [alphabet_sizes, data_sizes] =
-      generateRandomAlphabetAndDataSizes<TypeParam>(
+      generateRandomAlphabetAndDataSizes<TypeParam, true>(
           1000, free_mem / sizeof(TypeParam), kNumIters);
 
   std::vector<RankSelectQuery<TypeParam>> rank_queries(kNumQueries);
@@ -1008,12 +1018,14 @@ TYPED_TEST(WaveletTreeTestFixture, runDeviceSelectIf) {
 }
 
 TYPED_TEST(WaveletTreeTestFixture, runDeviceSelectIfRandom) {
-  uint8_t constexpr kNumIters = 20;
+  uint8_t constexpr kNumIters = 100;
   size_t free_mem, total_mem;
   gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
   auto [alphabet_sizes, data_sizes] =
-      generateRandomAlphabetAndDataSizes<TypeParam>(
-          1000, free_mem / sizeof(TypeParam), kNumIters);
+      generateRandomAlphabetAndDataSizes<TypeParam, true>(
+          1000,
+          std::min(size_t(10'000'000'000), free_mem / (2 * sizeof(TypeParam))),
+          kNumIters);
 
   void* d_temp_storage = nullptr;
   size_t temp_storage_bytes = 0;

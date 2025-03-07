@@ -41,13 +41,23 @@ namespace ecl {
 __global__ void writeWordsParallelKernel(BitArray bit_array, size_t array_index,
                                          uint32_t* words, size_t num_words);
 
-template <typename T>
+template <typename T, bool UseLogDist = false>
 void generateRandomNums(std::vector<T>& nums_vec, T const min, T const max) {
   std::random_device rd;
   std::mt19937 gen(rd());  // Random number generator
-  std::uniform_int_distribution<T> dis(min, max);
+  if constexpr (UseLogDist) {
+    double const log_min = std::log(min);
+    double const log_max = std::log(max);
 
-  std::generate(nums_vec.begin(), nums_vec.end(), [&]() { return dis(gen); });
+    // Generate a uniform distribution between log_min and log_max
+    std::uniform_real_distribution<double> log_dist(log_min, log_max);
+    std::generate(nums_vec.begin(), nums_vec.end(),
+                  [&]() { return static_cast<T>(std::exp(log_dist(gen))); });
+  } else {
+    std::uniform_int_distribution<T> dis(min, max);
+
+    std::generate(nums_vec.begin(), nums_vec.end(), [&]() { return dis(gen); });
+  }
 }
 
 template <typename T>
@@ -401,7 +411,7 @@ std::vector<T> generateRandomDataAndRSQueries(
   return data;
 }
 
-template <typename T>
+template <typename T, bool UseLogDist = false>
 std::pair<std::vector<size_t>, std::vector<size_t>>
 generateRandomAlphabetAndDataSizes(size_t const min_data_size,
                                    size_t const max_data_size,
@@ -410,14 +420,28 @@ generateRandomAlphabetAndDataSizes(size_t const min_data_size,
   std::vector<size_t> alphabet_sizes(num_sizes);
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> dis_data(min_data_size, max_data_size);
-  for (size_t i = 0; i < num_sizes; i++) {
-    data_sizes[i] = dis_data(gen);
-    std::uniform_int_distribution<size_t> dis_alphabet(
-        kMinAlphabetSize,
-        std::min(data_sizes[i],
-                 static_cast<size_t>(std::numeric_limits<T>::max()) + 1));
-    alphabet_sizes[i] = dis_alphabet(gen);
+  if constexpr (UseLogDist) {
+    std::uniform_real_distribution<double> dis_data(std::log(min_data_size),
+                                                    std::log(max_data_size));
+    for (size_t i = 0; i < num_sizes; i++) {
+      data_sizes[i] = static_cast<size_t>(std::exp(dis_data(gen)));
+      std::uniform_int_distribution<size_t> dis_alphabet(
+          kMinAlphabetSize,
+          std::min(data_sizes[i],
+                   static_cast<size_t>(std::numeric_limits<T>::max()) + 1));
+      alphabet_sizes[i] = dis_alphabet(gen);
+    }
+  } else {
+    std::uniform_int_distribution<size_t> dis_data(min_data_size,
+                                                   max_data_size);
+    for (size_t i = 0; i < num_sizes; i++) {
+      data_sizes[i] = dis_data(gen);
+      std::uniform_int_distribution<size_t> dis_alphabet(
+          kMinAlphabetSize,
+          std::min(data_sizes[i],
+                   static_cast<size_t>(std::numeric_limits<T>::max()) + 1));
+      alphabet_sizes[i] = dis_alphabet(gen);
+    }
   }
   return std::make_pair(alphabet_sizes, data_sizes);
 }

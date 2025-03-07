@@ -259,7 +259,7 @@ class RankSelect {
             bit_array_.sizeHost(i));
         kernelStreamCheck(cudaStreamPerThread);
       } else {
-        auto const& ideal_configs = getIdealConfigs(prop.name);
+        IdealConfigs const& ideal_configs = getIdealConfigs(prop.name);
         uint32_t const block_size =
             ideal_configs.ideal_TPB_calculateL2EntriesKernel != 0
                 ? ideal_configs.ideal_TPB_calculateL2EntriesKernel
@@ -332,7 +332,7 @@ class RankSelect {
     kernelCheck();
 
     if (total_ones_samples > 0 or total_zeros_samples > 0) {
-      auto const& ideal_configs = getIdealConfigs(prop.name);
+      IdealConfigs const& ideal_configs = getIdealConfigs(prop.name);
 #pragma omp parallel for num_threads(num_arrays)
       for (uint8_t i = 0; i < num_arrays; i++) {
         size_t const num_ones_samples =

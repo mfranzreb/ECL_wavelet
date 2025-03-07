@@ -58,8 +58,8 @@ TYPED_TEST(UtilsTest, ceilLog2) {
 }
 
 TYPED_TEST(UtilsTest, RSQueriesGenerator) {
-  uint8_t constexpr kNumIters = 1000;
-  uint8_t constexpr kNumQueries = 100;
+  size_t constexpr kNumIters = 1000;
+  size_t constexpr kNumQueries = 100;
   auto [alphabet_sizes, data_sizes] =
       generateRandomAlphabetAndDataSizes<TypeParam, true>(
           1000, static_cast<size_t>(5e9) / sizeof(TypeParam), kNumIters);

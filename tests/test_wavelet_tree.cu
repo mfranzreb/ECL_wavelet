@@ -385,7 +385,7 @@ TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogram) {
 }
 
 TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogramRandom) {
-  uint8_t constexpr kNumIters = 1000;
+  size_t constexpr kNumIters = 1000;
   size_t free_mem, total_mem;
   gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
   auto [alphabet_sizes, data_sizes] =
@@ -926,7 +926,7 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
 }
 
 TYPED_TEST(WaveletTreeTestFixture, genAlphabetRandom) {
-  uint8_t constexpr kNumIters = 20;
+  size_t constexpr kNumIters = 20;
   std::vector<size_t> alphabet_sizes(kNumIters);
   generateRandomNums<size_t>(
       alphabet_sizes, kMinAlphabetSize,
@@ -1018,7 +1018,7 @@ TYPED_TEST(WaveletTreeTestFixture, runDeviceSelectIf) {
 }
 
 TYPED_TEST(WaveletTreeTestFixture, runDeviceSelectIfRandom) {
-  uint8_t constexpr kNumIters = 100;
+  size_t constexpr kNumIters = 100;
   size_t free_mem, total_mem;
   gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
   auto [alphabet_sizes, data_sizes] =

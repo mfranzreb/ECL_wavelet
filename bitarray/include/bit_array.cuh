@@ -92,12 +92,26 @@ class BitArray {
    * \param index Index of the bit to be read to in the bit array.
    * \return boolean representing the bit.
    */
-  __device__ [[nodiscard]] bool access(size_t const array_index,
-                                       size_t const index) const noexcept;
+  __device__ [[nodiscard]] __forceinline__ bool access(
+      size_t const array_index, size_t const index) const noexcept {
+    assert(array_index < num_arrays_);
+    assert(index < d_bit_sizes_[array_index]);
+    // Get position in 32-bit word
+    uint8_t const offset = index & uint8_t(0b11111);
+    // Get relevant word, shift and return bit
+    return (d_data_[d_offsets_[array_index] + (index >> 5)] >> offset) & 1U;
+  }
 
-  __device__ [[nodiscard]] bool access(size_t const array_index,
-                                       size_t const index,
-                                       size_t const offset) const noexcept;
+  __device__ [[nodiscard]] __forceinline__ bool access(
+      size_t const array_index, size_t const index,
+      size_t const offset) const noexcept {
+    assert(array_index < num_arrays_);
+    assert(index < d_bit_sizes_[array_index]);
+    // Get position in 32-bit word
+    uint8_t const bit_offset = index & uint8_t(0b11111);
+    // Get relevant word, shift and return bit
+    return (d_data_[offset + (index >> 5)] >> bit_offset) & 1U;
+  }
 
   /*!
    * \brief Access operator to write to a whole word of the bit array.
@@ -106,8 +120,13 @@ class BitArray {
    * \param value Word to be written. Least significant bit corresponds to the
    * first bit of the word.
    */
-  __device__ void writeWord(size_t const array_index, size_t const index,
-                            uint32_t const value) noexcept;
+  __device__ __forceinline__ void writeWord(size_t const array_index,
+                                            size_t const index,
+                                            uint32_t const value) noexcept {
+    assert(array_index < num_arrays_);
+    assert(index < sizeInWords(array_index));
+    d_data_[d_offsets_[array_index] + index] = value;
+  }
 
   /*!
    * \brief Access operator to write to a whole word of the bit array.
@@ -116,8 +135,13 @@ class BitArray {
    * \param value Word to be written. Least significant bit corresponds to the
    * first bit of the word.
    */
-  __device__ void writeWordAtBit(size_t const array_index, size_t const index,
-                                 uint32_t const value) noexcept;
+  __device__ __forceinline__ void writeWordAtBit(
+      size_t const array_index, size_t const index,
+      uint32_t const value) noexcept {
+    assert(array_index < num_arrays_);
+    assert(index < d_bit_sizes_[array_index]);
+    d_data_[d_offsets_[array_index] + (index / (sizeof(uint32_t) * 8))] = value;
+  }
 
   /*!
    * \brief Access operator to write to a whole word of the bit array.
@@ -127,11 +151,20 @@ class BitArray {
    * first bit of the word.
    * \param offset Offset to the bit array to be written to.
    */
-  __device__ void writeWordAtBit(size_t const array_index, size_t const index,
-                                 uint32_t const value,
-                                 size_t const offset) noexcept;
+  __device__ __forceinline__ void writeWordAtBit(size_t const array_index,
+                                                 size_t const index,
+                                                 uint32_t const value,
+                                                 size_t const offset) noexcept {
+    assert(array_index < num_arrays_);
+    assert(index < d_bit_sizes_[array_index]);
+    d_data_[offset + (index / (sizeof(uint32_t) * 8))] = value;
+  }
 
-  __device__ size_t getOffset(size_t const array_index) const noexcept;
+  __device__ __forceinline__ size_t
+  getOffset(size_t const array_index) const noexcept {
+    assert(array_index < num_arrays_);
+    return d_offsets_[array_index];
+  }
 
   /*!
    * \brief Direct access to one word of the raw data of the bit
@@ -141,12 +174,20 @@ class BitArray {
    * \return index-th word of the raw bit array data. Least significant bit
    * corresponds to the first bit of the word.
    */
-  __device__ [[nodiscard]] uint32_t word(size_t const array_index,
-                                         size_t const index) const noexcept;
+  __device__ [[nodiscard]] __forceinline__ uint32_t
+  word(size_t const array_index, size_t const index) const noexcept {
+    assert(array_index < num_arrays_);
+    assert(index < sizeInWords(array_index));
+    return d_data_[d_offsets_[array_index] + index];
+  }
 
-  __device__ [[nodiscard]] uint32_t word(size_t const array_index,
-                                         size_t const index,
-                                         size_t const offset) const noexcept;
+  __device__ [[nodiscard]] __forceinline__ uint32_t
+  word(size_t const array_index, size_t const index,
+       size_t const offset) const noexcept {
+    assert(array_index < num_arrays_);
+    assert(index < sizeInWords(array_index));
+    return d_data_[offset + index];
+  }
 
   /*!
    * \brief Direct access to two words of the raw data of the bit
@@ -156,13 +197,23 @@ class BitArray {
    * \return index-th and index-th + 1 words of the raw bit array data. Least
    * significant bit corresponds to the first bit of each word.
    */
-  __device__ [[nodiscard]] uint64_t twoWords(size_t const array_index,
-                                             size_t const index) const noexcept;
+  __device__ [[nodiscard]] __forceinline__ uint64_t
+  twoWords(size_t const array_index, size_t const index) const noexcept {
+    assert(array_index < num_arrays_);
+    assert(index + 1 < sizeInWords(array_index));
+    assert(index % 2 == 0 or index == 0);
+    return reinterpret_cast<const uint64_t*>(
+        d_data_)[(d_offsets_[array_index] + index) / 2];
+  }
 
-  __device__ [[nodiscard]] uint64_t twoWords(
-      size_t const array_index, size_t const index,
-      size_t const offset) const noexcept;
-
+  __device__ [[nodiscard]] __forceinline__ uint64_t
+  twoWords(size_t const array_index, size_t const index,
+           size_t const offset) const noexcept {
+    assert(array_index < num_arrays_);
+    assert(index < sizeInWords(array_index));
+    assert(index % 2 == 0 or index == 0);
+    return reinterpret_cast<const uint64_t*>(d_data_)[(offset + index) / 2];
+  }
   /*!
    * \brief Direct access to one word of the raw data of the bit
    * array.
@@ -172,8 +223,12 @@ class BitArray {
    * \return index-th word of the raw bit array data. Least significant bit
    * corresponds to the first bit of the word.
    */
-  __device__ [[nodiscard]] uint32_t wordAtBit(
-      size_t const array_index, size_t const index) const noexcept;
+  __device__ [[nodiscard]] __forceinline__ uint32_t
+  wordAtBit(size_t const array_index, size_t const index) const noexcept {
+    assert(array_index < num_arrays_);
+    assert(index < d_bit_sizes_[array_index]);
+    return d_data_[d_offsets_[array_index] + (index / (sizeof(uint32_t) * 8))];
+  }
 
   /*!
    * \brief Direct access to one word of the raw data of the bit
@@ -184,18 +239,28 @@ class BitArray {
    * bit_index) left unchanged, and all others set to 0. Least significant bit
    * corresponds to the first bit of the word.
    */
-  __device__ [[nodiscard]] uint32_t partialWord(
-      uint32_t word, uint8_t const bit_index) noexcept;
+  __device__ [[nodiscard]] __forceinline__ uint32_t
+  partialWord(uint32_t word, uint8_t const bit_index) const noexcept {
+    assert(bit_index <= sizeof(uint32_t) * 8);
+    return word & ((1UL << bit_index) - 1);
+  }
 
-  __device__ [[nodiscard]] uint64_t partialTwoWords(
-      uint64_t word, uint8_t const bit_index) noexcept;
+  __device__ [[nodiscard]] __forceinline__ uint64_t
+  partialTwoWords(uint64_t word, uint8_t const bit_index) const noexcept {
+    assert(bit_index <= sizeof(uint64_t) * 8);
+    return word & ((1ULL << bit_index) - 1);
+  }
   /*!
    * \brief Get the size of the bit array in
    * bits.
    * \param array_index Index of the bit array to get the size of.
    * \return Size of the bit array in bits.
    */
-  __device__ [[nodiscard]] size_t size(size_t const array_index) const noexcept;
+  __device__ [[nodiscard]] __forceinline__ size_t
+  size(size_t const array_index) const noexcept {
+    assert(array_index < num_arrays_);
+    return d_bit_sizes_[array_index];
+  }
 
   /*! @copydoc size(size_t const) */
   __host__ [[nodiscard]] size_t sizeHost(
@@ -207,14 +272,21 @@ class BitArray {
    * \param array_index Index of the bit array to get the size of.
    * \return Size of the bit array in words.
    */
-  __device__ [[nodiscard]] size_t sizeInWords(
-      size_t const array_index) const noexcept;
+  __device__ [[nodiscard]] __forceinline__ size_t
+  sizeInWords(size_t const array_index) const noexcept {
+    assert(array_index < num_arrays_);
+    return (d_bit_sizes_[array_index] + sizeof(uint32_t) * 8 - 1) /
+           (sizeof(uint32_t) * 8);
+  }
 
   /*!
    * \brief Get the number of bit arrays stored in the global array.
    * \return Number of bit arrays stored in the global array.
    */
-  __host__ __device__ [[nodiscard]] uint8_t numArrays() const noexcept;
+  __host__ __device__ [[nodiscard]] __forceinline__ uint8_t
+  numArrays() const noexcept {
+    return num_arrays_;
+  }
 
   __host__ [[nodiscard]] static size_t getNeededGPUMemory(
       size_t const size, uint8_t const num_arrays) noexcept;

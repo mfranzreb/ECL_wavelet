@@ -107,52 +107,8 @@ __host__ RankSelect::~RankSelect() {
   }
 }
 
-__device__ [[nodiscard]] size_t RankSelect::getNumL1Blocks(
-    uint32_t const array_index) const {
-  assert(array_index < bit_array_.numArrays());
-  return d_num_l1_blocks_[array_index];
-}
-
-__device__ [[nodiscard]] size_t RankSelect::getNumL2Blocks(
-    uint32_t const array_index) const {
-  assert(array_index < bit_array_.numArrays());
-  if (array_index == bit_array_.numArrays() - 1) {
-    return total_num_l2_blocks_ - d_l2_offsets_[array_index];
-  }
-  return d_l2_offsets_[array_index + 1] - d_l2_offsets_[array_index];
-}
-
-__device__ [[nodiscard]] size_t RankSelect::getNumLastL2Blocks(
-    uint32_t const array_index) const {
-  assert(array_index < bit_array_.numArrays());
-  return d_num_last_l2_blocks_[array_index];
-}
-
-__device__ void RankSelect::writeL2Index(
-    uint32_t const array_index, size_t const index,
-    RSConfig::L2_TYPE const value) noexcept {
-  assert(array_index < bit_array_.numArrays());
-  assert(index < getNumL2Blocks(array_index));
-  d_l2_indices_[d_l2_offsets_[array_index] + index] = value;
-}
-
-__device__ void RankSelect::writeL1Index(
-    uint32_t const array_index, size_t const index,
-    RSConfig::L1_TYPE const value) noexcept {
-  assert(array_index < bit_array_.numArrays());
-  assert(index < d_num_l1_blocks_[array_index]);
-  d_l1_indices_[d_l1_offsets_[array_index] + index] = value;
-}
-
-__device__ [[nodiscard]] RSConfig::L1_TYPE RankSelect::getL1Entry(
-    uint32_t const array_index, size_t const index) const {
-  assert(array_index < bit_array_.numArrays());
-  assert(index < d_num_l1_blocks_[array_index]);
-  return d_l1_indices_[d_l1_offsets_[array_index] + index];
-}
-
 __host__ [[nodiscard]] RSConfig::L1_TYPE* RankSelect::getL1EntryPointer(
-    uint32_t const array_index, size_t const index) const {
+    uint32_t const array_index, size_t const index) const noexcept {
   assert(array_index < bit_array_.numArrays());
   assert(index < num_l1_blocks_[array_index]);
   // Pointer arithmetic
@@ -161,19 +117,6 @@ __host__ [[nodiscard]] RSConfig::L1_TYPE* RankSelect::getL1EntryPointer(
     offset += num_l1_blocks_[i];
   }
   return d_l1_indices_ + offset + index;
-}
-
-__device__ [[nodiscard]] size_t RankSelect::getL2Entry(
-    uint32_t const array_index, size_t const index) const {
-  assert(array_index < bit_array_.numArrays());
-  assert(index < getNumL2Blocks(array_index));
-  return d_l2_indices_[d_l2_offsets_[array_index] + index];
-}
-
-__device__ void RankSelect::writeNumLastL2Blocks(
-    uint32_t const array_index, uint16_t const value) noexcept {
-  assert(array_index < bit_array_.numArrays());
-  d_num_last_l2_blocks_[array_index] = value;
 }
 
 __host__ [[nodiscard]] size_t RankSelect::getNeededGPUMemory(

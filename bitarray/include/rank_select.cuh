@@ -805,28 +805,40 @@ class RankSelect {
    * \param array_index Index of the bit array to be used.
    * \return Number of L1 blocks.
    */
-  __device__ [[nodiscard]] size_t getNumL1Blocks(
-      uint32_t const array_index) const;
+  __device__ [[nodiscard]] __forceinline__ size_t
+  getNumL1Blocks(uint32_t const array_index) const noexcept {
+    assert(array_index < bit_array_.numArrays());
+    return d_num_l1_blocks_[array_index];
+  }
 
   /*!
    * \brief Get the number of L2 blocks for a bit array.
    * \param array_index Index of the bit array to be used.
    * \return Number of L2 blocks.
    */
-  __device__ [[nodiscard]] size_t getNumL2Blocks(
-      uint32_t const array_index) const;
+  __device__ [[nodiscard]] __forceinline__ size_t
+  getNumL2Blocks(uint32_t const array_index) const noexcept {
+    assert(array_index < bit_array_.numArrays());
+    if (array_index == bit_array_.numArrays() - 1) {
+      return total_num_l2_blocks_ - d_l2_offsets_[array_index];
+    }
+    return d_l2_offsets_[array_index + 1] - d_l2_offsets_[array_index];
+  }
 
   /*!
    * \brief Get the number of L2 blocks in the last L1 block for a bit array.
    * \param array_index Index of the bit array to be used.
    * \return Number of L2 blocks in the last L1 block.
    */
-  __device__ [[nodiscard]] size_t getNumLastL2Blocks(
-      uint32_t const array_index) const;
+  __device__ [[nodiscard]] __forceinline__ size_t
+  getNumLastL2Blocks(uint32_t const array_index) const noexcept {
+    assert(array_index < bit_array_.numArrays());
+    return d_num_last_l2_blocks_[array_index];
+  }
 
   template <uint32_t Value>
-  __device__ [[nodiscard]] size_t getTotalNumVals(
-      uint32_t const array_index) const {
+  __device__ [[nodiscard]] __forceinline__ size_t
+  getTotalNumVals(uint32_t const array_index) const noexcept {
     static_assert(Value == 0 or Value == 1, "Value must be 0 or 1.");
     if constexpr (Value == 1) {
       return d_total_num_ones_[array_index];
@@ -836,8 +848,8 @@ class RankSelect {
   }
 
   template <uint32_t Value>
-  __device__ [[nodiscard]] size_t getSelectSample(uint32_t const array_index,
-                                                  size_t const index) const {
+  __device__ [[nodiscard]] __forceinline__ size_t getSelectSample(
+      uint32_t const array_index, size_t const index) const noexcept {
     if constexpr (Value == 0) {
       return d_select_samples_0_[d_select_samples_0_offsets_[array_index] +
                                  index];
@@ -853,8 +865,13 @@ class RankSelect {
    * \param index Local index of the L2 index to be written to.
    * \param value Value to be written.
    */
-  __device__ void writeL2Index(uint32_t const array_index, size_t const index,
-                               RSConfig::L2_TYPE const value) noexcept;
+  __device__ __forceinline__ void writeL2Index(
+      uint32_t const array_index, size_t const index,
+      RSConfig::L2_TYPE const value) noexcept {
+    assert(array_index < bit_array_.numArrays());
+    assert(index < getNumL2Blocks(array_index));
+    d_l2_indices_[d_l2_offsets_[array_index] + index] = value;
+  }
 
   /*!
    * \brief Write a value to the L1 index.
@@ -862,19 +879,24 @@ class RankSelect {
    * \param index Local index of the L1 index to be written to.
    * \param value Value to be written.
    */
-  __device__ void writeL1Index(uint32_t const array_index, size_t const index,
-                               RSConfig::L1_TYPE const value) noexcept;
+  __device__ __forceinline__ void writeL1Index(
+      uint32_t const array_index, size_t const index,
+      RSConfig::L1_TYPE const value) noexcept {
+    assert(array_index < bit_array_.numArrays());
+    assert(index < d_num_l1_blocks_[array_index]);
+    d_l1_indices_[d_l1_offsets_[array_index] + index] = value;
+  }
 
-  __device__ void writeTotalNumOnes(uint32_t const array_index,
-                                    size_t const value) noexcept {
+  __device__ __forceinline__ void writeTotalNumOnes(
+      uint32_t const array_index, size_t const value) noexcept {
     assert(array_index < bit_array_.numArrays());
     d_total_num_ones_[array_index] = value;
   }
 
   template <uint32_t Value>
-  __device__ void writeSelectSample(uint32_t const array_index,
-                                    size_t const index,
-                                    size_t const value) noexcept {
+  __device__ __forceinline__ void writeSelectSample(
+      uint32_t const array_index, size_t const index,
+      size_t const value) noexcept {
     static_assert(Value == 0 or Value == 1, "Value must be 0 or 1.");
     if constexpr (Value == 0) {
       d_select_samples_0_[d_select_samples_0_offsets_[array_index] + index] =
@@ -891,8 +913,12 @@ class RankSelect {
    * \param index Local index of the L1 entry to be returned.
    * \return L1 entry.
    */
-  __device__ [[nodiscard]] RSConfig::L1_TYPE getL1Entry(
-      uint32_t const array_index, size_t const index) const;
+  __device__ [[nodiscard]] __forceinline__ RSConfig::L1_TYPE getL1Entry(
+      uint32_t const array_index, size_t const index) const noexcept {
+    assert(array_index < bit_array_.numArrays());
+    assert(index < d_num_l1_blocks_[array_index]);
+    return d_l1_indices_[d_l1_offsets_[array_index] + index];
+  }
 
   /*!
    * \brief Get a device pointer to an L1 entry for a bit array.
@@ -901,7 +927,7 @@ class RankSelect {
    * \return Pointer to L1 entry.
    */
   __host__ [[nodiscard]] RSConfig::L1_TYPE* getL1EntryPointer(
-      uint32_t const array_index, size_t const index) const;
+      uint32_t const array_index, size_t const index) const noexcept;
 
   /*!
    * \brief Get an L2 entry for a bit array.
@@ -909,16 +935,23 @@ class RankSelect {
    * \param index Local index of the L2 entry to be returned.
    * \return L2 entry.
    */
-  __device__ [[nodiscard]] size_t getL2Entry(uint32_t const array_index,
-                                             size_t const index) const;
+  __device__ [[nodiscard]] __forceinline__ size_t
+  getL2Entry(uint32_t const array_index, size_t const index) const noexcept {
+    assert(array_index < bit_array_.numArrays());
+    assert(index < getNumL2Blocks(array_index));
+    return d_l2_indices_[d_l2_offsets_[array_index] + index];
+  }
 
   /*!
    * \brief Write the number of L2 blocks in the last L1 block of a bit array.
    * \param array_index Index of the bit array to be used.
    * \param value Number of L2 blocks in the last L1 block.
    */
-  __device__ void writeNumLastL2Blocks(uint32_t const array_index,
-                                       uint16_t const value) noexcept;
+  __device__ __forceinline__ void writeNumLastL2Blocks(
+      uint32_t const array_index, uint16_t const value) noexcept {
+    assert(array_index < bit_array_.numArrays());
+    d_num_last_l2_blocks_[array_index] = value;
+  }
 
   /*!
    * \brief Do a sum reduction with a subset of a warp.
@@ -932,7 +965,7 @@ class RankSelect {
    */
 
   template <typename T, int NumThreads>
-  __device__ T warpReduce(uint32_t const mask, T val) {
+  __device__ __forceinline__ T warpReduce(uint32_t const mask, T val) {
 #pragma unroll
     for (int offset = NumThreads / 2; offset > 0; offset /= 2) {
       val += __shfl_down_sync(mask, val, offset);
@@ -941,7 +974,8 @@ class RankSelect {
   }
 
   template <typename T, int NumThreads, bool IsInclusive>
-  __device__ void warpSum(T& input, T& output, uint32_t const mask) {
+  __device__ __forceinline__ void warpSum(T& input, T& output,
+                                          uint32_t const mask) {
     T val = input;
     uint8_t const lane = threadIdx.x % NumThreads;
 

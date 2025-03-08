@@ -55,7 +55,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // TODO: check if shmem helpful for all kernels
 // TODO: change min alphabet to 2
-// TODO: kernelchecks
 namespace ecl {
 
 template <typename T>
@@ -389,14 +388,13 @@ class WaveletTree {
       gpuErrchk(cub::DeviceSelect::If(
           d_temp_storage, temp_storage_bytes, d_data + i * chunk_size,
           d_cub_select_results + i,
-          i == num_chunks - 1 ? last_chunk_size : chunk_size, pred));
-      kernelCheck();
+          i == num_chunks - 1 ? last_chunk_size : chunk_size, pred,
+          cudaStreamDefault));
     }
     size_t new_size;
     if (num_chunks > 1) {
-      compactArrayKernel<<<1, 1>>>(d_cub_select_results, num_chunks, d_data,
-                                   chunk_size);
-      kernelCheck();
+      compactArrayKernel<<<1, 1, 0, cudaStreamDefault>>>(
+          d_cub_select_results, num_chunks, d_data, chunk_size);
       gpuErrchk(cudaMemcpy(&new_size, d_cub_select_results + num_chunks,
                            sizeof(size_t), cudaMemcpyDeviceToHost));
     } else {
@@ -843,7 +841,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   gpuErrchk(cudaHostAlloc(&select_pinned_mem_pool_,
                           select_mem_pool_size_ * sizeof(size_t),
                           cudaHostAllocPortable));
-  kernelCheck();
 }
 
 template <typename T>

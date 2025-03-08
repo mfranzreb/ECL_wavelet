@@ -59,7 +59,7 @@ TYPED_TEST(UtilsTest, ceilLog2) {
 }
 
 TYPED_TEST(UtilsTest, RSQueriesGenerator) {
-  if constexpr (sizeof(TypeParam <= 2)) {
+  if constexpr (sizeof(TypeParam) <= 2) {
     size_t constexpr kNumIters = 100;
     size_t const num_queries = omp_get_num_procs();
     auto [alphabet_sizes, data_sizes] =

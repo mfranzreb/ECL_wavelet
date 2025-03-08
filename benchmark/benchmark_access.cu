@@ -16,7 +16,7 @@ static void BM_Access(benchmark::State& state) {
   bool const pin_memory = state.range(3);
 
   auto alphabet = std::vector<T>(alphabet_size);
-  std::iota(alphabet.begin(), alphabet.end(), 0);
+  std::iota(alphabet.begin(), alphabet.end(), 0ULL);
   auto data = generateRandomData<T>(alphabet, data_size);
 
   state.counters["param.data_size"] = data_size;

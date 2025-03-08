@@ -40,7 +40,7 @@ static void BM_SDSL(benchmark::State& state) {
   std::vector<size_t> queries;
   if (rebuild_wt) {
     alphabet = std::vector<T>(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
+    std::iota(alphabet.begin(), alphabet.end(), 0ULL);
     auto data = generateRandomData<T>(alphabet, data_size);
     queries = generateRandomAccessQueries<T>(data_size, num_queries);
     curr_alphabet_size = alphabet_size;

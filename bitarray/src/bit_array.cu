@@ -79,7 +79,7 @@ __host__ BitArray::BitArray(std::vector<size_t> const& sizes)
 
   // perform exclusive sum to get the offsets
   std::exclusive_scan(array_offsets.begin(), array_offsets.end(),
-                      array_offsets.begin(), 0);
+                      array_offsets.begin(), 0ULL);
 
   gpuErrchk(cudaMalloc(&d_offsets_, array_offsets.size() * sizeof(size_t)));
   gpuErrchk(cudaMemcpy(d_offsets_, array_offsets.data(),

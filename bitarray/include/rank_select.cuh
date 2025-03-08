@@ -144,7 +144,7 @@ class RankSelect {
     std::vector<size_t> l1_offsets(num_l1_blocks_.size());
 
     std::exclusive_scan(num_l1_blocks_.begin(), num_l1_blocks_.end(),
-                        l1_offsets.begin(), 0);
+                        l1_offsets.begin(), 0ULL);
     gpuErrchk(cudaMallocAsync(
         &d_l1_offsets_, l1_offsets.size() * sizeof(size_t), cudaStreamDefault));
     gpuErrchk(cudaMemcpyAsync(d_l1_offsets_, l1_offsets.data(),
@@ -193,7 +193,7 @@ class RankSelect {
 
     std::exclusive_scan(num_l2_blocks_per_arr.begin(),
                         num_l2_blocks_per_arr.end(),
-                        num_l2_blocks_per_arr.begin(), 0);
+                        num_l2_blocks_per_arr.begin(), 0ULL);
 
     gpuErrchk(cudaMallocAsync(&d_l2_offsets_,
                               num_l2_blocks_per_arr.size() * sizeof(size_t),
@@ -302,10 +302,10 @@ class RankSelect {
     }
     size_t const total_ones_samples =
         std::accumulate(num_ones_samples_per_array.begin(),
-                        num_ones_samples_per_array.end(), 0);
+                        num_ones_samples_per_array.end(), 0ULL);
     std::exclusive_scan(num_ones_samples_per_array.begin(),
                         num_ones_samples_per_array.end(),
-                        num_ones_samples_per_array.begin(), 0);
+                        num_ones_samples_per_array.begin(), 0ULL);
     gpuErrchk(cudaMallocAsync(&d_select_samples_1_,
                               total_ones_samples * sizeof(size_t),
                               cudaStreamDefault));
@@ -318,10 +318,10 @@ class RankSelect {
 
     size_t const total_zeros_samples =
         std::accumulate(num_zeros_samples_per_array.begin(),
-                        num_zeros_samples_per_array.end(), 0);
+                        num_zeros_samples_per_array.end(), 0ULL);
     std::exclusive_scan(num_zeros_samples_per_array.begin(),
                         num_zeros_samples_per_array.end(),
-                        num_zeros_samples_per_array.begin(), 0);
+                        num_zeros_samples_per_array.begin(), 0ULL);
     gpuErrchk(cudaMallocAsync(&d_select_samples_0_,
                               total_zeros_samples * sizeof(size_t),
                               cudaStreamDefault));

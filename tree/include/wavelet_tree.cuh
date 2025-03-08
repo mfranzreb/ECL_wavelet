@@ -581,7 +581,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   // make minimal alphabet
   if (not is_min_alphabet_) {
     auto min_alphabet = std::vector<T>(alphabet_size_);
-    std::iota(min_alphabet.begin(), min_alphabet.end(), 0);
+    std::iota(min_alphabet.begin(), min_alphabet.end(), 0ULL);
     if (not is_pow_two) {
       codes = createMinimalCodes(min_alphabet);
     }

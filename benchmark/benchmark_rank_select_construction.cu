@@ -16,7 +16,6 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
   state.counters["param.size"] = size;
   state.counters["param.num_levels"] = num_levels;
 
-  //? not working as expected
   // Memory usage
   {
     size_t max_memory_usage = 0;

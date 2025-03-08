@@ -59,7 +59,7 @@ void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
   size_t const alphabet_size = 16;
 
   std::vector<uint8_t> alphabet(alphabet_size);
-  std::iota(alphabet.begin(), alphabet.end(), 0);
+  std::iota(alphabet.begin(), alphabet.end(), 0ULL);
   auto [data, hist] = generateRandomDataAndHist(alphabet, data_size);
   auto alphabet_copy = alphabet;
 
@@ -261,7 +261,7 @@ void tuneFillLevelKernel(std::string out_dir, uint32_t const GPU_index) {
 
   using T = uint8_t;
   std::vector<T> alphabet(alphabet_size);
-  std::iota(alphabet.begin(), alphabet.end(), 0);
+  std::iota(alphabet.begin(), alphabet.end(), 0ULL);
   auto data = generateRandomData(alphabet, data_size);
   WaveletTreeTest<T> wt(data.data(), data_size, std::move(alphabet), GPU_index);
   T* d_data;

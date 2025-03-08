@@ -14,7 +14,7 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> data;
     if (use_min_alphabet) {
       alphabet = std::vector<uint8_t>(alphabet_size);
-      std::iota(alphabet.begin(), alphabet.end(), 0);
+      std::iota(alphabet.begin(), alphabet.end(), 0ULL);
       data = ecl::generateRandomData<uint8_t>(alphabet, data_size);
     } else {
       std::tie(alphabet, data) = ecl::generateRandomAlphabetAndData<uint8_t>(
@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
     std::vector<uint16_t> data;
     if (use_min_alphabet) {
       alphabet = std::vector<uint16_t>(alphabet_size);
-      std::iota(alphabet.begin(), alphabet.end(), 0);
+      std::iota(alphabet.begin(), alphabet.end(), 0ULL);
       data = ecl::generateRandomData<uint16_t>(alphabet, data_size);
     } else {
       std::tie(alphabet, data) = ecl::generateRandomAlphabetAndData<uint16_t>(
@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> data;
     if (use_min_alphabet) {
       alphabet = std::vector<uint32_t>(alphabet_size);
-      std::iota(alphabet.begin(), alphabet.end(), 0);
+      std::iota(alphabet.begin(), alphabet.end(), 0ULL);
       data = ecl::generateRandomData<uint32_t>(alphabet, data_size);
     } else {
       std::tie(alphabet, data) = ecl::generateRandomAlphabetAndData<uint32_t>(

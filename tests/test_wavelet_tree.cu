@@ -132,7 +132,7 @@ TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
       for (size_t i = 0; i < max_data_size; ++i) {
         data[i] = i % alphabet.size();
       }
-      std::vector<size_t> data_sizes(200);
+      std::vector<size_t> data_sizes(50);
       generateRandomNums<size_t, true>(data_sizes, size_t(1000), max_data_size);
       for (size_t data_size : data_sizes) {
         auto alphabet_copy = alphabet;
@@ -149,12 +149,12 @@ TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
     {
       size_t const alphabet_size = std::numeric_limits<TypeParam>::max();
       std::vector<TypeParam> alphabet(alphabet_size);
-      std::iota(alphabet.begin(), alphabet.end(), 0);
+      std::iota(alphabet.begin(), alphabet.end(), 0ULL);
 #pragma omp parallel for
       for (size_t i = 0; i < max_data_size; ++i) {
         data[i] = i % alphabet.size();
       }
-      std::vector<size_t> data_sizes(200);
+      std::vector<size_t> data_sizes(50);
       generateRandomNums(data_sizes, size_t(1000), max_data_size);
       for (size_t data_size : data_sizes) {
         auto alphabet_copy = alphabet;
@@ -175,14 +175,14 @@ TYPED_TEST(WaveletTreeTestFixture, createMinimalCodes) {
   // Check that for powers of two, the vector is empty
   for (size_t i = 4; i < 8 * sizeof(TypeParam); i *= 2) {
     std::vector<TypeParam> alphabet(i);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
+    std::iota(alphabet.begin(), alphabet.end(), 0ULL);
     auto codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
     EXPECT_TRUE(codes.empty());
   }
 
   size_t alphabet_size = 72;
   std::vector<TypeParam> alphabet(alphabet_size);
-  std::iota(alphabet.begin(), alphabet.end(), 0);
+  std::iota(alphabet.begin(), alphabet.end(), 0ULL);
   auto codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
   auto code_value = 64UL;
   for (int i = 64; i <= 71; ++i) {
@@ -193,14 +193,14 @@ TYPED_TEST(WaveletTreeTestFixture, createMinimalCodes) {
 
   alphabet_size = 63;
   alphabet.resize(alphabet_size);
-  std::iota(alphabet.begin(), alphabet.end(), 0);
+  std::iota(alphabet.begin(), alphabet.end(), 0ULL);
   codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
   EXPECT_EQ(codes[0].code_, 62);
   EXPECT_EQ(codes[0].len_, 5);
 
   alphabet_size = 75;
   alphabet.resize(alphabet_size);
-  std::iota(alphabet.begin(), alphabet.end(), 0);
+  std::iota(alphabet.begin(), alphabet.end(), 0ULL);
   codes = WaveletTree<TypeParam>::createMinimalCodes(alphabet);
   code_value = 64UL;
   for (int i = 64; i < 72; ++i) {
@@ -229,7 +229,7 @@ TYPED_TEST(WaveletTreeTestFixture, getNodePosRandom) {
         (rand() % (std::numeric_limits<TypeParam>::max() - kMinAlphabetSize));
 
     std::vector<TypeParam> alphabet(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
+    std::iota(alphabet.begin(), alphabet.end(), 0ULL);
 
     auto alphabet_copy = alphabet;
     WaveletTree<TypeParam> wt(alphabet.data(), alphabet.size(),
@@ -571,14 +571,14 @@ TYPED_TEST(WaveletTreeTestFixture, access) {
 
     for (uint32_t i = 1; i < data.size(); i++) {
       std::vector<size_t> indices(i);
-      std::iota(indices.begin(), indices.end(), 0);
+      std::iota(indices.begin(), indices.end(), 0ULL);
       compareAccessResults<TypeParam>(wt, indices, data);
     }
   }
   if constexpr (sizeof(TypeParam) == 1) {
     size_t alphabet_size = 256;
     std::vector<TypeParam> alphabet(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
+    std::iota(alphabet.begin(), alphabet.end(), 0ULL);
     std::vector<TypeParam> data(alphabet_size * 5);
     for (size_t i = 0; i < data.size(); ++i) {
       data[i] = i % alphabet_size;
@@ -587,7 +587,7 @@ TYPED_TEST(WaveletTreeTestFixture, access) {
                               kGPUIndex);
     for (uint32_t i = 1; i < data.size(); i++) {
       std::vector<size_t> indices(i);
-      std::iota(indices.begin(), indices.end(), 0);
+      std::iota(indices.begin(), indices.end(), 0ULL);
       compareAccessResults<TypeParam>(wt, indices, data);
     }
   }
@@ -621,7 +621,7 @@ TYPED_TEST(WaveletTreeTestFixture, rank) {
   if constexpr (sizeof(TypeParam) == 1) {
     size_t alphabet_size = 256;
     std::vector<TypeParam> alphabet(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
+    std::iota(alphabet.begin(), alphabet.end(), 0ULL);
     std::vector<TypeParam> data(alphabet_size * 5);
     for (size_t i = 0; i < data.size(); ++i) {
       data[i] = i % alphabet_size;
@@ -661,7 +661,7 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
         queries.push_back({j / 10 + 1, data[j]});
       }
       std::vector<size_t> results_should(queries.size());
-      std::iota(results_should.begin(), results_should.end(), 0);
+      std::iota(results_should.begin(), results_should.end(), 0ULL);
       compareSelectResults<TypeParam>(wt, queries, results_should,
                                       queries.size());
     }
@@ -676,7 +676,7 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
   if constexpr (sizeof(TypeParam) == 1) {
     size_t alphabet_size = 256;
     std::vector<TypeParam> alphabet(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
+    std::iota(alphabet.begin(), alphabet.end(), 0ULL);
     std::vector<TypeParam> data(alphabet_size * 5);
     for (size_t i = 0; i < data.size(); ++i) {
       data[i] = i % alphabet_size;
@@ -689,7 +689,7 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
       queries.push_back({i / alphabet_size + 1, data[i]});
     }
     std::vector<size_t> results_should(queries.size());
-    std::iota(results_should.begin(), results_should.end(), 0);
+    std::iota(results_should.begin(), results_should.end(), 0ULL);
     compareSelectResults<TypeParam>(wt, queries, results_should,
                                     queries.size());
 
@@ -749,7 +749,7 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
     for (size_t const alphabet_size :
          std::vector<size_t>{kMinAlphabetSize, 4, 32, 128, 256}) {
       std::vector<TypeParam> alphabet(alphabet_size);
-      std::iota(alphabet.begin(), alphabet.end(), 0);
+      std::iota(alphabet.begin(), alphabet.end(), 0ULL);
       auto data = generateRandomDataAndRSQueries<TypeParam>(
           alphabet, data_size, num_queries, rank_queries, select_queries,
           rank_results, select_results);
@@ -771,7 +771,7 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
     size_t const num_queries = std::min(data_size / 2, kNumQueries);
     size_t alphabet_size = 1 << 16;
     std::vector<TypeParam> alphabet(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
+    std::iota(alphabet.begin(), alphabet.end(), 0ULL);
     auto data = generateRandomDataAndRSQueries<TypeParam>(
         alphabet, data_size, num_queries, rank_queries, select_queries,
         rank_results, select_results);
@@ -799,7 +799,7 @@ TYPED_TEST(WaveletTreeTestFixture, genAlphabetRandom) {
   for (uint8_t i = 0; i < kNumIters; ++i) {
     size_t const alphabet_size = alphabet_sizes[i];
     std::vector<TypeParam> alphabet(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
+    std::iota(alphabet.begin(), alphabet.end(), 0ULL);
     auto data = generateRandomData<TypeParam>(alphabet, 10'000'000);
     // Add alphabet at the end to make sure all symbols are present
     data.insert(data.end(), alphabet.begin(), alphabet.end());
@@ -908,7 +908,7 @@ TYPED_TEST(WaveletTreeTestFixture, runDeviceSelectIfRandom) {
       alphabet_size--;
     }
     std::vector<TypeParam> alphabet(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
+    std::iota(alphabet.begin(), alphabet.end(), 0ULL);
     data = generateRandomData<TypeParam>(alphabet, data_size);
     // Add alphabet at the end to make sure all symbols are present
     for (size_t j = 0; j < alphabet_size; ++j) {

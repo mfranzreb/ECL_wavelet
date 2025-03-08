@@ -19,7 +19,7 @@ static void BM_WaveletTreeConstruction(benchmark::State& state) {
   std::vector<T> data;
   if (is_min_alphabet) {
     alphabet = std::vector<T>(alphabet_size);
-    std::iota(alphabet.begin(), alphabet.end(), 0);
+    std::iota(alphabet.begin(), alphabet.end(), 0ULL);
     data = generateRandomData<T>(alphabet, data_size);
   } else {
     std::tie(alphabet, data) =

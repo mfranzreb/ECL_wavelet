@@ -12,7 +12,7 @@ void profileAccess(size_t const data_size, size_t const alphabet_size,
   std::vector<T> alphabet;
   std::vector<T> data;
   alphabet = std::vector<T>(alphabet_size);
-  std::iota(alphabet.begin(), alphabet.end(), 0);
+  std::iota(alphabet.begin(), alphabet.end(), 0ULL);
   data = ecl::generateRandomData<T>(alphabet, data_size);
   auto queries = ecl::generateRandomAccessQueries(data_size, num_queries);
   ecl::WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), 0);

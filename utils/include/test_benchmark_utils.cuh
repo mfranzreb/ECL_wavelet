@@ -68,7 +68,7 @@ std::vector<T> generateRandomAlphabet(size_t const alphabet_size) {
   std::uniform_int_distribution<T> dis(0, std::numeric_limits<T>::max());
   if constexpr (sizeof(T) < 4) {
     std::vector<T> tmp(static_cast<size_t>(std::numeric_limits<T>::max()) + 1);
-    std::iota(tmp.begin(), tmp.end(), 0);
+    std::iota(tmp.begin(), tmp.end(), 0ULL);
     std::shuffle(tmp.begin(), tmp.end(), gen);
     std::copy(tmp.begin(), tmp.begin() + alphabet_size, alphabet.begin());
   } else {

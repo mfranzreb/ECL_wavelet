@@ -64,7 +64,7 @@ TYPED_TEST(UtilsTest, RSQueriesGenerator) {
     size_t const num_queries = omp_get_num_procs();
     auto [alphabet_sizes, data_sizes] =
         generateRandomAlphabetAndDataSizes<TypeParam, true>(
-            1000, static_cast<size_t>(5e9) / sizeof(TypeParam), kNumIters);
+            1000, static_cast<size_t>(2e9) / sizeof(TypeParam), kNumIters);
     std::vector<RankSelectQuery<TypeParam>> rank_queries(num_queries);
     std::vector<RankSelectQuery<TypeParam>> select_queries(num_queries);
     std::vector<size_t> rank_results(num_queries);

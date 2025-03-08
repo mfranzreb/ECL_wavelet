@@ -33,7 +33,7 @@ static void BM_Access(benchmark::State& state) {
   auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);
 
   for (auto _ : state) {
-    auto results = wt.template access<1>(queries.data(), num_queries);
+    auto results = wt.access(queries.data(), num_queries);
   }
   if (pin_memory) {
     gpuErrchk(cudaHostUnregister(queries.data()));

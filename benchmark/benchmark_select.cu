@@ -40,7 +40,7 @@ static void BM_Select(benchmark::State& state) {
   auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);
 
   for (auto _ : state) {
-    auto results = wt.template select<1>(queries.data(), num_queries);
+    auto results = wt.select(queries.data(), num_queries);
   }
   if (pin_memory) {
     gpuErrchk(cudaHostUnregister(queries.data()));

@@ -18,23 +18,14 @@ void profileRank(size_t const data_size, size_t const alphabet_size,
   ecl::WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), 0);
 
   auto queries_copy = queries;
-  auto results = wt.template rank<1>(queries_copy.data(), num_queries);
+  auto results = wt.rank(queries_copy.data(), num_queries);
   queries_copy = queries;
   if (use_profiler_api) {
     cudaProfilerStart();
-    results = wt.template rank<1>(queries_copy.data(), num_queries);
+    results = wt.rank(queries_copy.data(), num_queries);
     cudaProfilerStop();
     queries_copy = queries;
   }
-  results = wt.template rank<2>(queries_copy.data(), num_queries);
-  queries_copy = queries;
-  results = wt.template rank<4>(queries_copy.data(), num_queries);
-  queries_copy = queries;
-  results = wt.template rank<8>(queries_copy.data(), num_queries);
-  queries_copy = queries;
-  results = wt.template rank<16>(queries_copy.data(), num_queries);
-  queries_copy = queries;
-  results = wt.template rank<32>(queries_copy.data(), num_queries);
 }
 
 int main(int argc, char** argv) {

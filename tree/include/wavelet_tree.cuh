@@ -191,7 +191,6 @@ class WaveletTree {
    * \param num_indices Number of indices.
    * \return Vector of symbols.
    */
-  template <int NumThreads = WS>
   __host__ std::span<T> access(size_t* indices, size_t const num_indices);
 
   /*!
@@ -200,7 +199,6 @@ class WaveletTree {
    * \param queries Vector of rank queries.
    * \return Vector of ranks.
    */
-  template <int NumThreads = WS>
   __host__ std::span<size_t> rank(RankSelectQuery<T>* queries,
                                   size_t const num_queries);
 
@@ -210,7 +208,6 @@ class WaveletTree {
    * \param queries Vector of select queries.
    * \return Vector of selected indices.
    */
-  template <int ThreadsPerQuery = WS>
   __host__ std::span<size_t> select(RankSelectQuery<T>* queries,
                                     size_t const num_queries);
 
@@ -937,11 +934,12 @@ __host__ [[nodiscard]] GraphContents createQueriesGraph(
   return GraphContents{graph_exec, copy_indices_nodes, kernel_nodes,
                        copy_results_nodes};
 }
-// TODO: remove tmeplate
 template <typename T>
-template <int NumThreads>
 __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
     size_t* indices, size_t const num_indices) {
+  // Number of threads per query, set to 1 since it showed the best performance
+  uint8_t constexpr NumThreads = 1;
+
   assert(num_indices > 0);
   IdealConfigs const& ideal_configs =
       getIdealConfigs(getDeviceProperties().name);
@@ -1230,9 +1228,11 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
 }
 
 template <typename T>
-template <int NumThreads>
 __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
     RankSelectQuery<T>* queries, size_t const num_queries) {
+  // Number of threads per query, set to 1 since it showed the best performance
+  uint8_t constexpr NumThreads = 1;
+
   assert(std::all_of(queries, queries + num_queries,
                      [&](const RankSelectQuery<T>& s) {
                        return s.index_ < rank_select_.bit_array_.sizeHost(0);
@@ -1546,9 +1546,11 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
 
 // TODO: when documenting, emphasize the power of sorting queries
 template <typename T>
-template <int ThreadsPerQuery>
 __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
     RankSelectQuery<T>* queries, size_t const num_queries) {
+  // Number of threads per query, set to 1 since it showed the best performance
+  uint8_t constexpr ThreadsPerQuery = 1;
+
   assert(std::all_of(queries, queries + num_queries,
                      [](const RankSelectQuery<T>& s) { return s.index_ > 0; }));
   IdealConfigs const& ideal_configs =

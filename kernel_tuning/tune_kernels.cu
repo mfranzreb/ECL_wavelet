@@ -99,13 +99,13 @@ void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
       ideal_configs.selectKernel_logrel.slope = slope;
       // Warmup
       for (uint8_t i = 0; i < 2; ++i) {
-        auto results = wt.template access<1>(access_queries.data(), num_query);
+        auto results = wt.access(access_queries.data(), num_query);
       }
 
       std::vector<size_t> times(num_iters);
       for (uint8_t i = 0; i < num_iters; ++i) {
         start_time = std::chrono::high_resolution_clock::now();
-        auto results = wt.template access<1>(access_queries.data(), num_query);
+        auto results = wt.access(access_queries.data(), num_query);
         end_time = std::chrono::high_resolution_clock::now();
         times[i] = std::chrono::duration_cast<std::chrono::microseconds>(
                        end_time - start_time)
@@ -121,12 +121,12 @@ void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
 
       // Warmup
       for (uint8_t i = 0; i < 2; ++i) {
-        auto results = wt.template rank<1>(rank_queries.data(), num_query);
+        auto results = wt.rank(rank_queries.data(), num_query);
       }
 
       for (uint8_t i = 0; i < num_iters; ++i) {
         start_time = std::chrono::high_resolution_clock::now();
-        auto results = wt.template rank<1>(rank_queries.data(), num_query);
+        auto results = wt.rank(rank_queries.data(), num_query);
         end_time = std::chrono::high_resolution_clock::now();
         times[i] = std::chrono::duration_cast<std::chrono::microseconds>(
                        end_time - start_time)
@@ -142,12 +142,12 @@ void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
 
       // Warmup
       for (uint8_t i = 0; i < 2; ++i) {
-        auto results = wt.template select<1>(select_queries.data(), num_query);
+        auto results = wt.select(select_queries.data(), num_query);
       }
 
       for (uint8_t i = 0; i < num_iters; ++i) {
         start_time = std::chrono::high_resolution_clock::now();
-        auto results = wt.template select<1>(select_queries.data(), num_query);
+        auto results = wt.select(select_queries.data(), num_query);
         end_time = std::chrono::high_resolution_clock::now();
         times[i] = std::chrono::duration_cast<std::chrono::microseconds>(
                        end_time - start_time)

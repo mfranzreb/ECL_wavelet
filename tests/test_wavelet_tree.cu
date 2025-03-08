@@ -59,37 +59,34 @@ __global__ void getNodePosKernel(WaveletTree<T> tree, T symbol, uint8_t l,
   *output = tree.getNodePosAtLevel<IsPowTwo>(symbol, l);
 }
 
-template <typename T, int NumThreads>
+template <typename T>
 __host__ void compareAccessResults(WaveletTree<T>& wt,
                                    std::vector<size_t>& indices,
                                    std::vector<T> const& data) {
-  auto const results =
-      wt.template access<NumThreads>(indices.data(), indices.size());
+  auto const results = wt.access(indices.data(), indices.size());
   for (size_t i = 0; i < indices.size(); ++i) {
     EXPECT_EQ(data[indices[i]], results[i]);
   }
 }
 
-template <typename T, int NumThreads>
+template <typename T>
 __host__ void compareRankResults(WaveletTree<T>& wt,
                                  std::vector<RankSelectQuery<T>> const& queries,
                                  std::vector<size_t> const& results_should,
                                  size_t const num_queries) {
   auto queries_copy = queries;
-  auto const results =
-      wt.template rank<NumThreads>(queries_copy.data(), num_queries);
+  auto const results = wt.rank(queries_copy.data(), num_queries);
   for (size_t i = 0; i < num_queries; ++i) {
     EXPECT_EQ(results_should[i], results[i]);
   }
 }
 
-template <typename T, int NumThreads>
+template <typename T>
 __host__ void compareSelectResults(
     WaveletTree<T>& wt, std::vector<RankSelectQuery<T>> const& queries,
     std::vector<size_t> const& results_should, size_t const num_queries) {
   auto queries_copy = queries;
-  auto const results =
-      wt.template select<NumThreads>(queries_copy.data(), num_queries);
+  auto const results = wt.select(queries_copy.data(), num_queries);
   for (size_t i = 0; i < num_queries; ++i) {
     EXPECT_EQ(results_should[i], results[i]);
   }
@@ -575,12 +572,7 @@ TYPED_TEST(WaveletTreeTestFixture, access) {
     for (uint32_t i = 1; i < data.size(); i++) {
       std::vector<size_t> indices(i);
       std::iota(indices.begin(), indices.end(), 0);
-      compareAccessResults<TypeParam, 1>(wt, indices, data);
-      compareAccessResults<TypeParam, 2>(wt, indices, data);
-      compareAccessResults<TypeParam, 4>(wt, indices, data);
-      compareAccessResults<TypeParam, 8>(wt, indices, data);
-      compareAccessResults<TypeParam, 16>(wt, indices, data);
-      compareAccessResults<TypeParam, 32>(wt, indices, data);
+      compareAccessResults<TypeParam>(wt, indices, data);
     }
   }
   if constexpr (sizeof(TypeParam) == 1) {
@@ -596,12 +588,7 @@ TYPED_TEST(WaveletTreeTestFixture, access) {
     for (uint32_t i = 1; i < data.size(); i++) {
       std::vector<size_t> indices(i);
       std::iota(indices.begin(), indices.end(), 0);
-      compareAccessResults<TypeParam, 1>(wt, indices, data);
-      compareAccessResults<TypeParam, 2>(wt, indices, data);
-      compareAccessResults<TypeParam, 4>(wt, indices, data);
-      compareAccessResults<TypeParam, 8>(wt, indices, data);
-      compareAccessResults<TypeParam, 16>(wt, indices, data);
-      compareAccessResults<TypeParam, 32>(wt, indices, data);
+      compareAccessResults<TypeParam>(wt, indices, data);
     }
   }
 }
@@ -626,18 +613,8 @@ TYPED_TEST(WaveletTreeTestFixture, rank) {
         results_should[i] = std::count(
             data.begin(), data.begin() + queries[i].index_, queries[i].symbol_);
       }
-      compareRankResults<TypeParam, 1>(wt, queries, results_should,
-                                       queries.size());
-      compareRankResults<TypeParam, 2>(wt, queries, results_should,
-                                       queries.size());
-      compareRankResults<TypeParam, 4>(wt, queries, results_should,
-                                       queries.size());
-      compareRankResults<TypeParam, 8>(wt, queries, results_should,
-                                       queries.size());
-      compareRankResults<TypeParam, 16>(wt, queries, results_should,
-                                        queries.size());
-      compareRankResults<TypeParam, 32>(wt, queries, results_should,
-                                        queries.size());
+      compareRankResults<TypeParam>(wt, queries, results_should,
+                                    queries.size());
     }
   }
 
@@ -662,18 +639,8 @@ TYPED_TEST(WaveletTreeTestFixture, rank) {
         results_should[i] = std::count(
             data.begin(), data.begin() + queries[i].index_, queries[i].symbol_);
       }
-      compareRankResults<TypeParam, 1>(wt, queries, results_should,
-                                       queries.size());
-      compareRankResults<TypeParam, 2>(wt, queries, results_should,
-                                       queries.size());
-      compareRankResults<TypeParam, 4>(wt, queries, results_should,
-                                       queries.size());
-      compareRankResults<TypeParam, 8>(wt, queries, results_should,
-                                       queries.size());
-      compareRankResults<TypeParam, 16>(wt, queries, results_should,
-                                        queries.size());
-      compareRankResults<TypeParam, 32>(wt, queries, results_should,
-                                        queries.size());
+      compareRankResults<TypeParam>(wt, queries, results_should,
+                                    queries.size());
     }
   }
 }
@@ -695,18 +662,8 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
       }
       std::vector<size_t> results_should(queries.size());
       std::iota(results_should.begin(), results_should.end(), 0);
-      compareSelectResults<TypeParam, 1>(wt, queries, results_should,
-                                         queries.size());
-      compareSelectResults<TypeParam, 2>(wt, queries, results_should,
-                                         queries.size());
-      compareSelectResults<TypeParam, 4>(wt, queries, results_should,
-                                         queries.size());
-      compareSelectResults<TypeParam, 8>(wt, queries, results_should,
-                                         queries.size());
-      compareSelectResults<TypeParam, 16>(wt, queries, results_should,
-                                          queries.size());
-      compareSelectResults<TypeParam, 32>(wt, queries, results_should,
-                                          queries.size());
+      compareSelectResults<TypeParam>(wt, queries, results_should,
+                                      queries.size());
     }
 
     // Check that if there is no n-th occurrence of a symbol, the result is
@@ -733,18 +690,8 @@ TYPED_TEST(WaveletTreeTestFixture, select) {
     }
     std::vector<size_t> results_should(queries.size());
     std::iota(results_should.begin(), results_should.end(), 0);
-    compareSelectResults<TypeParam, 1>(wt, queries, results_should,
-                                       queries.size());
-    compareSelectResults<TypeParam, 2>(wt, queries, results_should,
-                                       queries.size());
-    compareSelectResults<TypeParam, 4>(wt, queries, results_should,
-                                       queries.size());
-    compareSelectResults<TypeParam, 8>(wt, queries, results_should,
-                                       queries.size());
-    compareSelectResults<TypeParam, 16>(wt, queries, results_should,
-                                        queries.size());
-    compareSelectResults<TypeParam, 32>(wt, queries, results_should,
-                                        queries.size());
+    compareSelectResults<TypeParam>(wt, queries, results_should,
+                                    queries.size());
 
     // Check that if there is no n-th occurrence of a symbol, the result is
     // the size of the data
@@ -782,38 +729,13 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
       WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                                 kGPUIndex);
       auto indices = generateRandomAccessQueries(data_size, num_queries);
-      compareAccessResults<TypeParam, 1>(wt, indices, data);
-      compareAccessResults<TypeParam, 2>(wt, indices, data);
-      compareAccessResults<TypeParam, 4>(wt, indices, data);
-      compareAccessResults<TypeParam, 8>(wt, indices, data);
-      compareAccessResults<TypeParam, 16>(wt, indices, data);
-      compareAccessResults<TypeParam, 32>(wt, indices, data);
+      compareAccessResults<TypeParam>(wt, indices, data);
 
-      compareRankResults<TypeParam, 1>(wt, rank_queries, rank_results,
-                                       num_queries);
-      compareRankResults<TypeParam, 2>(wt, rank_queries, rank_results,
-                                       num_queries);
-      compareRankResults<TypeParam, 4>(wt, rank_queries, rank_results,
-                                       num_queries);
-      compareRankResults<TypeParam, 8>(wt, rank_queries, rank_results,
-                                       num_queries);
-      compareRankResults<TypeParam, 16>(wt, rank_queries, rank_results,
-                                        num_queries);
-      compareRankResults<TypeParam, 32>(wt, rank_queries, rank_results,
-                                        num_queries);
+      compareRankResults<TypeParam>(wt, rank_queries, rank_results,
+                                    num_queries);
 
-      compareSelectResults<TypeParam, 1>(wt, select_queries, select_results,
-                                         num_queries);
-      compareSelectResults<TypeParam, 2>(wt, select_queries, select_results,
-                                         num_queries);
-      compareSelectResults<TypeParam, 4>(wt, select_queries, select_results,
-                                         num_queries);
-      compareSelectResults<TypeParam, 8>(wt, select_queries, select_results,
-                                         num_queries);
-      compareSelectResults<TypeParam, 16>(wt, select_queries, select_results,
-                                          num_queries);
-      compareSelectResults<TypeParam, 32>(wt, select_queries, select_results,
-                                          num_queries);
+      compareSelectResults<TypeParam>(wt, select_queries, select_results,
+                                      num_queries);
     } catch (std::runtime_error const& e) {
       assert(std::string(e.what()) ==
              "Not enough memory available for the wavelet tree.");
@@ -836,38 +758,13 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
                                 kGPUIndex);
 
       auto indices = generateRandomAccessQueries(data_size, num_queries);
-      compareAccessResults<TypeParam, 1>(wt, indices, data);
-      compareAccessResults<TypeParam, 2>(wt, indices, data);
-      compareAccessResults<TypeParam, 4>(wt, indices, data);
-      compareAccessResults<TypeParam, 8>(wt, indices, data);
-      compareAccessResults<TypeParam, 16>(wt, indices, data);
-      compareAccessResults<TypeParam, 32>(wt, indices, data);
+      compareAccessResults<TypeParam>(wt, indices, data);
 
-      compareRankResults<TypeParam, 1>(wt, rank_queries, rank_results,
-                                       num_queries);
-      compareRankResults<TypeParam, 2>(wt, rank_queries, rank_results,
-                                       num_queries);
-      compareRankResults<TypeParam, 4>(wt, rank_queries, rank_results,
-                                       num_queries);
-      compareRankResults<TypeParam, 8>(wt, rank_queries, rank_results,
-                                       num_queries);
-      compareRankResults<TypeParam, 16>(wt, rank_queries, rank_results,
-                                        num_queries);
-      compareRankResults<TypeParam, 32>(wt, rank_queries, rank_results,
-                                        num_queries);
+      compareRankResults<TypeParam>(wt, rank_queries, rank_results,
+                                    num_queries);
 
-      compareSelectResults<TypeParam, 1>(wt, select_queries, select_results,
-                                         num_queries);
-      compareSelectResults<TypeParam, 2>(wt, select_queries, select_results,
-                                         num_queries);
-      compareSelectResults<TypeParam, 4>(wt, select_queries, select_results,
-                                         num_queries);
-      compareSelectResults<TypeParam, 8>(wt, select_queries, select_results,
-                                         num_queries);
-      compareSelectResults<TypeParam, 16>(wt, select_queries, select_results,
-                                          num_queries);
-      compareSelectResults<TypeParam, 32>(wt, select_queries, select_results,
-                                          num_queries);
+      compareSelectResults<TypeParam>(wt, select_queries, select_results,
+                                      num_queries);
     }
   } else if (sizeof(TypeParam) == 2) {
     size_t data_size = data_sizes[0];
@@ -882,38 +779,12 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
     auto indices = generateRandomAccessQueries(data_size, num_queries);
-    compareAccessResults<TypeParam, 1>(wt, indices, data);
-    compareAccessResults<TypeParam, 2>(wt, indices, data);
-    compareAccessResults<TypeParam, 4>(wt, indices, data);
-    compareAccessResults<TypeParam, 8>(wt, indices, data);
-    compareAccessResults<TypeParam, 16>(wt, indices, data);
-    compareAccessResults<TypeParam, 32>(wt, indices, data);
+    compareAccessResults<TypeParam>(wt, indices, data);
 
-    compareRankResults<TypeParam, 1>(wt, rank_queries, rank_results,
-                                     num_queries);
-    compareRankResults<TypeParam, 2>(wt, rank_queries, rank_results,
-                                     num_queries);
-    compareRankResults<TypeParam, 4>(wt, rank_queries, rank_results,
-                                     num_queries);
-    compareRankResults<TypeParam, 8>(wt, rank_queries, rank_results,
-                                     num_queries);
-    compareRankResults<TypeParam, 16>(wt, rank_queries, rank_results,
-                                      num_queries);
-    compareRankResults<TypeParam, 32>(wt, rank_queries, rank_results,
-                                      num_queries);
+    compareRankResults<TypeParam>(wt, rank_queries, rank_results, num_queries);
 
-    compareSelectResults<TypeParam, 1>(wt, select_queries, select_results,
-                                       num_queries);
-    compareSelectResults<TypeParam, 2>(wt, select_queries, select_results,
-                                       num_queries);
-    compareSelectResults<TypeParam, 4>(wt, select_queries, select_results,
-                                       num_queries);
-    compareSelectResults<TypeParam, 8>(wt, select_queries, select_results,
-                                       num_queries);
-    compareSelectResults<TypeParam, 16>(wt, select_queries, select_results,
-                                        num_queries);
-    compareSelectResults<TypeParam, 32>(wt, select_queries, select_results,
-                                        num_queries);
+    compareSelectResults<TypeParam>(wt, select_queries, select_results,
+                                    num_queries);
   }
 }
 

@@ -16,17 +16,12 @@ void profileAccess(size_t const data_size, size_t const alphabet_size,
   data = ecl::generateRandomData<T>(alphabet, data_size);
   auto queries = ecl::generateRandomAccessQueries(data_size, num_queries);
   ecl::WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), 0);
-  auto results = wt.template access<1>(queries.data(), num_queries);
+  auto results = wt.access(queries.data(), num_queries);
   if (use_profiler_api) {
     cudaProfilerStart();
-    results = wt.template access<1>(queries.data(), num_queries);
+    results = wt.access(queries.data(), num_queries);
     cudaProfilerStop();
   }
-  results = wt.template access<2>(queries.data(), num_queries);
-  results = wt.template access<4>(queries.data(), num_queries);
-  results = wt.template access<8>(queries.data(), num_queries);
-  results = wt.template access<16>(queries.data(), num_queries);
-  results = wt.template access<32>(queries.data(), num_queries);
 }
 
 int main(int argc, char** argv) {

@@ -41,7 +41,7 @@ static void BM_Rank(benchmark::State& state) {
   }
 
   for (auto _ : state) {
-    auto results = wt.template rank<1>(queries.data(), num_queries);
+    auto results = wt.rank(queries.data(), num_queries);
   }
   if (pin_memory) {
     gpuErrchk(cudaHostUnregister(queries.data()));

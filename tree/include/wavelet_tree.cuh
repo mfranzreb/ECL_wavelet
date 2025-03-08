@@ -54,7 +54,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "utils.cuh"
 
 // TODO: check if shmem helpful for all kernels
-// TODO: change min alphabet to 2
 namespace ecl {
 
 template <typename T>

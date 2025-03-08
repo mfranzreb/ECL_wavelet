@@ -72,7 +72,7 @@ inline uint32_t kMinTPB = 0;
 inline uint32_t kMinBPM = 0;
 constexpr uint8_t kBankSizeBytes = 4;
 constexpr uint8_t kBanksPerLine = 32;
-static constexpr uint8_t kMinAlphabetSize = 3;
+static constexpr uint8_t kMinAlphabetSize = 2;
 
 #define gpuErrchk(ans)                    \
   {                                       \

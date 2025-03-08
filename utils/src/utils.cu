@@ -40,6 +40,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace ecl {
 namespace internal {
 static cudaDeviceProp prop;
+static IdealConfigs ideal_configs;
 }  // namespace internal
 
 __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
@@ -100,7 +101,7 @@ __host__ cudaDeviceProp &getDeviceProperties() {
   return internal::prop;
 }
 
-__host__ void checkWarpSize(uint8_t const GPU_index) {
+__host__ void checkWarpSize(uint32_t const GPU_index) {
   if (internal::prop.totalGlobalMem == 0) {
     gpuErrchk(cudaSetDevice(GPU_index));
     cudaGetDeviceProperties(&internal::prop, GPU_index);
@@ -130,7 +131,11 @@ __host__ IdealConfigs &getIdealConfigs(const std::string &GPU_name) {
       return IdealConfigs();
     }
   };
-  static IdealConfigs ideal_configs = get_configs(GPU_name);
-  return ideal_configs;
+  static bool first_call = true;
+  if (first_call) {
+    first_call = false;
+    internal::ideal_configs = get_configs(GPU_name);
+  }
+  return internal::ideal_configs;
 }
 }  // namespace ecl

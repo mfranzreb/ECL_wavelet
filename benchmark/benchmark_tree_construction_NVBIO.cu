@@ -68,7 +68,7 @@ static void BM_NVBIO(benchmark::State& state) {
       std::atomic_bool done{false};
       std::atomic_bool can_start{false};
       std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                    std::ref(max_memory_usage));
+                    std::ref(max_memory_usage), 0);
       while (not can_start) {
         std::this_thread::yield();
       }
@@ -90,7 +90,7 @@ static void BM_NVBIO(benchmark::State& state) {
       std::atomic_bool done{false};
       std::atomic_bool can_start{false};
       std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                    std::ref(max_memory_usage));
+                    std::ref(max_memory_usage), 0);
       while (not can_start) {
         std::this_thread::yield();
       }
@@ -112,7 +112,7 @@ static void BM_NVBIO(benchmark::State& state) {
       std::atomic_bool done{false};
       std::atomic_bool can_start{false};
       std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                    std::ref(max_memory_usage));
+                    std::ref(max_memory_usage), 0);
       while (not can_start) {
         std::this_thread::yield();
       }
@@ -134,7 +134,7 @@ static void BM_NVBIO(benchmark::State& state) {
       std::atomic_bool done{false};
       std::atomic_bool can_start{false};
       std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                    std::ref(max_memory_usage));
+                    std::ref(max_memory_usage), 0);
       while (not can_start) {
         std::this_thread::yield();
       }

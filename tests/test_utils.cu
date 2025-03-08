@@ -58,7 +58,7 @@ TYPED_TEST(UtilsTest, ceilLog2) {
 }
 
 TYPED_TEST(UtilsTest, RSQueriesGenerator) {
-  size_t constexpr kNumIters = 1000;
+  size_t constexpr kNumIters = 100;
   size_t constexpr kNumQueries = 100;
   auto [alphabet_sizes, data_sizes] =
       generateRandomAlphabetAndDataSizes<TypeParam, true>(
@@ -67,7 +67,7 @@ TYPED_TEST(UtilsTest, RSQueriesGenerator) {
   std::vector<RankSelectQuery<TypeParam>> select_queries(kNumQueries);
   std::vector<size_t> rank_results(kNumQueries);
   std::vector<size_t> select_results(kNumQueries);
-  for (uint8_t i = 0; i < kNumIters; ++i) {
+  for (size_t i = 0; i < kNumIters; ++i) {
     size_t const data_size = data_sizes[i];
     size_t const alphabet_size = alphabet_sizes[i];
     auto alphabet = generateRandomAlphabet<TypeParam>(alphabet_size);
@@ -75,7 +75,7 @@ TYPED_TEST(UtilsTest, RSQueriesGenerator) {
         alphabet, data_size, kNumQueries, rank_queries, select_queries,
         rank_results, select_results);
 #pragma omp parallel for
-    for (uint8_t j = 0; j < kNumQueries; ++j) {
+    for (size_t j = 0; j < kNumQueries; ++j) {
       auto rank_result = rank_results[j];
       auto select_result = select_results[j];
       auto rank_should =

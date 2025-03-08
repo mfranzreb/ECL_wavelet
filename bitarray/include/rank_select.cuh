@@ -108,7 +108,7 @@ class RankSelect {
    * \param bit_array \c BitArray to be used for queries.
    * \param GPU_index Index of the GPU to be used.
    */
-  __host__ RankSelect(BitArray&& bit_array, uint8_t const GPU_index) noexcept
+  __host__ RankSelect(BitArray&& bit_array, uint32_t const GPU_index) noexcept
       : bit_array_(std::move(bit_array)), is_copy_(false) {
     checkWarpSize(GPU_index);
 
@@ -238,6 +238,7 @@ class RankSelect {
     kernelCheck();
 #pragma omp parallel for num_threads(num_arrays)
     for (uint32_t i = 0; i < num_arrays; i++) {
+      gpuErrchk(cudaSetDevice(GPU_index));
       auto const num_l1_blocks = num_l1_blocks_[i];
       auto const num_l2_blocks =
           i == (num_arrays - 1u)
@@ -335,6 +336,8 @@ class RankSelect {
       IdealConfigs const& ideal_configs = getIdealConfigs(prop.name);
 #pragma omp parallel for num_threads(num_arrays)
       for (uint8_t i = 0; i < num_arrays; i++) {
+        gpuErrchk(cudaSetDevice(GPU_index));
+
         size_t const num_ones_samples =
             i == num_arrays - 1
                 ? total_ones_samples - num_ones_samples_per_array[i]

@@ -192,7 +192,7 @@ __host__ __device__ T powTwo(T n) {
   return 1 << n;
 }
 
-__host__ void checkWarpSize(uint8_t const GPU_index);
+__host__ void checkWarpSize(uint32_t const GPU_index);
 
 #define gpuErrchkInternal(ans, file, line) \
   {                                        \

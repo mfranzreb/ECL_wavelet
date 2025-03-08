@@ -10,6 +10,7 @@ namespace ecl {
 
 template <typename T>
 static void BM_WaveletTreeConstruction(benchmark::State& state) {
+  checkWarpSize(0);
   auto const data_size = state.range(0);
   auto const alphabet_size = state.range(1);
   bool const is_min_alphabet = state.range(2);
@@ -36,7 +37,7 @@ static void BM_WaveletTreeConstruction(benchmark::State& state) {
     std::atomic_bool done{false};
     std::atomic_bool can_start{false};
     std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                  std::ref(max_memory_usage));
+                  std::ref(max_memory_usage), 0);
     while (not can_start) {
       std::this_thread::yield();
     }

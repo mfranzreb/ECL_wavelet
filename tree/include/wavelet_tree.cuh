@@ -55,6 +55,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 // TODO: check if shmem helpful for all kernels
 // TODO: change min alphabet to 2
+// TODO: kernelchecks
 namespace ecl {
 
 template <typename T>
@@ -168,7 +169,7 @@ class WaveletTree {
    * \param GPU_index Index of the GPU to use.
    */
   __host__ WaveletTree(T* const data, size_t data_size,
-                       std::vector<T>&& alphabet, uint8_t const GPU_index);
+                       std::vector<T>&& alphabet, uint32_t const GPU_index);
 
   /*! Copy constructor*/
   __host__ WaveletTree(WaveletTree const& other);
@@ -382,9 +383,8 @@ class WaveletTree {
 
     size_t* d_cub_select_results;
     // 1 extra element for total offset
-    gpuErrchk(cudaMallocAsync(&d_cub_select_results,
-                              (num_chunks + 1) * sizeof(size_t),
-                              cudaStreamDefault));
+    gpuErrchk(
+        cudaMalloc(&d_cub_select_results, (num_chunks + 1) * sizeof(size_t)));
     for (uint16_t i = 0; i < num_chunks; ++i) {
       gpuErrchk(cub::DeviceSelect::If(
           d_temp_storage, temp_storage_bytes, d_data + i * chunk_size,
@@ -432,6 +432,7 @@ class WaveletTree {
       nullptr; /*!< Number of nodes at each level, without counting nodes that
                   start at 0*/
   T num_ranks_;
+  uint32_t GPU_index_; /*!< Index of the GPU to use*/
 };
 
 /*!
@@ -536,8 +537,8 @@ size_t WaveletTree<T>::select_mem_pool_size_ = 10'000'000;
 template <typename T>
 __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
                                      std::vector<T>&& alphabet,
-                                     uint8_t const GPU_index)
-    : alphabet_(alphabet), is_copy_(false) {
+                                     uint32_t const GPU_index)
+    : alphabet_(alphabet), is_copy_(false), GPU_index_(GPU_index) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type");
   assert(data_size > 0);
@@ -545,7 +546,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   assert(alphabet_.size() == 0 or
          std::is_sorted(alphabet_.begin(), alphabet_.end()));
 
-  checkWarpSize(GPU_index);
+  checkWarpSize(GPU_index_);
   alphabet_size_ = alphabet_.size();
 
   bool const create_alphabet = alphabet_size_ == 0;
@@ -806,7 +807,7 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   gpuErrchk(cudaFree(d_temp_storage));
 
   // build rank and select structures from bit-vectors
-  rank_select_ = RankSelect(std::move(bit_array), GPU_index);
+  rank_select_ = RankSelect(std::move(bit_array), GPU_index_);
 
   if (num_ranks_ > 0) {
     NodeInfo<T>* d_node_starts = nullptr;
@@ -1018,6 +1019,7 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
 
   bool alloc_failed = false;
   std::thread gpu_alloc_thread([&]() {
+    gpuErrchk(cudaSetDevice(GPU_index_));
     auto res =
         cudaMalloc(&d_indices, last_chunk_size * num_buffers * sizeof(size_t));
     if (res != cudaSuccess) {
@@ -1213,6 +1215,7 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   kernelCheck();
 
   std::thread end_thread([&]() {
+    gpuErrchk(cudaSetDevice(GPU_index_));
     gpuErrchk(cudaFree(d_indices));
     gpuErrchk(cudaFree(d_results));
     if (not is_pinned_mem) {
@@ -1312,6 +1315,7 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
 
   bool alloc_failed = false;
   std::thread gpu_alloc_thread([&]() {
+    gpuErrchk(cudaSetDevice(GPU_index_));
     auto res = cudaMalloc(
         &d_queries, last_chunk_size * num_buffers * sizeof(RankSelectQuery<T>));
     if (res != cudaSuccess) {
@@ -1624,6 +1628,7 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
 
   bool alloc_failed = false;
   std::thread gpu_alloc_thread([&]() {
+    gpuErrchk(cudaSetDevice(GPU_index_));
     auto res = cudaMalloc(
         &d_queries, last_chunk_size * num_buffers * sizeof(RankSelectQuery<T>));
     if (res != cudaSuccess) {
@@ -2239,10 +2244,8 @@ __global__ LB(MAX_TPB, MIN_BPM) void precomputeRanksKernel(
     uint8_t const level = node_info.level_;
     size_t const offset = tree.rank_select_.bit_array_.getOffset(level);
 
-#pragma nv_diag_suppress 174
     tree.setPrecomputedRank(i, tree.rank_select_.template rank<1, false, 0>(
                                    level, char_counts, offset));
-#pragma nv_diag_default 174
   }
 }
 
@@ -2318,11 +2321,9 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
           start = tree.getPrecomputedRank(ranks_start + node_pos);
         }
       }
-#pragma nv_diag_suppress 174
       RankResult const result =
           tree.rank_select_.template rank<ThreadsPerQuery, true, 0>(
               l, char_counts + index, offset);
-#pragma nv_diag_default 174
       size_t const pos = result.rank;
       bool const bit_at_index = result.bit;
       // To avoid overflow if alphabet size is the maximum value of T
@@ -2417,10 +2418,8 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
           start = tree.getPrecomputedRank(ranks_start + node_pos);
         }
       }
-#pragma nv_diag_suppress 174
       pos = tree.rank_select_.template rank<ThreadsPerQuery, false, 0>(
           l, char_counts + query.index_, offset);
-#pragma nv_diag_default 174
       char_split =
           char_start +
           getPrevPowTwo<size_t>(static_cast<size_t>(char_end - char_start) + 1);

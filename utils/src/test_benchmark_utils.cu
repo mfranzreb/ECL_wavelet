@@ -94,7 +94,9 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
 }
 
 void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
-                        size_t& max_memory_usage) {
+                        size_t& max_memory_usage, uint32_t const GPU_index) {
+  gpuErrchk(cudaSetDevice(GPU_index));
+
   max_memory_usage = 0;
   size_t free_bytes;
   size_t total_bytes;

@@ -24,7 +24,7 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
     std::atomic_bool can_start{false};
     auto ba = createRandomBitArray(size, num_levels);
     std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                  std::ref(max_memory_usage));
+                  std::ref(max_memory_usage), 0);
     while (not can_start) {
       std::this_thread::yield();
     }

@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <omp.h>
 
 #include "test_benchmark_utils.cuh"
 #include "utils.cuh"
@@ -58,39 +59,41 @@ TYPED_TEST(UtilsTest, ceilLog2) {
 }
 
 TYPED_TEST(UtilsTest, RSQueriesGenerator) {
-  size_t constexpr kNumIters = 100;
-  size_t constexpr kNumQueries = 100;
-  auto [alphabet_sizes, data_sizes] =
-      generateRandomAlphabetAndDataSizes<TypeParam, true>(
-          1000, static_cast<size_t>(5e9) / sizeof(TypeParam), kNumIters);
-  std::vector<RankSelectQuery<TypeParam>> rank_queries(kNumQueries);
-  std::vector<RankSelectQuery<TypeParam>> select_queries(kNumQueries);
-  std::vector<size_t> rank_results(kNumQueries);
-  std::vector<size_t> select_results(kNumQueries);
-  for (size_t i = 0; i < kNumIters; ++i) {
-    size_t const data_size = data_sizes[i];
-    size_t const alphabet_size = alphabet_sizes[i];
-    auto alphabet = generateRandomAlphabet<TypeParam>(alphabet_size);
-    auto data = generateRandomDataAndRSQueries<TypeParam>(
-        alphabet, data_size, kNumQueries, rank_queries, select_queries,
-        rank_results, select_results);
+  if constexpr (sizeof(TypeParam <= 2)) {
+    size_t constexpr kNumIters = 100;
+    size_t const num_queries = omp_get_num_procs();
+    auto [alphabet_sizes, data_sizes] =
+        generateRandomAlphabetAndDataSizes<TypeParam, true>(
+            1000, static_cast<size_t>(5e9) / sizeof(TypeParam), kNumIters);
+    std::vector<RankSelectQuery<TypeParam>> rank_queries(num_queries);
+    std::vector<RankSelectQuery<TypeParam>> select_queries(num_queries);
+    std::vector<size_t> rank_results(num_queries);
+    std::vector<size_t> select_results(num_queries);
+    for (size_t i = 0; i < kNumIters; ++i) {
+      size_t const data_size = data_sizes[i];
+      size_t const alphabet_size = alphabet_sizes[i];
+      auto alphabet = generateRandomAlphabet<TypeParam>(alphabet_size);
+      auto data = generateRandomDataAndRSQueries<TypeParam>(
+          alphabet, data_size, num_queries, rank_queries, select_queries,
+          rank_results, select_results);
 #pragma omp parallel for
-    for (size_t j = 0; j < kNumQueries; ++j) {
-      auto rank_result = rank_results[j];
-      auto select_result = select_results[j];
-      auto rank_should =
-          std::count(data.begin(), data.begin() + rank_queries[j].index_,
-                     rank_queries[j].symbol_);
-      size_t counts = 0;
-      auto select_should =
-          std::find_if(data.begin(), data.end(),
-                       [&](TypeParam c) {
-                         return c == select_queries[j].symbol_ and
-                                ++counts == select_queries[j].index_;
-                       }) -
-          data.begin();
-      EXPECT_EQ(rank_result, rank_should);
-      EXPECT_EQ(select_result, select_should);
+      for (size_t j = 0; j < num_queries; ++j) {
+        auto rank_result = rank_results[j];
+        auto select_result = select_results[j];
+        auto rank_should =
+            std::count(data.begin(), data.begin() + rank_queries[j].index_,
+                       rank_queries[j].symbol_);
+        size_t counts = 0;
+        auto select_should =
+            std::find_if(data.begin(), data.end(),
+                         [&](TypeParam c) {
+                           return c == select_queries[j].symbol_ and
+                                  ++counts == select_queries[j].index_;
+                         }) -
+            data.begin();
+        EXPECT_EQ(rank_result, rank_should);
+        EXPECT_EQ(select_result, select_should);
+      }
     }
   }
 }

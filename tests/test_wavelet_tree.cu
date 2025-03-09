@@ -744,7 +744,7 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
   }
   if constexpr (sizeof(TypeParam) == 1) {
     // test alphabet sizes of 3, 4, 32, 128
-    size_t data_size = data_sizes[0];
+    size_t data_size = free_mem / (2 * sizeof(TypeParam));
     size_t const num_queries = std::min(data_size / 2, kNumQueries);
     for (size_t const alphabet_size :
          std::vector<size_t>{kMinAlphabetSize, 4, 32, 128, 256}) {
@@ -767,7 +767,7 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
                                       num_queries);
     }
   } else if (sizeof(TypeParam) == 2) {
-    size_t data_size = data_sizes[0];
+    size_t data_size = free_mem / (2 * sizeof(TypeParam));
     size_t const num_queries = std::min(data_size / 2, kNumQueries);
     size_t alphabet_size = 1 << 16;
     std::vector<TypeParam> alphabet(alphabet_size);
@@ -900,9 +900,6 @@ TYPED_TEST(WaveletTreeTestFixture, runDeviceSelectIfRandom) {
     size_t data_size = data_sizes[i];
     size_t alphabet_size = alphabet_sizes[i];
 
-    // 2*temp_storage_bytes to have a buffer
-    bool const use_unified_memory =
-        free_mem < 2 * temp_storage_bytes + data_size * sizeof(TypeParam);
     // Make sure that alphabet_size is not a power of 2
     if (isPowTwo(alphabet_size)) {
       alphabet_size--;
@@ -936,17 +933,9 @@ TYPED_TEST(WaveletTreeTestFixture, runDeviceSelectIfRandom) {
                          code_lens.size() * sizeof(uint8_t),
                          cudaMemcpyHostToDevice));
 
-    if (use_unified_memory) {
-      gpuErrchk(cudaMallocManaged(&d_temp_storage, temp_storage_bytes));
-    } else {
-      gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
-    }
+    gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
     TypeParam* d_data = nullptr;
-    if (use_unified_memory) {
-      gpuErrchk(cudaMallocManaged(&d_data, data_size * sizeof(TypeParam)));
-    } else {
-      gpuErrchk(cudaMalloc(&d_data, data_size * sizeof(TypeParam)));
-    }
+    gpuErrchk(cudaMalloc(&d_data, data_size * sizeof(TypeParam)));
     gpuErrchk(cudaMemcpy(d_data, data.data(), data_size * sizeof(TypeParam),
                          cudaMemcpyHostToDevice));
     auto data_should = data;

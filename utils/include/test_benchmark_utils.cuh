@@ -317,6 +317,7 @@ std::vector<T> generateRandomDataAndRSQueries(
     size_t const num_queries, std::vector<RankSelectQuery<T>>& rank_queries,
     std::vector<RankSelectQuery<T>>& select_queries,
     std::vector<size_t>& rank_results, std::vector<size_t>& select_results) {
+  assert(data_size > num_queries);
   if (alphabet.size() < kMinAlphabetSize) {
     throw std::invalid_argument("Alphabet size must be at least " +
                                 std::to_string(kMinAlphabetSize));
@@ -326,6 +327,9 @@ std::vector<T> generateRandomDataAndRSQueries(
 
   // Part 2: Generate data and histogram (parallel with thread-local histograms)
   std::vector<T> data(data_size);
+
+  size_t const max_num_threads = omp_get_max_threads();
+  std::vector<size_t> queries_per_thread(max_num_threads, 0);
 
 #pragma omp parallel
   {
@@ -339,11 +343,16 @@ std::vector<T> generateRandomDataAndRSQueries(
     assert(thread_id < num_threads and thread_id >= 0);
 
     std::unordered_map<T, size_t> local_hist;
-    size_t const queries_to_generate =
-        thread_id == num_threads - 1
-            ? num_queries / num_threads + num_queries % num_threads
-            : num_queries / num_threads;
-    size_t const start_query = thread_id * (num_queries / num_threads);
+    size_t queries_to_generate = num_queries / num_threads;
+    size_t const remaining_queries = num_queries % num_threads;
+    if (static_cast<size_t>(thread_id) < remaining_queries) {
+      queries_to_generate++;
+    }
+    queries_per_thread[thread_id] = queries_to_generate;
+#pragma omp barrier
+    size_t const start_query =
+        std::accumulate(queries_per_thread.begin(),
+                        queries_per_thread.begin() + thread_id, 0ULL);
     size_t curr_query = start_query;
 
     size_t const elements_to_generate =
@@ -385,17 +394,21 @@ std::vector<T> generateRandomDataAndRSQueries(
   }
 
   size_t const num_threads = thread_hists.size();
-  size_t const num_queries_per_thread = num_queries / num_threads;
   size_t curr_thread = 0;
+  size_t processed_queries = queries_per_thread[0];
+  std::exclusive_scan(queries_per_thread.begin(), queries_per_thread.end(),
+                      queries_per_thread.begin(), 0ULL);
   // Add hist rsults of previous threads to the queries after
-  for (size_t i = num_queries_per_thread; i < num_queries; i++) {
-    if (i % num_queries_per_thread == 0 and curr_thread < num_threads - 1) {
+  for (size_t i = processed_queries; i < num_queries; i++) {
+    if (curr_thread < num_threads - 1 and
+        i == queries_per_thread[curr_thread + 1]) {
       curr_thread++;
     }
     for (size_t j = 0; j < curr_thread; j++) {
       select_queries[i].index_ += thread_hists[j][select_queries[i].symbol_];
       rank_results[i] += thread_hists[j][rank_queries[i].symbol_];
     }
+    processed_queries++;
   }
   assert(curr_thread == num_threads - 1);
   assert(std::all_of(

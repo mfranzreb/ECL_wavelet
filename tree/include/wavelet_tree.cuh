@@ -652,6 +652,10 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     }
   }
 
+  // Placeholder allocation for bit array
+  void* d_placeholder;
+  gpuErrchk(cudaMalloc(&d_placeholder, num_levels_ * data_size / 8));
+
   std::vector<T> num_nodes_at_level(num_levels_ - 1);
   //  create codes and copy to device
   uint8_t* d_code_lens = nullptr;
@@ -699,26 +703,6 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   gpuErrchk(cudaMalloc(&d_counts_, alphabet_size_ * sizeof(size_t)));
   gpuErrchk(cudaMemset(d_counts_, 0, alphabet_size_ * sizeof(size_t)));
 
-  // Copy data to device
-  T* d_data;
-  if (use_data_unified_memory) {
-    gpuErrchk(cudaMallocManaged(&d_data, data_size * sizeof(T)));
-  } else {
-    gpuErrchk(cudaMalloc(&d_data, data_size * sizeof(T)));
-  }
-  gpuErrchk(
-      cudaMemcpy(d_data, data, data_size * sizeof(T), cudaMemcpyHostToDevice));
-
-  // Allocate space for sorted data
-  T* d_sorted_data;
-  if (use_sorted_data_unified_memory) {
-    gpuErrchk(cudaMallocManaged(&d_sorted_data, data_size * sizeof(T)));
-  } else {
-    gpuErrchk(cudaMalloc(&d_sorted_data, data_size * sizeof(T)));
-  }
-
-  d_data_buffer = cub::DoubleBuffer<T>(d_data, d_sorted_data);
-
   void* d_temp_storage = nullptr;
 
   if (use_cub_unified_memory) {
@@ -739,6 +723,16 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
                          alphabet_size_ * sizeof(T), cudaMemcpyHostToDevice));
   }
 
+  // Copy data to device
+  T* d_data;
+  if (use_data_unified_memory) {
+    gpuErrchk(cudaMallocManaged(&d_data, data_size * sizeof(T)));
+  } else {
+    gpuErrchk(cudaMalloc(&d_data, data_size * sizeof(T)));
+  }
+  gpuErrchk(
+      cudaMemcpy(d_data, data, data_size * sizeof(T), cudaMemcpyHostToDevice));
+
   computeGlobalHistogram(is_pow_two, data_size, d_data, d_alphabet, d_counts_);
 
   // Copy counts to host
@@ -746,6 +740,10 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
   gpuErrchk(cudaMemcpy(counts.data(), d_counts_,
                        alphabet_size_ * sizeof(size_t),
                        cudaMemcpyDeviceToHost));
+
+  // Perform exclusive sum of counts
+  gpuErrchk(cub::DeviceScan::ExclusiveSum(d_temp_storage, max_needed_storage,
+                                          d_counts_, alphabet_size_));
 
   // Calculate size of bit array at each level
   std::vector<size_t> bit_array_sizes(num_levels_, data_size);
@@ -763,11 +761,18 @@ __host__ WaveletTree<T>::WaveletTree(T* const data, size_t data_size,
     }
   }
 
-  // Perform exclusive sum of counts
-  gpuErrchk(cub::DeviceScan::ExclusiveSum(d_temp_storage, max_needed_storage,
-                                          d_counts_, alphabet_size_));
-
+  gpuErrchk(cudaFree(d_placeholder));
   BitArray bit_array(bit_array_sizes, false);
+
+  // Allocate space for sorted data
+  T* d_sorted_data;
+  if (use_sorted_data_unified_memory) {
+    gpuErrchk(cudaMallocManaged(&d_sorted_data, data_size * sizeof(T)));
+  } else {
+    gpuErrchk(cudaMalloc(&d_sorted_data, data_size * sizeof(T)));
+  }
+
+  d_data_buffer = cub::DoubleBuffer<T>(d_data, d_sorted_data);
 
   for (uint32_t l = 0; l < num_levels_; l++) {
     assert(data_size == bit_array_sizes[l]);
@@ -1014,13 +1019,14 @@ __host__ [[nodiscard]] std::span<T> WaveletTree<T>::access(
   bool alloc_failed = false;
   std::thread gpu_alloc_thread([&]() {
     gpuErrchk(cudaSetDevice(GPU_index_));
-    auto res =
-        cudaMalloc(&d_indices, last_chunk_size * num_buffers * sizeof(size_t));
+    cudaMalloc(&d_indices, last_chunk_size * num_buffers * sizeof(size_t));
+    auto res = cudaGetLastError();
     if (res != cudaSuccess) {
       alloc_failed = true;
     }
 
-    res = cudaMalloc(&d_results, num_indices * sizeof(T));
+    cudaMalloc(&d_results, num_indices * sizeof(T));
+    res = cudaGetLastError();
     if (res != cudaSuccess) {
       alloc_failed = true;
     }
@@ -1312,13 +1318,16 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::rank(
   bool alloc_failed = false;
   std::thread gpu_alloc_thread([&]() {
     gpuErrchk(cudaSetDevice(GPU_index_));
-    auto res = cudaMalloc(
-        &d_queries, last_chunk_size * num_buffers * sizeof(RankSelectQuery<T>));
+    cudaMalloc(&d_queries,
+               last_chunk_size * num_buffers * sizeof(RankSelectQuery<T>));
+    auto res = cudaGetLastError();
+
     if (res != cudaSuccess) {
       alloc_failed = true;
     }
 
-    res = cudaMalloc(&d_results, num_queries * sizeof(size_t));
+    cudaMalloc(&d_results, num_queries * sizeof(size_t));
+    res = cudaGetLastError();
     if (res != cudaSuccess) {
       alloc_failed = true;
     }
@@ -1627,13 +1636,16 @@ __host__ [[nodiscard]] std::span<size_t> WaveletTree<T>::select(
   bool alloc_failed = false;
   std::thread gpu_alloc_thread([&]() {
     gpuErrchk(cudaSetDevice(GPU_index_));
-    auto res = cudaMalloc(
-        &d_queries, last_chunk_size * num_buffers * sizeof(RankSelectQuery<T>));
+    cudaMalloc(&d_queries,
+               last_chunk_size * num_buffers * sizeof(RankSelectQuery<T>));
+    auto res = cudaGetLastError();
+
     if (res != cudaSuccess) {
       alloc_failed = true;
     }
 
-    res = cudaMalloc(&d_results, num_queries * sizeof(size_t));
+    cudaMalloc(&d_results, num_queries * sizeof(size_t));
+    res = cudaGetLastError();
     if (res != cudaSuccess) {
       alloc_failed = true;
     }

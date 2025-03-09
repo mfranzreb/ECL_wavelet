@@ -201,7 +201,7 @@ __host__ void checkWarpSize(uint32_t const GPU_index);
 
 #define kernelCheck() kernelCheckFunc(__FILE__, __LINE__)
 __host__ inline void kernelCheckFunc(const char *file, int line) {
-  gpuErrchkInternal(cudaPeekAtLastError(), file, line);
+  gpuErrchkInternal(cudaGetLastError(), file, line);
   gpuErrchkInternal(cudaDeviceSynchronize(), file, line);
 }
 
@@ -209,7 +209,7 @@ __host__ inline void kernelCheckFunc(const char *file, int line) {
   kernelStreamCheckFunc(stream, __FILE__, __LINE__)
 __host__ inline void kernelStreamCheckFunc(cudaStream_t stream,
                                            const char *file, int line) {
-  gpuErrchkInternal(cudaPeekAtLastError(), file, line);
+  gpuErrchkInternal(cudaGetLastError(), file, line);
   gpuErrchkInternal(cudaStreamSynchronize(stream), file, line);
 }
 

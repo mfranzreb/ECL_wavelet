@@ -429,6 +429,8 @@ std::pair<std::vector<size_t>, std::vector<size_t>>
 generateRandomAlphabetAndDataSizes(size_t const min_data_size,
                                    size_t const max_data_size,
                                    size_t const num_sizes) {
+  // MAx alphabet size seen on papers is ~3M
+  size_t constexpr kMaxAlphabetSize = 5'000'000;
   std::vector<size_t> data_sizes(num_sizes);
   std::vector<size_t> alphabet_sizes(num_sizes);
   std::random_device rd;
@@ -440,8 +442,11 @@ generateRandomAlphabetAndDataSizes(size_t const min_data_size,
       data_sizes[i] = static_cast<size_t>(std::exp(dis_data(gen)));
       std::uniform_int_distribution<size_t> dis_alphabet(
           kMinAlphabetSize,
-          std::min(data_sizes[i],
-                   static_cast<size_t>(std::numeric_limits<T>::max()) + 1));
+          std::min({data_sizes[i],
+                    sizeof(T) < 8
+                        ? static_cast<size_t>(std::numeric_limits<T>::max()) + 1
+                        : static_cast<size_t>(std::numeric_limits<T>::max()),
+                    kMaxAlphabetSize}));
       alphabet_sizes[i] = dis_alphabet(gen);
     }
   } else {
@@ -451,8 +456,11 @@ generateRandomAlphabetAndDataSizes(size_t const min_data_size,
       data_sizes[i] = dis_data(gen);
       std::uniform_int_distribution<size_t> dis_alphabet(
           kMinAlphabetSize,
-          std::min(data_sizes[i],
-                   static_cast<size_t>(std::numeric_limits<T>::max()) + 1));
+          std::min({data_sizes[i],
+                    sizeof(T) < 8
+                        ? static_cast<size_t>(std::numeric_limits<T>::max()) + 1
+                        : static_cast<size_t>(std::numeric_limits<T>::max()),
+                    kMaxAlphabetSize}));
       alphabet_sizes[i] = dis_alphabet(gen);
     }
   }

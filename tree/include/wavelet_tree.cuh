@@ -211,6 +211,64 @@ class WaveletTree {
   __host__ std::span<size_t> select(RankSelectQuery<T>* queries,
                                     size_t const num_queries);
 
+  template <int ThreadsPerQuery>
+  __device__ T deviceAccess(size_t index, bool const is_pow_two,
+                            size_t* counts = nullptr, size_t* offsets = nullptr,
+                            size_t* ranks = nullptr) {
+    if (counts == nullptr) {
+      counts = d_counts_;
+    }
+    if (ranks == nullptr) {
+      ranks = d_ranks_;
+    }
+    T char_start = 0;
+    T char_end = alphabet_size_ - 1;
+    T ranks_start = 0;
+    for (uint8_t l = 0; l < num_levels_; ++l) {
+      size_t const char_counts = counts[char_start];
+      size_t offset;
+      if (offsets == nullptr) {
+        offset = rank_select_.bit_array_.getOffset(l);
+      } else {
+        offset = offsets[l];
+      }
+      if (char_end - char_start < 2) {
+        if (char_end - char_start > 0 and
+            rank_select_.bit_array_.access(l, char_counts + index, offset) ==
+                true) {
+          char_start++;
+        }
+        break;
+      }
+      size_t start;
+      if (char_start == 0) {
+        start = 0;
+      } else {
+        auto const node_pos = is_pow_two
+                                  ? getNodePosAtLevel<true>(char_start, l)
+                                  : getNodePosAtLevel<false>(char_start, l);
+        start = ranks[ranks_start + node_pos];
+      }
+      RankResult const result =
+          rank_select_.template rank<ThreadsPerQuery, true, 0>(
+              l, char_counts + index, offset);
+      size_t const pos = result.rank;
+      bool const bit_at_index = result.bit;
+      // To avoid overflow if alphabet size is the maximum value of T
+      T const diff =
+          getPrevPowTwo<size_t>(static_cast<size_t>(char_end - char_start) + 1);
+      if (bit_at_index == false) {
+        index = pos - start;
+        char_end = char_start + (diff - 1);
+      } else {
+        index -= pos - start;
+        char_start += diff;
+      }
+      ranks_start += is_pow_two ? powTwo<T>(l) - 1 : getNumNodesAtLevel(l);
+    }
+    return char_start;
+  }
+
   /*!
    * \brief Encodes a symbol from the alphabet. Only symbols that have a code
    * should be passed as argument.
@@ -2287,69 +2345,25 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
     __syncthreads();
   }
 
+  size_t* counts = ShmemCounts ? shmem + num_levels + num_ranks : nullptr;
+  size_t* ranks = ShmemRanks ? shmem + num_levels : nullptr;
+  size_t* offsets = ShmemOffsets ? shmem : nullptr;
+
+  size_t const data_size = tree.rank_select_.bit_array_.size(0);
+
   uint8_t const local_t_id = threadIdx.x % ThreadsPerQuery;
   size_t const global_group_id =
       (blockIdx.x * blockDim.x + threadIdx.x) / ThreadsPerQuery;
   bool const is_pow_two = isPowTwo<size_t>(alphabet_size);
   for (size_t i = global_group_id; i < num_indices; i += num_groups) {
     size_t index = indices[i];
-
-    T char_start = 0;
-    T char_end = alphabet_size - 1;
-    T ranks_start = 0;
-    for (uint8_t l = 0; l < num_levels; ++l) {
-      size_t char_counts;
-      if constexpr (ShmemCounts) {
-        char_counts = shmem[num_levels + num_ranks + char_start];
-      } else {
-        char_counts = tree.getCounts(char_start);
-      }
-      size_t offset;
-      if constexpr (ShmemOffsets) {
-        offset = shmem[l];
-      } else {
-        offset = tree.rank_select_.bit_array_.getOffset(l);
-      }
-      if (char_end - char_start < 2) {
-        if (char_end - char_start > 0 and
-            tree.rank_select_.bit_array_.access(l, char_counts + index,
-                                                offset) == true) {
-          char_start++;
-        }
-        break;
-      }
-      size_t start;
-      if (char_start == 0) {
-        start = 0;
-      } else {
-        auto const node_pos =
-            is_pow_two ? tree.getNodePosAtLevel<true>(char_start, l)
-                       : tree.getNodePosAtLevel<false>(char_start, l);
-        if constexpr (ShmemRanks) {
-          start = shmem[num_levels + ranks_start + node_pos];
-        } else {
-          start = tree.getPrecomputedRank(ranks_start + node_pos);
-        }
-      }
-      RankResult const result =
-          tree.rank_select_.template rank<ThreadsPerQuery, true, 0>(
-              l, char_counts + index, offset);
-      size_t const pos = result.rank;
-      bool const bit_at_index = result.bit;
-      // To avoid overflow if alphabet size is the maximum value of T
-      T const diff =
-          getPrevPowTwo<size_t>(static_cast<size_t>(char_end - char_start) + 1);
-      if (bit_at_index == false) {
-        index = pos - start;
-        char_end = char_start + (diff - 1);
-      } else {
-        index -= pos - start;
-        char_start += diff;
-      }
-      ranks_start += is_pow_two ? powTwo<T>(l) - 1 : tree.getNumNodesAtLevel(l);
+    if (index >= data_size) {
+      continue;
     }
+    T const result = tree.template deviceAccess<ThreadsPerQuery>(
+        index, is_pow_two, counts, offsets, ranks);
     if (local_t_id == 0) {
-      results[i] = char_start;
+      results[i] = result;
     }
   }
 }

@@ -84,3 +84,98 @@ for i in $(seq -f "%05g" 0 2); do
 done
 
 echo "Completed! Final output is in $FINAL_OUTPUT"
+
+#DNA files
+BASE_URL="https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR000"
+OUTPUT_FILE="${BASEDIR}/dna_data.txt"
+TEMP_DIR="${BASEDIR}/temp_dna"
+
+# Create directories
+mkdir -p $TEMP_DIR
+
+echo "Starting DNA data extraction from FASTQ files..."
+
+# Function to process a single FASTQ file
+process_fastq() {
+    local file_path=$1
+    local output_file=$2
+    
+    echo "Processing file: $file_path"
+    
+    # Extract only the second line of each 4-line record (the raw sequence)
+    # Then clean to keep only A, C, G, T characters
+    # Append to output without newlines
+    awk 'NR % 4 == 2 {
+        # Remove all characters that are not A, C, G, or T
+        gsub(/[^ACGT]/, "", $0)
+        printf "%s", $0
+    }' "$file_path" >> "$output_file"
+}
+
+# Initialize output file
+> $OUTPUT_FILE
+
+# Try to download and process files in the specified range
+for i in $(seq -f "%06g" 1 426); do
+    PARENT_URL_DIR="DRR${i}"
+    # Handle the base case and the _1 and _2 suffixes
+    for suffix in "" "_1" "_2"; do
+        ID="DRR${i}${suffix}"
+        FASTQ_URL="${BASE_URL}/${PARENT_URL_DIR}/${ID}.fastq.gz"
+        LOCAL_FILE="${TEMP_DIR}/${ID}.fastq.gz"
+        
+        echo "Attempting to download: $ID"
+        
+        # Try to download the file
+        wget -q --spider "$FASTQ_URL" 2>/dev/null
+        #print wget error code
+        EXIT_CODE=$?
+        # if exit code is 4, try to download the file again
+        while [ $EXIT_CODE -eq 4 ]; do
+            wget -q --spider "$FASTQ_URL" 2>/dev/null
+            EXIT_CODE=$?
+        done
+        if [ $EXIT_CODE -eq 0 ]; then
+            echo "File exists, downloading: $ID"
+            wget -q "$FASTQ_URL" -O "$LOCAL_FILE"
+            EXIT_CODE=$?
+            # if exit code is 4, try to download the file again
+            while [ $EXIT_CODE -eq 4 ]; do
+                wget -q --spider "$FASTQ_URL" 2>/dev/null
+                EXIT_CODE=$?
+            done
+            if [ -f "$LOCAL_FILE" ] && [ -s "$LOCAL_FILE" ]; then
+                #unzip the file
+                gunzip -c "$LOCAL_FILE" > "${LOCAL_FILE%.gz}"
+                # Process the downloaded file
+                process_fastq "${LOCAL_FILE%.gz}" "$OUTPUT_FILE"
+                
+                # Remove the downloaded file to save space
+                rm "$LOCAL_FILE"
+                rm "${LOCAL_FILE%.gz}"
+            else
+                echo "Failed to download or empty file: $ID"
+            fi
+        else
+            echo "File does not exist: $ID"
+        fi
+    done
+    
+    # Print progress every 10 files
+    if [ $((i % 10)) -eq 0 ]; then
+        echo "Progress: Processed up to file $i of 426"
+    fi
+done
+
+# Check if output file exists and has content
+if [ -f "$OUTPUT_FILE" ] && [ -s "$OUTPUT_FILE" ]; then
+    echo "DNA data extraction complete. Output is in $OUTPUT_FILE"
+    echo "Final file contains $(wc -c < $OUTPUT_FILE) characters"
+else
+    echo "Error: No data was extracted or output file is empty"
+fi
+
+# Clean up
+rmdir $TEMP_DIR 2>/dev/null || echo "Temp directory not empty, some files may remain"
+
+echo "Process completed."

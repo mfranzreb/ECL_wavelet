@@ -179,3 +179,97 @@ fi
 rmdir $TEMP_DIR 2>/dev/null || echo "Temp directory not empty, some files may remain"
 
 echo "Process completed."
+
+################################################
+# Script to download, process and concatenate UniProt database files
+# - Downloads uniprot_sprot.dat.gz and uniprot_trembl.dat.gz
+# - Extracts only the sequence lines
+# - Removes all whitespace
+# - Concatenates in order: sprot first, then trembl
+
+# Set variables
+BASE_URL="https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete"
+OUTPUT_FILE="${BASEDIR}/prot.txt"
+TEMP_DIR="${BASEDIR}/temp"
+
+# Create temp directory
+mkdir -p $TEMP_DIR
+
+echo "Starting UniProt database processing..."
+
+# Process each database file (sprot first, then trembl)
+for DB_ID in "sprot" "trembl"; do
+    FILE_NAME="uniprot_${DB_ID}.dat.gz"
+    LOCAL_GZ="${TEMP_DIR}/${FILE_NAME}"
+    PROCESSED_FILE="${TEMP_DIR}/processed_${DB_ID}.txt"
+    
+    echo "Processing $FILE_NAME..."
+    
+    # Download the file
+    echo "  Downloading $FILE_NAME..."
+    wget -q "${BASE_URL}/${FILE_NAME}" -O "$LOCAL_GZ"
+    
+    if [ $? -ne 0 ] || [ ! -s "$LOCAL_GZ" ]; then
+        echo "  Error downloading $FILE_NAME, skipping..."
+        continue
+    fi
+    
+    echo "  Download complete. Extracting sequence lines..."
+    
+    # Process the file:
+    # 1. Decompress gzip
+    # 2. Extract only sequence lines (those that don't start with whitespace or '//')
+    # 3. Remove all whitespace
+    # Note: In UniProt .dat files, sequence lines start with spaces, but the actual
+    #       sequence data doesn't start with whitespace
+    zcat "$LOCAL_GZ" | awk '
+        # We want lines that contain sequence data
+        # In UniProt .dat format, sequence lines start with spaces,
+        # come after a line with "SQ" and before a line with "//"
+        /^SQ/ {in_seq=1; next}
+        /^\/\// {in_seq=0; next}
+        in_seq && /^     / {
+            # This is a sequence line, remove all whitespace
+            gsub(/[[:space:]]/,"")
+            # Only output non-empty lines
+            if (length($0) > 0) {
+                print
+            }
+        }
+    ' > "$PROCESSED_FILE"
+    
+    # Check if processing was successful
+    if [ -s "$PROCESSED_FILE" ]; then
+        echo "  Successfully processed $FILE_NAME."
+    else
+        echo "  Error: No sequence data extracted from $FILE_NAME."
+    fi
+    
+    # Remove the downloaded gz file to save space
+    rm "$LOCAL_GZ"
+    
+    # Append to the final output file (creates it if first file)
+    cat "$PROCESSED_FILE" >> "$OUTPUT_FILE"
+    
+    # Remove the processed file
+    rm "$PROCESSED_FILE"
+    
+    echo "  Added $DB_ID sequences to $OUTPUT_FILE"
+done
+
+# Check final output
+if [ -s "$OUTPUT_FILE" ]; then
+    # Remove any remaining newlines to ensure entire output is on a single line
+    tr -d '\n' < "$OUTPUT_FILE" > "${OUTPUT_FILE}.tmp" && mv "${OUTPUT_FILE}.tmp" "$OUTPUT_FILE"
+    
+    echo "Process completed successfully."
+    echo "Final output is in $OUTPUT_FILE"
+    echo "File contains $(wc -c < $OUTPUT_FILE) characters"
+else
+    echo "Error: No data was processed or output file is empty"
+fi
+
+# Clean up
+rmdir $TEMP_DIR 2>/dev/null
+
+echo "UniProt processing complete."

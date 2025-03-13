@@ -402,6 +402,7 @@ class RankSelect {
    * \return Number of zeros (rank) before position \c index, i.e. in the slice
    * [0, i).
    */
+  // TODO: try to make loop coalesced
   template <int NumThreads, bool GetBit, int Value>
   __device__ [[nodiscard]] auto rank(uint8_t const array_index,
                                      size_t const index, size_t const offset) {

@@ -558,16 +558,12 @@ class RankSelect {
         }
       } else {
         if constexpr (Value == 0) {
-          if (RSConfig::SELECT_SAMPLE_RATE > getTotalNumVals<0>(array_index)) {
-            next_sample_pos = bit_array_.size(array_index);
-          } else {
+          if (RSConfig::SELECT_SAMPLE_RATE <= getTotalNumVals<0>(array_index)) {
             next_sample_pos =
                 d_select_samples_0_[d_select_samples_0_offsets_[array_index]];
           }
         } else {
-          if (RSConfig::SELECT_SAMPLE_RATE > getTotalNumVals<1>(array_index)) {
-            next_sample_pos = bit_array_.size(array_index);
-          } else {
+          if (RSConfig::SELECT_SAMPLE_RATE <= getTotalNumVals<1>(array_index)) {
             next_sample_pos =
                 d_select_samples_1_[d_select_samples_1_offsets_[array_index]];
           }

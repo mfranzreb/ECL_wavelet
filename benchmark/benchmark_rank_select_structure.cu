@@ -127,6 +127,9 @@ static void BM_binaryRank(benchmark::State& state) {
   std::vector<size_t> results(num_queries);
   gpuErrchk(cudaMemcpy(results.data(), d_results, num_queries * sizeof(size_t),
                        cudaMemcpyDeviceToHost));
+
+  gpuErrchk(cudaFree(d_queries));
+  gpuErrchk(cudaFree(d_results));
   for (size_t i = 0; i < num_queries; ++i) {
     if (results[i] >= size) {
       std::cerr << "Invalid result: " << results[i] << std::endl;
@@ -206,6 +209,9 @@ static void BM_binarySelect(benchmark::State& state) {
   std::vector<size_t> results(num_queries);
   gpuErrchk(cudaMemcpy(results.data(), d_results, num_queries * sizeof(size_t),
                        cudaMemcpyDeviceToHost));
+
+  gpuErrchk(cudaFree(d_queries));
+  gpuErrchk(cudaFree(d_results));
   for (size_t i = 0; i < num_queries; ++i) {
     if (results[i] >= size) {
       std::cerr << "Invalid result: " << results[i] << std::endl;

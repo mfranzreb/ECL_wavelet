@@ -89,7 +89,10 @@ std::vector<T> generateRandomAlphabet(size_t const alphabet_size) {
  * \param num_levels Number of levels of the bit array.
  * \return Random bit array.
  */
-__host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels);
+__host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels,
+                                       bool const is_adversarial = false,
+                                       uint8_t const fill_rate = 50,
+                                       size_t* one_bits_out = nullptr);
 
 template <typename T>
 std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(

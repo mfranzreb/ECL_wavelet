@@ -47,17 +47,60 @@ __global__ void writeWordsParallelKernel(BitArray bit_array, size_t array_index,
   }
 }
 
-__host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels) {
+__host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels,
+                                       bool const is_adversarial,
+                                       uint8_t const fill_rate,
+                                       size_t* one_bits_out) {
+  assert(fill_rate <= 100);
   BitArray ba(std::vector<size_t>(num_levels, size), false);
 
   auto num_words = (size + 31) / 32;
-  std::vector<uint32_t> uint32_vec(num_words);
-  generateRandomNums<uint32_t>(uint32_vec, 0, UINT32_MAX);
+  std::vector<uint32_t> bits(num_words);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<size_t> bit_dist(0, 99);
+
+  size_t one_bits = 0;
+  if (not is_adversarial) {
+#pragma omp parallel for reduction(+ : one_bits)
+    for (size_t i = 0; i < num_words; i++) {
+      uint32_t word = 0;
+      for (size_t j = 0; j < 32; ++j) {
+        bool const flip_bit =
+            (static_cast<uint32_t>(bit_dist(gen)) < fill_rate);
+        one_bits += flip_bit ? 1 : 0;
+        word |= flip_bit << j;
+      }
+      bits[i] = word;
+    }
+  } else {
+    size_t const split_index = (size / 100) * (100 - fill_rate) / 32;
+#pragma omp parallel for reduction(+ : one_bits)
+    for (size_t i = 0; i < split_index; ++i) {
+      uint32_t word = 0;
+      for (size_t j = 0; j < 32; ++j) {
+        bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < 1);
+        one_bits += flip_bit ? 1 : 0;
+        word |= flip_bit << j;
+      }
+      bits[i] = word;
+    }
+#pragma omp parallel for reduction(+ : one_bits)
+    for (size_t i = split_index; i < num_words; ++i) {
+      uint32_t word = 0;
+      for (size_t j = 0; j < 32; ++j) {
+        bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < 99);
+        one_bits += flip_bit ? 1 : 0;
+        word |= flip_bit << j;
+      }
+      bits[i] = word;
+    }
+  }
 
   uint32_t* d_words_arr;
   gpuErrchk(cudaMalloc(&d_words_arr, num_words * sizeof(uint32_t)));
-  gpuErrchk(cudaMemcpy(d_words_arr, uint32_vec.data(),
-                       num_words * sizeof(uint32_t), cudaMemcpyHostToDevice));
+  gpuErrchk(cudaMemcpy(d_words_arr, bits.data(), num_words * sizeof(uint32_t),
+                       cudaMemcpyHostToDevice));
   auto [blocks, threads] = getLaunchConfig(
       num_words / 32 == 0 ? 1 : num_words / 32, kMinTPB, kMaxTPB);
   for (uint8_t i = 0; i < num_levels; ++i) {
@@ -66,6 +109,10 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels) {
   }
   kernelCheck();
   gpuErrchk(cudaFree(d_words_arr));
+
+  if (one_bits_out != nullptr) {
+    *one_bits_out = one_bits;
+  }
 
   return ba;
 }

@@ -10,3 +10,12 @@
 [submodule "third_party/pwm"]
 	path = third_party/pwm
 	url = https://github.com/kurpicz/pwm.git
+[submodule "third_party/pasta"]
+	path = third_party/pasta
+	url = https://github.com/pasta-toolbox/bit_vector.git
+[submodule "third_party/tlx"]
+	path = third_party/tlx
+	url = https://github.com/tlx/tlx.git
+[submodule "third_party/pasta_utils"]
+	path = third_party/pasta_utils
+	url = https://github.com/pasta-toolbox/utils.git

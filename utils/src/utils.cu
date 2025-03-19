@@ -47,6 +47,7 @@ __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
                                              int const min_block_size,
                                              int max_block_size) {
   assert(internal::prop.totalGlobalMem != 0);
+  assert(max_block_size >= min_block_size);
   int const min_block_size_warps = min_block_size / WS;
   int const warps_per_sm = internal::prop.maxThreadsPerMultiProcessor / WS;
   int const warps_per_block = internal::prop.maxThreadsPerBlock / WS;

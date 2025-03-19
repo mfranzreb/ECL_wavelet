@@ -43,7 +43,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cmath>
 #include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_scan.cuh>
-#include <cub/device/device_select.cuh>
 #include <execution>
 #include <numeric>
 #include <thread>
@@ -81,29 +80,6 @@ std::unordered_map<uint16_t, GraphContents> queries_graph_cache;
  */
 template <typename T>
 struct RankSelectQuery;
-
-/*!
- * \brief Helper class for reducing the data with thrust::remove_if.
- */
-template <typename T>
-class isLongEnough {
- public:
-  isLongEnough(uint8_t* d_code_lens, uint32_t l, T codes_start)
-      : d_code_lens_(d_code_lens), l_(l), codes_start_(codes_start) {}
-
-  __device__ bool operator()(T const code) const {
-    if (code < codes_start_) {
-      return true;
-    }
-    assert(d_code_lens_[code - codes_start_] > 0);
-    return d_code_lens_[code - codes_start_] > l_ + 1;
-  }
-
- private:
-  uint8_t* d_code_lens_;
-  uint32_t l_;
-  T codes_start_;
-};
 
 template <typename T>
 __global__ LB(MAX_TPB,
@@ -143,7 +119,7 @@ __global__ LB(MAX_TPB,
   select_results[num_chunks] = offset;
 }
 
-__global__ void emptyKernel() {}
+__global__ LB(MAX_TPB, MIN_BPM) void emptyKernel() {}
 
 __host__ [[nodiscard]] GraphContents createQueriesGraph(
     uint16_t const num_chunks, uint16_t const num_buffers) {
@@ -218,11 +194,10 @@ class WaveletTree;
  * \param alphabet_size Size of the alphabet.
  */
 template <typename T, bool isMinAlphabet, bool isPowTwo, bool UseShmem>
-__global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
-                                             size_t const data_size,
-                                             size_t* counts, T* const alphabet,
-                                             size_t const alphabet_size,
-                                             uint16_t const hists_per_block) {
+__global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
+    WaveletTree<T> tree, T* data, size_t const data_size, size_t* counts,
+    T* const alphabet, size_t const alphabet_size,
+    uint16_t const hists_per_block) {
   assert(blockDim.x % WS == 0);
   extern __shared__ size_t shared_hist[];
   size_t offset;
@@ -286,11 +261,10 @@ __global__ void computeGlobalHistogramKernel(WaveletTree<T> tree, T* data,
  * \param level Level to be filled.
  */
 template <typename T, bool UseShmemPerThread>
-__global__ void fillLevelKernel(BitArray bit_array, T* const data,
-                                size_t const data_size,
-                                uint8_t const alphabet_start_bit,
-                                uint32_t const level, size_t const num_threads,
-                                uint32_t const warps_per_block) {
+__global__ LB(MAX_TPB, MIN_BPM) void fillLevelKernel(
+    BitArray bit_array, T* const data, size_t const data_size,
+    uint8_t const alphabet_start_bit, uint32_t const level,
+    size_t const num_threads, uint32_t const warps_per_block) {
   assert(blockDim.x % WS == 0);
   size_t const offset = bit_array.getOffset(level);
 
@@ -369,9 +343,9 @@ __global__ void fillLevelKernel(BitArray bit_array, T* const data,
 }
 
 template <typename T>
-__global__ void precomputeRanksKernel(WaveletTree<T> tree,
-                                      NodeInfo<T>* const node_starts,
-                                      size_t const total_num_nodes) {
+__global__ LB(MAX_TPB, MIN_BPM) void precomputeRanksKernel(
+    WaveletTree<T> tree, NodeInfo<T>* const node_starts,
+    size_t const total_num_nodes) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type");
   assert(blockDim.x % WS == 0);
@@ -399,11 +373,10 @@ __global__ void precomputeRanksKernel(WaveletTree<T> tree,
  */
 template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets,
           bool ShmemRanks>
-__global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
-                             size_t const num_indices, T* results,
-                             size_t const alphabet_size,
-                             uint32_t const num_groups,
-                             uint8_t const num_levels, T const num_ranks) {
+__global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
+    WaveletTree<T> tree, size_t* const indices, size_t const num_indices,
+    T* results, size_t const alphabet_size, uint32_t const num_groups,
+    uint8_t const num_levels, T const num_ranks) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type");
   assert(blockDim.x % WS == 0);
@@ -458,12 +431,11 @@ __global__ void accessKernel(WaveletTree<T> tree, size_t* const indices,
  */
 template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets,
           bool ShmemRanks>
-__global__ void rankKernel(WaveletTree<T> tree,
-                           RankSelectQuery<T>* const queries,
-                           size_t const num_queries, size_t* const results,
-                           uint32_t const num_groups,
-                           size_t const alphabet_size, uint8_t const num_levels,
-                           T const num_ranks, bool const is_pow_two) {
+__global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
+    WaveletTree<T> tree, RankSelectQuery<T>* const queries,
+    size_t const num_queries, size_t* const results, uint32_t const num_groups,
+    size_t const alphabet_size, uint8_t const num_levels, T const num_ranks,
+    bool const is_pow_two) {
   assert(blockDim.x % WS == 0);
   extern __shared__ size_t shmem[];
 
@@ -518,11 +490,10 @@ __global__ void rankKernel(WaveletTree<T> tree,
  * \param ranks Array to store the selected indices.
  */
 template <typename T, int ThreadsPerQuery, bool ShmemRanks>
-__global__ void selectKernel(WaveletTree<T> tree,
-                             RankSelectQuery<T>* const queries,
-                             size_t const num_queries, size_t* const results,
-                             uint32_t const num_groups, bool const is_pow_two,
-                             T const num_ranks) {
+__global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
+    WaveletTree<T> tree, RankSelectQuery<T>* const queries,
+    size_t const num_queries, size_t* const results, uint32_t const num_groups,
+    bool const is_pow_two, T const num_ranks) {
   assert(blockDim.x % WS == 0);
   extern __shared__ size_t shmem[];
   if constexpr (ShmemRanks) {
@@ -673,14 +644,7 @@ class WaveletTree {
     gpuErrchk(cub::DeviceScan::ExclusiveSum(nullptr, exclusive_sum_bytes,
                                             (size_t*)data, alphabet_size_));
 
-    size_t select_if_bytes = 0;
-    gpuErrchk(cub::DeviceSelect::If(
-        nullptr, select_if_bytes, data, data,
-        std::min(data_size,
-                 static_cast<size_t>(std::numeric_limits<int>::max())),
-        isLongEnough<T>(nullptr, 0, 0)));
-    auto max_needed_storage =
-        std::max({radix_sort_bytes, exclusive_sum_bytes, select_if_bytes});
+    auto max_needed_storage = std::max(radix_sort_bytes, exclusive_sum_bytes);
     bool const use_cub_unified_memory = max_needed_storage > free_memory;
 
     if (use_data_unified_memory or use_sorted_data_unified_memory or
@@ -707,19 +671,9 @@ class WaveletTree {
 
     std::vector<T> num_nodes_at_level(num_levels_ - 1);
     //  create codes and copy to device
-    uint8_t* d_code_lens = nullptr;
     if (not is_pow_two) {
       gpuErrchk(cudaMalloc(&d_codes_, codes.size() * sizeof(Code)));
       gpuErrchk(cudaMemcpy(d_codes_, codes.data(), codes.size() * sizeof(Code),
-                           cudaMemcpyHostToDevice));
-
-      std::vector<uint8_t> code_lens(codes.back().code_ + 1 - codes_start_);
-      for (size_t i = 0; i < alphabet_size_ - codes_start_; ++i) {
-        code_lens[codes[i].code_ - codes_start_] = codes[i].len_;
-      }
-      gpuErrchk(cudaMalloc(&d_code_lens, code_lens.size() * sizeof(uint8_t)));
-      gpuErrchk(cudaMemcpy(d_code_lens, code_lens.data(),
-                           code_lens.size() * sizeof(uint8_t),
                            cudaMemcpyHostToDevice));
 
       // Get number of nodes at each level
@@ -825,32 +779,22 @@ class WaveletTree {
     d_data_buffer = cub::DoubleBuffer<T>(d_data, d_sorted_data);
 
     for (uint32_t l = 0; l < num_levels_; l++) {
-      assert(data_size == bit_array_sizes[l]);
-
       if (l > 0) {
-        // Perform radix sort
+        // Always sort whole data, but only fill bit array with necessary
+        // characters
         gpuErrchk(cub::DeviceRadixSort::SortKeys(
             d_temp_storage, max_needed_storage, d_data_buffer, data_size,
             alphabet_start_bit_ + 1 - l, alphabet_start_bit_ + 1,
             cudaStreamDefault));
       }
       //  Fill l-th bit array
-      fillLevel(bit_array, d_data_buffer.Current(), data_size,
+      fillLevel(bit_array, d_data_buffer.Current(), bit_array_sizes[l],
                 l);  // synchronous
-
-      if (l != (num_levels_ - 1u) and
-          bit_array_sizes[l] != bit_array_sizes[l + 1]) {
-        auto pred = isLongEnough<T>(d_code_lens, l, codes_start_);
-        //  Reduce text
-        data_size = runDeviceSelectIf(d_temp_storage, max_needed_storage,
-                                      d_data_buffer.Current(), data_size, pred);
-      }
     }
 
     if (alphabet_size_ * sizeof(T) > max_needed_storage) {
       gpuErrchk(cudaFreeAsync(d_alphabet, cudaStreamDefault));
     }
-    gpuErrchk(cudaFreeAsync(d_code_lens, cudaStreamDefault));
     gpuErrchk(cudaFree(d_data));
     gpuErrchk(cudaFree(d_sorted_data));
     gpuErrchk(cudaFree(d_temp_storage));
@@ -1080,8 +1024,8 @@ class WaveletTree {
     auto min_block_size = kMinTPB;
     if (offsets_shmem) {
       shmem_per_block += offsets_size;
-      for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
-           block_size /= 2) {
+      for (uint32_t block_size = maxThreadsPerBlockAccess;
+           block_size >= kMinTPB; block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
           min_block_size = 2 * block_size;
@@ -1095,8 +1039,8 @@ class WaveletTree {
 
     if (ranks_shmem) {
       shmem_per_block += ranks_size;
-      for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
-           block_size /= 2) {
+      for (uint32_t block_size = maxThreadsPerBlockAccess;
+           block_size >= kMinTPB; block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
           min_block_size = 2 * block_size;
@@ -1110,8 +1054,8 @@ class WaveletTree {
 
     if (counts_shmem) {
       shmem_per_block += counts_size;
-      for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
-           block_size /= 2) {
+      for (uint32_t block_size = maxThreadsPerBlockAccess;
+           block_size >= kMinTPB; block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
           min_block_size = 2 * block_size;
@@ -1390,7 +1334,7 @@ class WaveletTree {
     auto min_block_size = kMinTPB;
     if (offsets_shmem) {
       shmem_per_block += offsets_size;
-      for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
+      for (uint32_t block_size = maxThreadsPerBlock; block_size >= kMinTPB;
            block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
@@ -1405,7 +1349,7 @@ class WaveletTree {
 
     if (ranks_shmem) {
       shmem_per_block += ranks_size;
-      for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
+      for (uint32_t block_size = maxThreadsPerBlock; block_size >= kMinTPB;
            block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
@@ -1420,7 +1364,7 @@ class WaveletTree {
 
     if (counts_shmem) {
       shmem_per_block += counts_size;
-      for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
+      for (uint32_t block_size = maxThreadsPerBlock; block_size >= kMinTPB;
            block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
@@ -1700,7 +1644,7 @@ class WaveletTree {
 
     auto min_block_size = kMinTPB;
     if (ranks_shmem) {
-      for (uint32_t block_size = kMaxTPB; block_size >= kMinTPB;
+      for (uint32_t block_size = maxThreadsPerBlock; block_size >= kMinTPB;
            block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (total_shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
@@ -2260,7 +2204,7 @@ class WaveletTree {
             (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
 
     auto const [num_blocks, threads_per_block] =
-        getLaunchConfig(num_warps, min_block_size, kMaxTPB);
+        getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockHist);
 
     uint16_t const blocks_per_SM = max_threads_per_SM / threads_per_block;
 
@@ -2437,7 +2381,6 @@ class WaveletTree {
       uint8_t const num_levels, T const num_codes) noexcept {
     size_t total_size = 0;
     total_size += num_codes * sizeof(Code);      // d_codes_
-    total_size += num_codes * sizeof(uint8_t);   // d_code_lens
     total_size += (num_levels - 1) * sizeof(T);  // d_num_nodes_at_level_
     total_size +=
         alphabet_size *
@@ -2448,41 +2391,6 @@ class WaveletTree {
     total_size += RankSelect::getNeededGPUMemory(data_size, num_levels);
 
     return total_size;
-  }
-
-  __host__ [[nodiscard]] static size_t runDeviceSelectIf(
-      void* d_temp_storage, size_t& temp_storage_bytes, T* d_data,
-      size_t const data_size, isLongEnough<T>& pred) noexcept {
-    uint16_t const num_chunks = (data_size + INT_MAX - 1) / INT_MAX;
-    size_t const chunk_size = num_chunks == 1 ? data_size : INT_MAX;
-    size_t const last_chunk_size =
-        data_size % INT_MAX == 0 ? INT_MAX : data_size % INT_MAX;
-
-    assert((num_chunks - 1) * chunk_size + last_chunk_size == data_size);
-
-    size_t* d_cub_select_results;
-    // 1 extra element for total offset
-    gpuErrchk(
-        cudaMalloc(&d_cub_select_results, (num_chunks + 1) * sizeof(size_t)));
-    for (uint16_t i = 0; i < num_chunks; ++i) {
-      gpuErrchk(cub::DeviceSelect::If(
-          d_temp_storage, temp_storage_bytes, d_data + i * chunk_size,
-          d_cub_select_results + i,
-          i == num_chunks - 1 ? last_chunk_size : chunk_size, pred,
-          cudaStreamDefault));
-    }
-    size_t new_size;
-    if (num_chunks > 1) {
-      compactArrayKernel<<<1, 1, 0, cudaStreamDefault>>>(
-          d_cub_select_results, num_chunks, d_data, chunk_size);
-      gpuErrchk(cudaMemcpy(&new_size, d_cub_select_results + num_chunks,
-                           sizeof(size_t), cudaMemcpyDeviceToHost));
-    } else {
-      gpuErrchk(cudaMemcpy(&new_size, d_cub_select_results, sizeof(size_t),
-                           cudaMemcpyDeviceToHost));
-    }
-    gpuErrchk(cudaFree(d_cub_select_results));
-    return new_size;
   }
 
  private:

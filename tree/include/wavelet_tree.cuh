@@ -549,7 +549,7 @@ class WaveletTree {
    * \param alphabet Alphabet of the input data. Must be sorted.
    * \param GPU_index Index of the GPU to use.
    */
-  __host__ WaveletTree(T* const data, size_t data_size,
+  __host__ WaveletTree(T const* data, size_t data_size,
                        std::vector<T>&& alphabet, uint32_t const GPU_index)
       : alphabet_(alphabet), is_copy_(false), GPU_index_(GPU_index) {
     static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
@@ -983,16 +983,40 @@ class WaveletTree {
     });
 
     T* results = access_pinned_mem_pool_;
+    struct cudaDeviceProp& prop = getDeviceProperties();
 
-    struct cudaFuncAttributes funcAttrib;
-    gpuErrchk(cudaFuncGetAttributes(
-        &funcAttrib, accessKernel<T, true, NumThreads, true, true>));
+    static bool is_first_call = true;
+    static uint32_t max_threads_per_block = 0;
+    static size_t static_shmem_per_block = 0;
+    if (is_first_call) {
+      is_first_call = false;
 
-    auto maxThreadsPerBlockAccess =
-        std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+      struct cudaFuncAttributes funcAttrib;
+      gpuErrchk(cudaFuncGetAttributes(
+          &funcAttrib, accessKernel<T, true, NumThreads, true, true>));
 
-    maxThreadsPerBlockAccess =
-        findLargestDivisor(kMaxTPB, maxThreadsPerBlockAccess);
+      max_threads_per_block = std::min(
+          kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+      max_threads_per_block =
+          findLargestDivisor(kMaxTPB, max_threads_per_block);
+
+      static_shmem_per_block = funcAttrib.sharedSizeBytes;
+
+      gpuErrchk(cudaFuncSetAttribute(
+          accessKernel<T, true, NumThreads, true, true>,
+          cudaFuncAttributeMaxDynamicSharedMemorySize,
+          prop.sharedMemPerBlockOptin - static_shmem_per_block));
+      gpuErrchk(cudaFuncSetAttribute(
+          accessKernel<T, false, NumThreads, true, true>,
+          cudaFuncAttributeMaxDynamicSharedMemorySize,
+          prop.sharedMemPerBlockOptin - static_shmem_per_block));
+      gpuErrchk(cudaFuncSetAttribute(
+          accessKernel<T, false, NumThreads, true, false>,
+          cudaFuncAttributeMaxDynamicSharedMemorySize,
+          prop.sharedMemPerBlockOptin - static_shmem_per_block));
+    }
+    auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
 
     size_t const counts_size = sizeof(size_t) * alphabet_size_;
 
@@ -1000,23 +1024,7 @@ class WaveletTree {
 
     size_t const ranks_size = sizeof(size_t) * num_ranks_;
 
-    struct cudaDeviceProp& prop = getDeviceProperties();
-    gpuErrchk(cudaFuncSetAttribute(
-        accessKernel<T, true, NumThreads, true, true>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
-    gpuErrchk(cudaFuncSetAttribute(
-        accessKernel<T, false, NumThreads, true, true>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
-    gpuErrchk(cudaFuncSetAttribute(
-        accessKernel<T, false, NumThreads, true, false>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
-
-    auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
-
-    size_t shmem_per_block = funcAttrib.sharedSizeBytes;
+    size_t shmem_per_block = static_shmem_per_block;
 
     bool const offsets_shmem =
         (offsets_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM;
@@ -1024,8 +1032,8 @@ class WaveletTree {
     auto min_block_size = kMinTPB;
     if (offsets_shmem) {
       shmem_per_block += offsets_size;
-      for (uint32_t block_size = maxThreadsPerBlockAccess;
-           block_size >= kMinTPB; block_size /= 2) {
+      for (uint32_t block_size = max_threads_per_block; block_size >= kMinTPB;
+           block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
           min_block_size = 2 * block_size;
@@ -1039,8 +1047,8 @@ class WaveletTree {
 
     if (ranks_shmem) {
       shmem_per_block += ranks_size;
-      for (uint32_t block_size = maxThreadsPerBlockAccess;
-           block_size >= kMinTPB; block_size /= 2) {
+      for (uint32_t block_size = max_threads_per_block; block_size >= kMinTPB;
+           block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
           min_block_size = 2 * block_size;
@@ -1054,8 +1062,8 @@ class WaveletTree {
 
     if (counts_shmem) {
       shmem_per_block += counts_size;
-      for (uint32_t block_size = maxThreadsPerBlockAccess;
-           block_size >= kMinTPB; block_size /= 2) {
+      for (uint32_t block_size = max_threads_per_block; block_size >= kMinTPB;
+           block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
           min_block_size = 2 * block_size;
@@ -1069,7 +1077,7 @@ class WaveletTree {
                  static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
                                       prop.multiProcessorCount) /
                                      WS)),
-        min_block_size, maxThreadsPerBlockAccess);
+        min_block_size, max_threads_per_block);
 
     uint32_t const num_groups = (num_blocks * threads_per_block) / NumThreads;
 
@@ -1092,7 +1100,7 @@ class WaveletTree {
         .gridDim = dim3(num_blocks, 1, 1),
         .blockDim = dim3(threads_per_block, 1, 1),
         .sharedMemBytes =
-            static_cast<uint32_t>(shmem_per_block - funcAttrib.sharedSizeBytes),
+            static_cast<uint32_t>(shmem_per_block - static_shmem_per_block),
         .kernelParams = nullptr,
         .extra = nullptr};
 
@@ -1291,14 +1299,43 @@ class WaveletTree {
     });
 
     size_t* results = rank_pinned_mem_pool_;
+    struct cudaDeviceProp& prop = getDeviceProperties();
 
-    struct cudaFuncAttributes funcAttrib;
-    gpuErrchk(cudaFuncGetAttributes(
-        &funcAttrib, rankKernel<T, true, NumThreads, true, true>));
-    uint32_t maxThreadsPerBlock =
-        std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+    static bool is_first_call = true;
+    static uint32_t max_threads_per_block = 0;
+    static size_t static_shmem_per_block = 0;
 
-    maxThreadsPerBlock = findLargestDivisor(kMaxTPB, maxThreadsPerBlock);
+    if (is_first_call) {
+      is_first_call = false;
+
+      struct cudaFuncAttributes funcAttrib;
+      gpuErrchk(cudaFuncGetAttributes(
+          &funcAttrib, rankKernel<T, true, NumThreads, true, true>));
+      max_threads_per_block = std::min(
+          kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+      max_threads_per_block =
+          findLargestDivisor(kMaxTPB, max_threads_per_block);
+
+      static_shmem_per_block = funcAttrib.sharedSizeBytes;
+
+      gpuErrchk(cudaFuncSetAttribute(
+          rankKernel<T, true, NumThreads, true, true>,
+          cudaFuncAttributeMaxDynamicSharedMemorySize,
+          prop.sharedMemPerBlockOptin - static_shmem_per_block));
+      gpuErrchk(cudaFuncSetAttribute(
+          rankKernel<T, false, NumThreads, true, true>,
+          cudaFuncAttributeMaxDynamicSharedMemorySize,
+          prop.sharedMemPerBlockOptin - static_shmem_per_block));
+      gpuErrchk(cudaFuncSetAttribute(
+          rankKernel<T, true, NumThreads, true, false>,
+          cudaFuncAttributeMaxDynamicSharedMemorySize,
+          prop.sharedMemPerBlockOptin - static_shmem_per_block));
+      gpuErrchk(cudaFuncSetAttribute(
+          rankKernel<T, false, NumThreads, true, false>,
+          cudaFuncAttributeMaxDynamicSharedMemorySize,
+          prop.sharedMemPerBlockOptin - static_shmem_per_block));
+    }
 
     size_t const counts_size = sizeof(size_t) * alphabet_size_;
 
@@ -1306,27 +1343,9 @@ class WaveletTree {
 
     size_t const ranks_size = sizeof(size_t) * num_ranks_;
 
-    struct cudaDeviceProp& prop = getDeviceProperties();
-    gpuErrchk(cudaFuncSetAttribute(
-        rankKernel<T, true, NumThreads, true, true>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
-    gpuErrchk(cudaFuncSetAttribute(
-        rankKernel<T, false, NumThreads, true, true>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
-    gpuErrchk(cudaFuncSetAttribute(
-        rankKernel<T, true, NumThreads, true, false>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
-    gpuErrchk(cudaFuncSetAttribute(
-        rankKernel<T, false, NumThreads, true, false>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
-
     auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
 
-    size_t shmem_per_block = funcAttrib.sharedSizeBytes;
+    size_t shmem_per_block = static_shmem_per_block;
 
     bool const offsets_shmem =
         (offsets_size + shmem_per_block) * kMinBPM <= max_shmem_per_SM;
@@ -1334,7 +1353,7 @@ class WaveletTree {
     auto min_block_size = kMinTPB;
     if (offsets_shmem) {
       shmem_per_block += offsets_size;
-      for (uint32_t block_size = maxThreadsPerBlock; block_size >= kMinTPB;
+      for (uint32_t block_size = max_threads_per_block; block_size >= kMinTPB;
            block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
@@ -1349,7 +1368,7 @@ class WaveletTree {
 
     if (ranks_shmem) {
       shmem_per_block += ranks_size;
-      for (uint32_t block_size = maxThreadsPerBlock; block_size >= kMinTPB;
+      for (uint32_t block_size = max_threads_per_block; block_size >= kMinTPB;
            block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
@@ -1364,7 +1383,7 @@ class WaveletTree {
 
     if (counts_shmem) {
       shmem_per_block += counts_size;
-      for (uint32_t block_size = maxThreadsPerBlock; block_size >= kMinTPB;
+      for (uint32_t block_size = max_threads_per_block; block_size >= kMinTPB;
            block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
@@ -1379,7 +1398,7 @@ class WaveletTree {
                  static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
                                       prop.multiProcessorCount) /
                                      WS)),
-        min_block_size, maxThreadsPerBlock);
+        min_block_size, max_threads_per_block);
 
     uint32_t const num_groups = (num_blocks * threads_per_block) / NumThreads;
 
@@ -1421,7 +1440,7 @@ class WaveletTree {
         .gridDim = dim3(num_blocks, 1, 1),
         .blockDim = dim3(threads_per_block, 1, 1),
         .sharedMemBytes =
-            static_cast<uint32_t>(shmem_per_block - funcAttrib.sharedSizeBytes),
+            static_cast<uint32_t>(shmem_per_block - static_shmem_per_block),
         .kernelParams = nullptr,
         .extra = nullptr};
 
@@ -1616,26 +1635,34 @@ class WaveletTree {
     });
 
     size_t* results = select_pinned_mem_pool_;
-
-    struct cudaFuncAttributes funcAttrib;
-    gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
-                                    selectKernel<T, ThreadsPerQuery, true>));
-    uint32_t maxThreadsPerBlock =
-        std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-
-    maxThreadsPerBlock = findLargestDivisor(kMaxTPB, maxThreadsPerBlock);
-
     auto& prop = getDeviceProperties();
 
-    gpuErrchk(cudaFuncSetAttribute(
-        selectKernel<T, ThreadsPerQuery, true>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
+    static bool is_first_call = true;
+    static uint32_t max_threads_per_block = 0;
+    static size_t static_shmem_per_block = 0;
+
+    if (is_first_call) {
+      is_first_call = false;
+
+      struct cudaFuncAttributes funcAttrib;
+      gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                      selectKernel<T, ThreadsPerQuery, true>));
+      max_threads_per_block = std::min(
+          kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+
+      max_threads_per_block =
+          findLargestDivisor(kMaxTPB, max_threads_per_block);
+
+      static_shmem_per_block = funcAttrib.sharedSizeBytes;
+      gpuErrchk(cudaFuncSetAttribute(
+          selectKernel<T, ThreadsPerQuery, true>,
+          cudaFuncAttributeMaxDynamicSharedMemorySize,
+          prop.sharedMemPerBlockOptin - static_shmem_per_block));
+    }
 
     size_t const ranks_size = sizeof(size_t) * num_ranks_;
 
-    size_t const total_shmem_per_block =
-        ranks_size + funcAttrib.sharedSizeBytes;
+    size_t const total_shmem_per_block = ranks_size + static_shmem_per_block;
 
     auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
 
@@ -1644,7 +1671,7 @@ class WaveletTree {
 
     auto min_block_size = kMinTPB;
     if (ranks_shmem) {
-      for (uint32_t block_size = maxThreadsPerBlock; block_size >= kMinTPB;
+      for (uint32_t block_size = max_threads_per_block; block_size >= kMinTPB;
            block_size /= 2) {
         auto const blocks_per_sm = kMinBPM * kMaxTPB / block_size;
         if (total_shmem_per_block * blocks_per_sm > max_shmem_per_SM) {
@@ -1659,7 +1686,7 @@ class WaveletTree {
                  static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
                                       prop.multiProcessorCount) /
                                      WS)),
-        min_block_size, maxThreadsPerBlock);
+        min_block_size, max_threads_per_block);
 
     uint32_t const num_groups =
         (num_blocks * threads_per_block) / ThreadsPerQuery;

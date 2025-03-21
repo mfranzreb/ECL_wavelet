@@ -50,6 +50,14 @@
       "problemMatcher": []
     },
     {
+      "label": "build access bm from data",
+      "type": "shell",
+      "command": "cmake",
+      "dependsOn": ["CMake Configure", "Build target access bm from data"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
       "label": "build tree tests",
       "type": "shell",
       "command": "cmake",
@@ -143,6 +151,21 @@
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "./build", "--target", "ecl_WT_benchmarks"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Build target access bm from data",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "./build",
+        "--target",
+        "ecl_access_benchmark_from_data"
+      ],
       "group": {
         "kind": "build",
         "isDefault": true

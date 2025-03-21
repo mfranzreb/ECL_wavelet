@@ -267,6 +267,30 @@
       "preLaunchTask": "build WT bm"
     },
     {
+      "name": "Debug access bm from data",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/benchmark/ecl_access_benchmark_from_data",
+      "args": ["0", "1", "./benchmark/data", "."],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build access bm from data"
+    },
+    {
       "name": "Debug kernel tuner CUDA",
       "type": "cuda-gdb",
       "request": "launch",

@@ -469,4 +469,29 @@ generateRandomAlphabetAndDataSizes(size_t const min_data_size,
   }
   return std::make_pair(alphabet_sizes, data_sizes);
 }
+
+template <typename T>
+__host__ std::vector<T> readDataFromFile(std::string const& filename) {
+  static_assert(std::is_unsigned_v<T>, "T must be an unsigned integer type");
+
+  std::ifstream file(filename, std::ios::binary | std::ios::ate);
+  if (!file) {
+    throw std::runtime_error("Failed to open file: " + filename);
+  }
+
+  std::streamsize file_size = file.tellg();
+  file.seekg(0, std::ios::beg);
+
+  if (file_size % sizeof(T) != 0) {
+    throw std::runtime_error("File size is not a multiple of the type size");
+  }
+
+  std::vector<T> data(file_size / sizeof(T));
+
+  if (!file.read(reinterpret_cast<char*>(data.data()), file_size)) {
+    throw std::runtime_error("Failed to read file: " + filename);
+  }
+
+  return data;
+}
 }  // namespace ecl

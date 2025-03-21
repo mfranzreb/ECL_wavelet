@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
 
   std::vector<std::string> const data_files = {
       input_dir + "/dna.txt", input_dir + "/common_crawl.txt",
-      input_dir + "/prot.txt", input_dir + "/ruWB.txt"};
+      input_dir + "/prot.txt", input_dir + "/russian_CC.txt"};
 
   for (auto const& data_file : data_files) {
     std::string const output =
@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
     out.close();
 
     for (auto const data_size : data_sizes) {
-      if (data_file == input_dir + "/ruWB.txt") {
+      if (data_file == input_dir + "/russian_CC.txt") {
         auto const data = ecl::readDataFromFile<uint16_t>(data_file);
         if (data_size > data.size()) {
           std::cerr << "Data size is larger than the file size, skipping..."

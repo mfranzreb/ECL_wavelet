@@ -23,12 +23,12 @@ mkdir -p "$DOWNLOAD_FOLDER"
 echo "Starting WET file processing..."
 
 # Download and process each file
-for i in $(seq -f "%05g" 0 2); do
+for i in $(seq -f "%05g" 0 300); do
   FILENAME="${FILE_PREFIX}${i}${FILE_SUFFIX}"
   DOWNLOAD_PATH="${DOWNLOAD_FOLDER}/${FILENAME}"
   PROCESSED_PATH="${DOWNLOAD_FOLDER}/processed_${i}.txt"
   
-  echo "Processing file $i of 2: $FILENAME"
+  echo "Processing file $i of 300: $FILENAME"
   
   # Download the file if it doesnt exist
   if [ ! -f "$DOWNLOAD_PATH" ]; then
@@ -71,7 +71,7 @@ done
 echo "All files processed. Concatenating in ascending order..."
 
 # Concatenate all processed files in order
-for i in $(seq -f "%05g" 0 2); do
+for i in $(seq -f "%05g" 0 300); do
   PROCESSED_PATH="${DOWNLOAD_FOLDER}/processed_${i}.txt"
   
   # Check if processed file exists before concatenating
@@ -87,7 +87,7 @@ echo "Completed! Final output is in $FINAL_OUTPUT"
 
 #DNA files
 BASE_URL="https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR000"
-OUTPUT_FILE="${BASEDIR}/dna_data.txt"
+OUTPUT_FILE="${BASEDIR}/dna.txt"
 TEMP_DIR="${BASEDIR}/temp_dna"
 
 # Create directories
@@ -116,7 +116,7 @@ process_fastq() {
 > $OUTPUT_FILE
 
 # Try to download and process files in the specified range
-for i in $(seq -f "%06g" 1 426); do
+for i in $(seq -f "%06g" 1 300); do
     PARENT_URL_DIR="DRR${i}"
     # Handle the base case and the _1 and _2 suffixes
     for suffix in "" "_1" "_2"; do
@@ -163,7 +163,7 @@ for i in $(seq -f "%06g" 1 426); do
     
     # Print progress every 10 files
     if [ $((i % 10)) -eq 0 ]; then
-        echo "Progress: Processed up to file $i of 426"
+        echo "Progress: Processed up to file $i of 300"
     fi
 done
 

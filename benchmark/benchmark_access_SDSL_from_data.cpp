@@ -1,9 +1,53 @@
 #include <random>
 #include <sdsl/int_vector.hpp>
 #include <sdsl/wavelet_trees.hpp>
-#include <utils.cuh>
+#include <omp.h>
 
-#include "test_benchmark_utils.cuh"
+std::vector<size_t> generateRandomAccessQueries(size_t const data_size,
+                                                size_t const num_queries) {
+  std::vector<size_t> queries(num_queries);
+
+#pragma omp parallel
+  {
+    // Thread-local random number generator
+    std::random_device rd;
+    // Add thread number to seed for better randomness across threads
+    std::mt19937 gen(rd() + omp_get_thread_num());
+    std::uniform_int_distribution<size_t> dis(0, data_size - 1);
+
+#pragma omp for
+    for (size_t i = 0; i < num_queries; i++) {
+      queries[i] = dis(gen);
+    }
+  }
+
+  return queries;
+}
+
+template <typename T>
+std::vector<T> readDataFromFile(std::string const& filename) {
+  static_assert(std::is_unsigned_v<T>, "T must be an unsigned integer type");
+
+  std::ifstream file(filename, std::ios::binary | std::ios::ate);
+  if (!file) {
+    throw std::runtime_error("Failed to open file: " + filename);
+  }
+
+  std::streamsize file_size = file.tellg();
+  file.seekg(0, std::ios::beg);
+
+  if (file_size % sizeof(T) != 0) {
+    throw std::runtime_error("File size is not a multiple of the type size");
+  }
+
+  std::vector<T> data(file_size / sizeof(T));
+
+  if (!file.read(reinterpret_cast<char*>(data.data()), file_size)) {
+    throw std::runtime_error("Failed to read file: " + filename);
+  }
+
+  return data;
+}
 
 template <typename T>
 auto getSDSLTree(T const* data, size_t const data_size) {
@@ -45,7 +89,7 @@ static void BM_Access(T const* data, size_t const data_size,
                 << std::endl;
       continue;
     }
-    auto queries = ecl::generateRandomAccessQueries(data_size, query_num);
+    auto queries = generateRandomAccessQueries(data_size, query_num);
 
     auto wt = getSDSLTree(data, data_size);
 
@@ -97,7 +141,7 @@ int main(int argc, char** argv) {
 
   std::vector<std::string> const data_files = {
       input_dir + "/dna.txt", input_dir + "/common_crawl.txt",
-      input_dir + "/prot.txt", input_dir + "/ruWB.txt"};
+      input_dir + "/prot.txt", input_dir + "/russian_CC.txt"};
 
   for (auto const& data_file : data_files) {
     std::string const output =
@@ -108,8 +152,8 @@ int main(int argc, char** argv) {
     out.close();
 
     for (auto const data_size : data_sizes) {
-      if (data_file == input_dir + "/ruWB.txt") {
-        auto const data = ecl::readDataFromFile<uint16_t>(data_file);
+      if (data_file == input_dir + "/russian_CC.txt") {
+        auto const data = readDataFromFile<uint16_t>(data_file);
         if (data_size > data.size()) {
           std::cerr << "Data size is larger than the file size, skipping..."
                     << std::endl;
@@ -118,7 +162,7 @@ int main(int argc, char** argv) {
         BM_Access<uint16_t>(data.data(), data_size, num_queries, num_iters,
                             output);
       } else {
-        auto const data = ecl::readDataFromFile<uint8_t>(data_file);
+        auto const data = readDataFromFile<uint8_t>(data_file);
         if (data_size > data.size()) {
           std::cerr << "Data size is larger than the file size, skipping..."
                     << std::endl;

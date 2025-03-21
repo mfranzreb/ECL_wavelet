@@ -123,7 +123,7 @@ static void BM_Access(T const* data, size_t const data_size,
 }
 
 int main(int argc, char** argv) {
-  if (argc != 5) {
+  if (argc != 4) {
     std::cerr << "Usage: " << argv[0] << "<num_iters> <input_dir> <output_dir>"
               << std::endl;
     return EXIT_FAILURE;

@@ -56,14 +56,12 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels,
 
   auto num_words = (size + 31) / 32;
   std::vector<uint32_t> bits(num_words);
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<size_t> bit_dist(0, 99);
 
   size_t one_bits = 0;
   if (!is_adversarial) {
 #pragma omp parallel reduction(+ : one_bits)
     {
+      std::random_device rd;
       std::mt19937 gen(rd() ^ omp_get_thread_num());  // Thread-local generator
       std::uniform_int_distribution<size_t> bit_dist(0, 99);
 
@@ -84,6 +82,7 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels,
 
 #pragma omp parallel reduction(+ : one_bits)
     {
+      std::random_device rd;
       std::mt19937 gen(rd() ^ omp_get_thread_num());
       std::uniform_int_distribution<size_t> bit_dist(0, 99);
 

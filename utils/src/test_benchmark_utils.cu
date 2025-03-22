@@ -61,39 +61,53 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels,
   std::uniform_int_distribution<size_t> bit_dist(0, 99);
 
   size_t one_bits = 0;
-  if (not is_adversarial) {
-#pragma omp parallel for reduction(+ : one_bits)
-    for (size_t i = 0; i < num_words; i++) {
-      uint32_t word = 0;
-      for (size_t j = 0; j < 32; ++j) {
-        bool const flip_bit =
-            (static_cast<uint32_t>(bit_dist(gen)) < fill_rate);
-        one_bits += flip_bit ? 1 : 0;
-        word |= flip_bit << j;
+  if (!is_adversarial) {
+#pragma omp parallel reduction(+ : one_bits)
+    {
+      std::mt19937 gen(rd() ^ omp_get_thread_num());  // Thread-local generator
+      std::uniform_int_distribution<size_t> bit_dist(0, 99);
+
+#pragma omp for
+      for (size_t i = 0; i < num_words; i++) {
+        uint32_t word = 0;
+        for (size_t j = 0; j < 32; ++j) {
+          bool const flip_bit =
+              (static_cast<uint32_t>(bit_dist(gen)) < fill_rate);
+          one_bits += flip_bit ? 1 : 0;
+          word |= flip_bit << j;
+        }
+        bits[i] = word;
       }
-      bits[i] = word;
     }
   } else {
-    size_t const split_index = (size / 100) * (100 - fill_rate) / 32;
-#pragma omp parallel for reduction(+ : one_bits)
-    for (size_t i = 0; i < split_index; ++i) {
-      uint32_t word = 0;
-      for (size_t j = 0; j < 32; ++j) {
-        bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < 1);
-        one_bits += flip_bit ? 1 : 0;
-        word |= flip_bit << j;
+    size_t const split_index = (num_words / 100) * (100 - fill_rate) / 32;
+
+#pragma omp parallel reduction(+ : one_bits)
+    {
+      std::mt19937 gen(rd() ^ omp_get_thread_num());
+      std::uniform_int_distribution<size_t> bit_dist(0, 99);
+
+#pragma omp for
+      for (size_t i = 0; i < split_index; ++i) {
+        uint32_t word = 0;
+        for (size_t j = 0; j < 32; ++j) {
+          bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < 1);
+          one_bits += flip_bit ? 1 : 0;
+          word |= flip_bit << j;
+        }
+        bits[i] = word;
       }
-      bits[i] = word;
-    }
-#pragma omp parallel for reduction(+ : one_bits)
-    for (size_t i = split_index; i < num_words; ++i) {
-      uint32_t word = 0;
-      for (size_t j = 0; j < 32; ++j) {
-        bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < 99);
-        one_bits += flip_bit ? 1 : 0;
-        word |= flip_bit << j;
+
+#pragma omp for
+      for (size_t i = split_index; i < num_words; ++i) {
+        uint32_t word = 0;
+        for (size_t j = 0; j < 32; ++j) {
+          bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < 99);
+          one_bits += flip_bit ? 1 : 0;
+          word |= flip_bit << j;
+        }
+        bits[i] = word;
       }
-      bits[i] = word;
     }
   }
 

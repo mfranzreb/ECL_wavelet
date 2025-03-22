@@ -55,9 +55,17 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
     state.counters["memory_usage"] = max_memory_usage;
   }
 
+  auto og_bit_array = createRandomBitArray(size, 1, is_adversarial, fill_rate);
+
+  // ccreate as many copys as the number of iterations
+  std::vector<BitArray> bit_arrays(state.max_iterations,
+                                   BitArray(og_bit_array));
+
   for (auto _ : state) {
     state.PauseTiming();
-    auto bit_array = createRandomBitArray(size, 1, is_adversarial, fill_rate);
+    // remove the last bit array from the vector
+    auto bit_array = std::move(bit_arrays.back());
+    bit_arrays.pop_back();
     state.ResumeTiming();
     RankSelect rs(std::move(bit_array), 0);
   }

@@ -103,6 +103,8 @@ static void BM_RankSelectBinaryRank(benchmark::State& state) {
   
   pasta::BitVector bv = generateRandomBitVector(size, is_adversarial, fill_rate);
 
+  std::random_device rd;
+  std::mt19937 gen(rd());
   std::uniform_int_distribution<size_t> dist(0, size - 1);
   std::vector<size_t> queries(num_queries);
   std::generate(queries.begin(), queries.end(), [&]() { return dist(gen); });
@@ -151,6 +153,8 @@ static void BM_RankSelectBinarySelect(benchmark::State& state) {
 
   std::vector<size_t> queries(num_queries);
   std::vector<size_t> results(num_queries);
+  std::random_device rd;
+  std::mt19937 gen(rd());
   if constexpr (Value == 1) {
     std::uniform_int_distribution<size_t> dist(1, one_bits);
     std::generate(queries.begin(), queries.end(), [&]() { return dist(gen); });

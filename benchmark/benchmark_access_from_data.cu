@@ -70,8 +70,9 @@ int main(int argc, char** argv) {
 
   ecl::checkWarpSize(GPU_index);
 
-  std::vector<size_t> const data_sizes = {500'000'000, 1'000'000'000,
-                                          2'000'000'000};
+  std::vector<size_t> const data_sizes = {2ULL << 28, 2ULL << 29, 2ULL << 30,
+                                          2ULL << 31, 2ULL << 32, 2ULL << 33,
+                                          2ULL << 34};
 
   std::vector<size_t> const num_queries = {100'000, 500'000, 1'000'000,
                                            5'000'000, 10'000'000};
@@ -82,29 +83,21 @@ int main(int argc, char** argv) {
 
   for (auto const& data_file : data_files) {
     std::string const output =
-        output_dir + "/access_" +
-        data_file.substr(data_file.find_last_of("/") + 1);
+        output_dir + "/construction_" + "GPU_" + std::to_string(GPU_index) +
+        "_" + data_file.substr(data_file.find_last_of("/") + 1);
     std::ofstream out(output);
     out << "data_size,num_queries,pin_memory,time" << std::endl;
     out.close();
 
     for (auto const data_size : data_sizes) {
       if (data_file == input_dir + "/russian_CC.txt") {
-        auto const data = ecl::readDataFromFile<uint16_t>(data_file);
-        if (data_size > data.size()) {
-          std::cerr << "Data size is larger than the file size, skipping..."
-                    << std::endl;
-          continue;
-        }
+        auto const data = ecl::readDataFromFile<uint16_t>(data_file, data_size);
+
         ecl::BM_Access<uint16_t>(data.data(), data_size, num_queries, GPU_index,
                                  num_iters, output);
       } else {
-        auto const data = ecl::readDataFromFile<uint8_t>(data_file);
-        if (data_size > data.size()) {
-          std::cerr << "Data size is larger than the file size, skipping..."
-                    << std::endl;
-          continue;
-        }
+        auto const data = ecl::readDataFromFile<uint8_t>(data_file, data_size);
+
         ecl::BM_Access<uint8_t>(data.data(), data_size, num_queries, GPU_index,
                                 num_iters, output);
       }

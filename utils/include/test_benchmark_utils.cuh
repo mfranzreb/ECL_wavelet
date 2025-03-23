@@ -471,7 +471,8 @@ generateRandomAlphabetAndDataSizes(size_t const min_data_size,
 }
 
 template <typename T>
-__host__ std::vector<T> readDataFromFile(std::string const& filename) {
+__host__ std::vector<T> readDataFromFile(std::string const& filename,
+                                         size_t const num_symbols) {
   static_assert(std::is_unsigned_v<T>, "T must be an unsigned integer type");
 
   std::ifstream file(filename, std::ios::binary | std::ios::ate);
@@ -480,15 +481,22 @@ __host__ std::vector<T> readDataFromFile(std::string const& filename) {
   }
 
   std::streamsize file_size = file.tellg();
+  if (file_size == -1) {
+    throw std::runtime_error("Failed to get file size: " + filename);
+  }
+  if (num_symbols * sizeof(T) > static_cast<size_t>(file_size)) {
+    throw std::runtime_error("Data size is larger than file size");
+  }
   file.seekg(0, std::ios::beg);
 
   if (file_size % sizeof(T) != 0) {
     throw std::runtime_error("File size is not a multiple of the type size");
   }
 
-  std::vector<T> data(file_size / sizeof(T));
+  std::vector<T> data(num_symbols);
 
-  if (!file.read(reinterpret_cast<char*>(data.data()), file_size)) {
+  if (!file.read(reinterpret_cast<char*>(data.data()),
+                 num_symbols * sizeof(T))) {
     throw std::runtime_error("Failed to read file: " + filename);
   }
 

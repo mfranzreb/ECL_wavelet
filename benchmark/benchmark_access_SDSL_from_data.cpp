@@ -25,7 +25,8 @@ std::vector<size_t> generateRandomAccessQueries(size_t const data_size,
 }
 
 template <typename T>
-std::vector<T> readDataFromFile(std::string const& filename) {
+std::vector<T> readDataFromFile(std::string const& filename,
+                                         size_t const num_symbols) {
   static_assert(std::is_unsigned_v<T>, "T must be an unsigned integer type");
 
   std::ifstream file(filename, std::ios::binary | std::ios::ate);
@@ -34,15 +35,22 @@ std::vector<T> readDataFromFile(std::string const& filename) {
   }
 
   std::streamsize file_size = file.tellg();
+  if (file_size == -1) {
+    throw std::runtime_error("Failed to get file size: " + filename);
+  }
+  if (num_symbols * sizeof(T) > file_size) {
+    throw std::runtime_error("Data size is larger than file size");
+  }
   file.seekg(0, std::ios::beg);
 
   if (file_size % sizeof(T) != 0) {
     throw std::runtime_error("File size is not a multiple of the type size");
   }
 
-  std::vector<T> data(file_size / sizeof(T));
+  std::vector<T> data(num_symbols);
 
-  if (!file.read(reinterpret_cast<char*>(data.data()), file_size)) {
+  if (!file.read(reinterpret_cast<char*>(data.data()),
+                 num_symbols * sizeof(T))) {
     throw std::runtime_error("Failed to read file: " + filename);
   }
 
@@ -133,8 +141,9 @@ int main(int argc, char** argv) {
   std::string const input_dir = argv[2];
   std::string const output_dir = argv[3];
 
-  std::vector<size_t> const data_sizes = {500'000'000, 1'000'000'000,
-                                          2'000'000'000};
+  std::vector<size_t> const data_sizes = {2ULL << 28, 2ULL << 29, 2ULL << 30,
+                                          2ULL << 31, 2ULL << 32, 2ULL << 33,
+                                          2ULL << 34};
 
   std::vector<size_t> const num_queries = {100'000, 500'000, 1'000'000,
                                            5'000'000, 10'000'000};
@@ -153,21 +162,11 @@ int main(int argc, char** argv) {
 
     for (auto const data_size : data_sizes) {
       if (data_file == input_dir + "/russian_CC.txt") {
-        auto const data = readDataFromFile<uint16_t>(data_file);
-        if (data_size > data.size()) {
-          std::cerr << "Data size is larger than the file size, skipping..."
-                    << std::endl;
-          continue;
-        }
+        auto const data = readDataFromFile<uint16_t>(data_file, data_size);
         BM_Access<uint16_t>(data.data(), data_size, num_queries, num_iters,
                             output);
       } else {
-        auto const data = readDataFromFile<uint8_t>(data_file);
-        if (data_size > data.size()) {
-          std::cerr << "Data size is larger than the file size, skipping..."
-                    << std::endl;
-          continue;
-        }
+        auto const data = readDataFromFile<uint8_t>(data_file, data_size);
         BM_Access<uint8_t>(data.data(), data_size, num_queries, num_iters,
                            output);
       }

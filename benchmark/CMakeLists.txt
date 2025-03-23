@@ -157,7 +157,7 @@ target_compile_features(${TARGET} PUBLIC cxx_std_20)
 set_property(TARGET ${TARGET} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
 ############################################################################################################
-set(TARGET ecl_bm_tree_construction_SDSL)
+set(TARGET sdsl_bm_tree_construction)
 
 
 add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_tree_construction_SDSL.cu")
@@ -328,7 +328,7 @@ target_compile_features(${TARGET} PUBLIC cxx_std_20)
 set_property(TARGET ${TARGET} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
 ############################################################################################################
-set(TARGET ecl_access_benchmark_SDSL)
+set(TARGET sdsl_access_benchmark)
 
 add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_access_SDSL.cu")
 
@@ -359,7 +359,7 @@ target_compile_features(${TARGET} PUBLIC cxx_std_20)
 set_property(TARGET ${TARGET} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
 ############################################################################################################
-set(TARGET ecl_access_benchmark_SDSL_from_data)
+set(TARGET sdsl_access_benchmark_from_data)
 
 add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_access_SDSL_from_data.cpp")
 
@@ -467,7 +467,7 @@ target_compile_features(${TARGET} PUBLIC cxx_std_20)
 set_property(TARGET ${TARGET} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
 ############################################################################################################
-set(TARGET ecl_rank_benchmark_SDSL)
+set(TARGET sdsl_rank_benchmark)
 
 add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_rank_SDSL.cu")
 
@@ -554,7 +554,7 @@ target_compile_features(${TARGET} PUBLIC cxx_std_20)
 set_property(TARGET ${TARGET} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
 ############################################################################################################
-set(TARGET ecl_select_benchmark_SDSL)
+set(TARGET sdsl_select_benchmark)
 
 add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_select_SDSL.cu")
 

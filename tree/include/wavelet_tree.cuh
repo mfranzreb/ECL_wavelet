@@ -2090,7 +2090,7 @@ class WaveletTree {
    * \brief Get the size of the alphabet.
    * \return Size of the alphabet.
    */
-  __device__ [[nodiscard]] size_t getAlphabetSize() const noexcept {
+  __host__ __device__ [[nodiscard]] size_t getAlphabetSize() const noexcept {
     return alphabet_size_;
   }
 

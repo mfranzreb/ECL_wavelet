@@ -26,9 +26,10 @@ pasta::BitVector generateRandomBitVector(size_t size,
 
 #pragma omp for
       for (size_t i = 0; i < num_words; i++) {
-        uint32_t word = 0;
+        uint64_t word = 0;
         for (size_t j = 0; j < kWordSize; ++j) {
-          bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < fill_rate);
+          bool const flip_bit =
+              (static_cast<uint64_t>(bit_dist(gen)) < fill_rate);
           one_bits += flip_bit ? 1 : 0;
           word |= flip_bit << j;
         }
@@ -46,9 +47,9 @@ pasta::BitVector generateRandomBitVector(size_t size,
 
 #pragma omp for
       for (size_t i = 0; i < split_index; ++i) {
-        uint32_t word = 0;
+        uint64_t word = 0;
         for (size_t j = 0; j < kWordSize; ++j) {
-          bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < 1);
+          bool const flip_bit = (static_cast<uint64_t>(bit_dist(gen)) < 1);
           one_bits += flip_bit ? 1 : 0;
           word |= flip_bit << j;
         }
@@ -57,9 +58,9 @@ pasta::BitVector generateRandomBitVector(size_t size,
 
 #pragma omp for
       for (size_t i = split_index; i < num_words; ++i) {
-        uint32_t word = 0;
+        uint64_t word = 0;
         for (size_t j = 0; j < kWordSize; ++j) {
-          bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < 99);
+          bool const flip_bit = (static_cast<uint64_t>(bit_dist(gen)) < 99);
           one_bits += flip_bit ? 1 : 0;
           word |= flip_bit << j;
         }

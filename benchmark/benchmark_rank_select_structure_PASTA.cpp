@@ -1,15 +1,13 @@
 #include <benchmark/benchmark.h>
-
-#include <random>
-#include <pasta/bit_vector/bit_vector.hpp>
-#include <pasta/bit_vector/support/wide_rank_select.hpp>
 #include <omp.h>
 
+#include <pasta/bit_vector/bit_vector.hpp>
+#include <pasta/bit_vector/support/wide_rank_select.hpp>
+#include <random>
 
-pasta::BitVector generateRandomBitVector(size_t size,
-                                       bool const is_adversarial,
-                                       uint8_t const fill_rate,
-                                       size_t* one_bits_out=nullptr){
+pasta::BitVector generateRandomBitVector(size_t size, bool const is_adversarial,
+                                         uint8_t const fill_rate,
+                                         size_t* one_bits_out = nullptr) {
   uint32_t constexpr kWordSize = 64;
 
   pasta::BitVector bv(size, 0);
@@ -31,13 +29,14 @@ pasta::BitVector generateRandomBitVector(size_t size,
           bool const flip_bit =
               (static_cast<uint64_t>(bit_dist(gen)) < fill_rate);
           one_bits += flip_bit ? 1 : 0;
-          word |= flip_bit << j;
+          word |= static_cast<uint64_t>(flip_bit) << j;
         }
         bv_data[i] = word;
       }
     }
   } else {
-    size_t const split_index = (num_words / 100) * (100 - fill_rate) / kWordSize;
+    size_t const split_index =
+        (num_words / 100) * (100 - fill_rate) / kWordSize;
 
 #pragma omp parallel reduction(+ : one_bits)
     {
@@ -51,7 +50,7 @@ pasta::BitVector generateRandomBitVector(size_t size,
         for (size_t j = 0; j < kWordSize; ++j) {
           bool const flip_bit = (static_cast<uint64_t>(bit_dist(gen)) < 1);
           one_bits += flip_bit ? 1 : 0;
-          word |= flip_bit << j;
+          word |= static_cast<uint64_t>(flip_bit) << j;
         }
         bv_data[i] = word;
       }
@@ -62,7 +61,7 @@ pasta::BitVector generateRandomBitVector(size_t size,
         for (size_t j = 0; j < kWordSize; ++j) {
           bool const flip_bit = (static_cast<uint64_t>(bit_dist(gen)) < 99);
           one_bits += flip_bit ? 1 : 0;
-          word |= flip_bit << j;
+          word |= static_cast<uint64_t>(flip_bit) << j;
         }
         bv_data[i] = word;
       }
@@ -82,8 +81,9 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
   state.counters["param.size"] = size;
   state.counters["param.is_adversarial"] = is_adversarial;
   state.counters["param.fill_rate"] = fill_rate;
-  
-  pasta::BitVector bv = generateRandomBitVector(size, is_adversarial, fill_rate);
+
+  pasta::BitVector bv =
+      generateRandomBitVector(size, is_adversarial, fill_rate);
 
   for (auto _ : state) {
     pasta::WideRankSelect<> rs(bv);
@@ -101,8 +101,9 @@ static void BM_RankSelectBinaryRank(benchmark::State& state) {
   state.counters["param.is_adversarial"] = is_adversarial;
   state.counters["param.fill_rate"] = fill_rate;
   state.counters["param.num_queries"] = num_queries;
-  
-  pasta::BitVector bv = generateRandomBitVector(size, is_adversarial, fill_rate);
+
+  pasta::BitVector bv =
+      generateRandomBitVector(size, is_adversarial, fill_rate);
 
   std::random_device rd;
   std::mt19937 gen(rd());
@@ -112,17 +113,21 @@ static void BM_RankSelectBinaryRank(benchmark::State& state) {
   std::vector<size_t> results(num_queries);
 
   if constexpr (Value == 1) {
-    pasta::WideRankSelect<pasta::OptimizedFor::ONE_QUERIES, pasta::FindL2WideWith::BINARY_SEARCH> rs(bv);
+    pasta::WideRankSelect<pasta::OptimizedFor::ONE_QUERIES,
+                          pasta::FindL2WideWith::BINARY_SEARCH>
+        rs(bv);
     for (auto _ : state) {
-    #pragma omp parallel for
-    for (size_t i = 0; i < num_queries; ++i) {
-      results[i] = rs.rank1(queries[i]);
+#pragma omp parallel for
+      for (size_t i = 0; i < num_queries; ++i) {
+        results[i] = rs.rank1(queries[i]);
+      }
     }
-  }
   } else {
-    pasta::WideRankSelect<pasta::OptimizedFor::ZERO_QUERIES, pasta::FindL2WideWith::BINARY_SEARCH> rs(bv);
+    pasta::WideRankSelect<pasta::OptimizedFor::ZERO_QUERIES,
+                          pasta::FindL2WideWith::BINARY_SEARCH>
+        rs(bv);
     for (auto _ : state) {
-      #pragma omp parallel for
+#pragma omp parallel for
       for (size_t i = 0; i < num_queries; ++i) {
         results[i] = rs.rank0(queries[i]);
       }
@@ -148,9 +153,10 @@ static void BM_RankSelectBinarySelect(benchmark::State& state) {
   state.counters["param.is_adversarial"] = is_adversarial;
   state.counters["param.fill_rate"] = fill_rate;
   state.counters["param.num_queries"] = num_queries;
-  
+
   size_t one_bits = 0;
-  pasta::BitVector bv = generateRandomBitVector(size, is_adversarial, fill_rate, &one_bits);
+  pasta::BitVector bv =
+      generateRandomBitVector(size, is_adversarial, fill_rate, &one_bits);
 
   std::vector<size_t> queries(num_queries);
   std::vector<size_t> results(num_queries);
@@ -160,33 +166,37 @@ static void BM_RankSelectBinarySelect(benchmark::State& state) {
     std::uniform_int_distribution<size_t> dist(1, one_bits);
     std::generate(queries.begin(), queries.end(), [&]() { return dist(gen); });
 
-    pasta::WideRankSelect<pasta::OptimizedFor::ONE_QUERIES, pasta::FindL2WideWith::BINARY_SEARCH> rs(bv);
+    pasta::WideRankSelect<pasta::OptimizedFor::ONE_QUERIES,
+                          pasta::FindL2WideWith::BINARY_SEARCH>
+        rs(bv);
     for (auto _ : state) {
-    #pragma omp parallel for
-    for (size_t i = 0; i < num_queries; ++i) {
-      results[i] = rs.select1(queries[i]);
+#pragma omp parallel for
+      for (size_t i = 0; i < num_queries; ++i) {
+        results[i] = rs.select1(queries[i]);
+      }
     }
-  }
   } else {
     std::uniform_int_distribution<size_t> dist(1, size - one_bits);
     std::generate(queries.begin(), queries.end(), [&]() { return dist(gen); });
 
-    pasta::WideRankSelect<pasta::OptimizedFor::ZERO_QUERIES, pasta::FindL2WideWith::BINARY_SEARCH> rs(bv);
+    pasta::WideRankSelect<pasta::OptimizedFor::ZERO_QUERIES,
+                          pasta::FindL2WideWith::BINARY_SEARCH>
+        rs(bv);
     for (auto _ : state) {
-    #pragma omp parallel for
-    for (size_t i = 0; i < num_queries; ++i) {
-      results[i] = rs.select0(queries[i]);
+#pragma omp parallel for
+      for (size_t i = 0; i < num_queries; ++i) {
+        results[i] = rs.select0(queries[i]);
+      }
     }
   }
-}
 
-// Check that all results are valid.
-for (size_t i = 0; i < num_queries; ++i) {
-  if (results[i] >= size) {
-    std::cerr << "Invalid result: " << results[i] << std::endl;
-    std::exit(1);
+  // Check that all results are valid.
+  for (size_t i = 0; i < num_queries; ++i) {
+    if (results[i] >= size) {
+      std::cerr << "Invalid result: " << results[i] << std::endl;
+      std::exit(1);
+    }
   }
-}
 }
 
 BENCHMARK(BM_RankSelectConstruction)

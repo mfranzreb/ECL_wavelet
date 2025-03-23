@@ -72,7 +72,7 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels,
           bool const flip_bit =
               (static_cast<uint32_t>(bit_dist(gen)) < fill_rate);
           one_bits += flip_bit ? 1 : 0;
-          word |= flip_bit << j;
+          word |= static_cast<uint32_t>(flip_bit) << j;
         }
         bits[i] = word;
       }
@@ -92,7 +92,7 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels,
         for (size_t j = 0; j < 32; ++j) {
           bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < 1);
           one_bits += flip_bit ? 1 : 0;
-          word |= flip_bit << j;
+          word |= static_cast<uint32_t>(flip_bit) << j;
         }
         bits[i] = word;
       }
@@ -103,7 +103,7 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels,
         for (size_t j = 0; j < 32; ++j) {
           bool const flip_bit = (static_cast<uint32_t>(bit_dist(gen)) < 99);
           one_bits += flip_bit ? 1 : 0;
-          word |= flip_bit << j;
+          word |= static_cast<uint32_t>(flip_bit) << j;
         }
         bits[i] = word;
       }

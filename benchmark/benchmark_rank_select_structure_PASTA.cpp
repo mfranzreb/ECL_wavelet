@@ -5,14 +5,15 @@
 #include <pasta/bit_vector/support/wide_rank_select.hpp>
 #include <random>
 
+uint32_t constexpr kWordSize = 64;
+
 pasta::BitVector generateRandomBitVector(size_t size, bool const is_adversarial,
                                          uint8_t const fill_rate,
                                          size_t* one_bits_out = nullptr) {
-  uint32_t constexpr kWordSize = 64;
-
+  assert(size % kWordSize == 0);
   pasta::BitVector bv(size, 0);
   auto bv_data = bv.data();
-  auto const num_words = bv_data.size();
+  auto const num_words = size / kWordSize;
 
   size_t one_bits = 0;
   if (!is_adversarial) {
@@ -70,11 +71,13 @@ pasta::BitVector generateRandomBitVector(size_t size, bool const is_adversarial,
   if (one_bits_out != nullptr) {
     *one_bits_out = one_bits;
   }
+
   return bv;
 }
 
 static void BM_RankSelectConstruction(benchmark::State& state) {
-  size_t const size = state.range(0);
+  // Round size to nearest 64-bit word.
+  size_t const size = (state.range(0) / kWordSize) * kWordSize;
   bool const is_adversarial = state.range(1);
   auto const fill_rate = state.range(2);
 
@@ -92,7 +95,7 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
 
 template <int Value>
 static void BM_RankSelectBinaryRank(benchmark::State& state) {
-  size_t const size = state.range(0);
+  size_t const size = (state.range(0) / kWordSize) * kWordSize;
   bool const is_adversarial = state.range(1);
   auto const fill_rate = state.range(2);
   size_t const num_queries = state.range(3);
@@ -144,7 +147,7 @@ static void BM_RankSelectBinaryRank(benchmark::State& state) {
 
 template <int Value>
 static void BM_RankSelectBinarySelect(benchmark::State& state) {
-  size_t const size = state.range(0);
+  size_t const size = (state.range(0) / kWordSize) * kWordSize;
   bool const is_adversarial = state.range(1);
   auto const fill_rate = state.range(2);
   size_t const num_queries = state.range(3);

@@ -140,12 +140,6 @@ __host__ BitArray::~BitArray() {
   }
 }
 
-__host__ [[nodiscard]] size_t BitArray::sizeHost(
-    size_t const array_index) const noexcept {
-  assert(array_index < num_arrays_);
-  return bit_sizes_[array_index];
-}
-
 __host__ [[nodiscard]] size_t BitArray::getNeededGPUMemory(
     size_t const size, uint8_t const num_arrays) noexcept {
   size_t total_size = 0;

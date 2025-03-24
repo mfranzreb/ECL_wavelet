@@ -7,7 +7,7 @@
 namespace ecl {
 
 template <typename T>
-static void BM_Access(T const* data, size_t const data_size,
+static void BM_Select(T const* data, size_t const data_size,
                       std::vector<size_t> const& num_queries,
                       int const GPU_index, int const num_iters,
                       std::string const& output) {
@@ -18,22 +18,31 @@ static void BM_Access(T const* data, size_t const data_size,
                 << std::endl;
       continue;
     }
-    auto queries = generateRandomAccessQueries(data_size, query_num);
 
     WaveletTree<T> wt(data, data_size, std::vector<T>{}, GPU_index);
 
+    auto alphabet = wt.getAlphabet();
+
+    std::unordered_map<T, size_t> hist(alphabet.size());
+    for (auto const symbol : alphabet) {
+      hist[symbol] = wt.getTotalAppearances(symbol);
+    }
+
+    auto queries = generateRandomSelectQueries(hist, query_num, alphabet);
+
     for (auto const pin_memory : {false, true}) {
       if (pin_memory) {
-        gpuErrchk(cudaHostRegister(queries.data(), query_num * sizeof(size_t),
+        gpuErrchk(cudaHostRegister(queries.data(),
+                                   query_num * sizeof(RankSelectQuery<T>),
                                    cudaHostAllocPortable));
       }
       // warmup
       for (int i = 0; i < 5; ++i) {
-        auto results = wt.access(queries.data(), query_num);
+        auto results = wt.select(queries.data(), query_num);
       }
       for (int i = 0; i < num_iters; ++i) {
         auto start = std::chrono::high_resolution_clock::now();
-        auto results = wt.access(queries.data(), query_num);
+        auto results = wt.select(queries.data(), query_num);
         auto end = std::chrono::high_resolution_clock::now();
         times[i] =
             std::chrono::duration_cast<std::chrono::microseconds>(end - start)
@@ -83,7 +92,7 @@ int main(int argc, char** argv) {
 
   for (auto const& data_file : data_files) {
     std::string const output =
-        output_dir + "/access_" + "GPU_" + std::to_string(GPU_index) + "_" +
+        output_dir + "/select_" + "GPU_" + std::to_string(GPU_index) + "_" +
         data_file.substr(data_file.find_last_of("/") + 1);
     std::ofstream out(output);
     out << "data_size,num_queries,pin_memory,time" << std::endl;
@@ -93,12 +102,12 @@ int main(int argc, char** argv) {
       if (data_file == input_dir + "/russian_CC.txt") {
         auto const data = ecl::readDataFromFile<uint16_t>(data_file, data_size);
 
-        ecl::BM_Access<uint16_t>(data.data(), data_size, num_queries, GPU_index,
+        ecl::BM_Select<uint16_t>(data.data(), data_size, num_queries, GPU_index,
                                  num_iters, output);
       } else {
         auto const data = ecl::readDataFromFile<uint8_t>(data_file, data_size);
 
-        ecl::BM_Access<uint8_t>(data.data(), data_size, num_queries, GPU_index,
+        ecl::BM_Select<uint8_t>(data.data(), data_size, num_queries, GPU_index,
                                 num_iters, output);
       }
     }

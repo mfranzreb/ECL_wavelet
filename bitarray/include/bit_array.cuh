@@ -256,15 +256,15 @@ class BitArray {
    * \param array_index Index of the bit array to get the size of.
    * \return Size of the bit array in bits.
    */
-  __device__ [[nodiscard]] __forceinline__ size_t
+  __host__ __device__ [[nodiscard]] __forceinline__ size_t
   size(size_t const array_index) const noexcept {
     assert(array_index < num_arrays_);
+#ifdef __CUDA_ARCH__
     return d_bit_sizes_[array_index];
+#else
+    return bit_sizes_[array_index];
+#endif
   }
-
-  /*! @copydoc size(size_t const) */
-  __host__ [[nodiscard]] size_t sizeHost(
-      size_t const array_index) const noexcept;
 
   /*!
    * \brief Get the size of the bit array in

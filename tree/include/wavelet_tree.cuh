@@ -740,8 +740,8 @@ class WaveletTree {
                            d_counts_);
 
     // Copy counts to host
-    std::vector<size_t> counts(alphabet_size_);
-    gpuErrchk(cudaMemcpy(counts.data(), d_counts_,
+    counts_ = std::vector<size_t>(alphabet_size_);
+    gpuErrchk(cudaMemcpy(counts_.data(), d_counts_,
                          alphabet_size_ * sizeof(size_t),
                          cudaMemcpyDeviceToHost));
 
@@ -757,7 +757,7 @@ class WaveletTree {
       for (size_t i = num_levels_ - 1; i >= min_code_len; --i) {
         for (int64_t j = alphabet_size_ - codes_start_ - 1; j >= 0; --j) {
           if (i >= codes[j].len_) {
-            bit_array_sizes[i] -= counts[codes_start_ + j];
+            bit_array_sizes[i] -= counts_[codes_start_ + j];
           } else {
             break;
           }
@@ -1206,7 +1206,7 @@ class WaveletTree {
 
     assert(std::all_of(queries, queries + num_queries,
                        [&](const RankSelectQuery<T>& s) {
-                         return s.index_ < rank_select_.bit_array_.sizeHost(0);
+                         return s.index_ < rank_select_.bit_array_.size(0);
                        }));
     IdealConfigs const& ideal_configs =
         getIdealConfigs(getDeviceProperties().name);
@@ -2094,6 +2094,10 @@ class WaveletTree {
     return alphabet_size_;
   }
 
+  __host__ std::vector<T> const& getAlphabet() const noexcept {
+    return alphabet_;
+  }
+
   /*!
    * \brief Get the number of levels in the wavelet tree.
    * \return Number of levels.
@@ -2108,11 +2112,17 @@ class WaveletTree {
    * from 0. \param i Index of the symbol in the alphabet. \return Number of
    * occurrences of all symbols that are lexicographically smaller.
    */
-  __device__ [[nodiscard]] size_t getCounts(size_t i) const noexcept {
+  __host__ __device__ [[nodiscard]] size_t getCounts(size_t i) const noexcept {
+    assert(i < alphabet_size_);
+#if defined(__CUDA_ARCH__)
     return d_counts_[i];
+#else
+    return counts_[i];
+#endif
   }
 
-  __device__ [[nodiscard]] size_t getTotalAppearances(size_t i) const noexcept {
+  __host__ __device__ [[nodiscard]] size_t getTotalAppearances(
+      size_t i) const noexcept {
     if (i == alphabet_size_ - 1) {
       return rank_select_.bit_array_.size(0) -
              getCounts(i);  // data_size - getCounts(i);
@@ -2427,6 +2437,7 @@ class WaveletTree {
   Code* d_codes_ =
       nullptr; /*!< Array of codes for each symbol in the alphabet*/
   size_t* d_counts_ = nullptr; /*!< Array of counts for each symbol*/
+  std::vector<size_t> counts_; /*!< Array of counts for each symbol*/
   uint8_t num_levels_;         /*!< Number of levels in the wavelet tree*/
   bool is_min_alphabet_; /*!< Flag to signal whether the alphabet is already
                             minimal*/

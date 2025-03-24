@@ -43,12 +43,12 @@ using BitArrayBoolTest = BitArrayTest<bool>;
 // Test the constructor that initializes with a specific size
 TEST_F(BitArrayBoolTest, ConstructorWithSize) {
   BitArray bit_array(std::vector<size_t>{64});
-  EXPECT_EQ(bit_array.sizeHost(0), 64);
+  EXPECT_EQ(bit_array.size(0), 64);
   // Additional checks could go here if necessary
   std::vector<size_t> sizes{2, 4, 8, 64, 128, 1024};
   BitArray new_bit_array(sizes);
   for (size_t i = 0; i < sizes.size(); ++i) {
-    EXPECT_EQ(new_bit_array.sizeHost(i), sizes[i]);
+    EXPECT_EQ(new_bit_array.size(i), sizes[i]);
   }
 }
 
@@ -111,7 +111,7 @@ TEST_F(BitArrayBoolTest, AccessAndWriteBits) {
     EXPECT_TRUE(*result);
     // check that all other bits are unchanged
     for (uint32_t j = 32 * i; j < 32 * (i + 1); ++j) {
-      if (j != 32 * i + bit and j < bit_array.sizeHost(0)) {
+      if (j != 32 * i + bit and j < bit_array.size(0)) {
         accessKernel<<<1, 1>>>(bit_array, 0, j, result);
         kernelCheck();
         EXPECT_FALSE(*result);

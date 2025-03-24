@@ -1,24 +1,35 @@
 #include <omp.h>
 
+#include <execution>
 #include <random>
 #include <sdsl/int_vector.hpp>
 #include <sdsl/wavelet_trees.hpp>
+#include <unordered_map>
+#include <unordered_set>
 
-std::vector<size_t> generateRandomAccessQueries(size_t const data_size,
-                                                size_t const num_queries) {
-  std::vector<size_t> queries(num_queries);
+template <typename T>
+struct RankSelectQuery {
+  size_t index_;
+  T symbol_;
+};
+
+template <typename T>
+std::vector<RankSelectQuery<T>> generateRandomRankQueries(
+    size_t const data_size, size_t const num_queries,
+    std::vector<T> const& alphabet) {
+  std::vector<RankSelectQuery<T>> queries(num_queries);
 
 #pragma omp parallel
   {
-    // Thread-local random number generator
+    // Thread-local random number generators
     std::random_device rd;
-    // Add thread number to seed for better randomness across threads
-    std::mt19937 gen(rd() + omp_get_thread_num());
+    std::mt19937 gen(rd() + omp_get_thread_num());  // Add thread ID to seed
     std::uniform_int_distribution<size_t> dis(0, data_size - 1);
+    std::uniform_int_distribution<size_t> dis2(0, alphabet.size() - 1);
 
 #pragma omp for
     for (size_t i = 0; i < num_queries; i++) {
-      queries[i] = dis(gen);
+      queries[i] = RankSelectQuery<T>(dis(gen), alphabet[dis2(gen)]);
     }
   }
 
@@ -88,9 +99,33 @@ auto getSDSLTree(T const* data, size_t const data_size) {
 }
 
 template <typename T>
-static void BM_Access(T const* data, size_t const data_size,
-                      std::vector<size_t> const& num_queries,
-                      int const num_iters, std::string const& output) {
+std::vector<T> getAlphabet(T const* data, size_t const data_size) {
+  std::vector<T> alphabet;
+  std::unordered_set<T> alphabet_set;
+#pragma omp parallel
+  {
+    auto const t_id = omp_get_thread_num();
+    auto const num_threads = omp_get_num_threads();
+    size_t const start = t_id * data_size / num_threads;
+    size_t const end = t_id == num_threads - 1
+                           ? data_size
+                           : (t_id + 1) * data_size / num_threads;
+    auto local_set = std::unordered_set<T>();
+    for (size_t i = start; i < end; ++i) {
+      local_set.insert(data[i]);
+    }
+#pragma omp critical
+    { alphabet_set.insert(local_set.begin(), local_set.end()); }
+  }
+  alphabet.assign(alphabet_set.begin(), alphabet_set.end());
+  std::sort(std::execution::par, alphabet.begin(), alphabet.end());
+  return alphabet;
+}
+
+template <typename T>
+static void BM_Rank(T const* data, size_t const data_size,
+                    std::vector<size_t> const& num_queries, int const num_iters,
+                    std::string const& output) {
   std::vector<size_t> times(num_iters);
   for (auto const query_num : num_queries) {
     if (query_num > data_size) {
@@ -98,23 +133,25 @@ static void BM_Access(T const* data, size_t const data_size,
                 << std::endl;
       continue;
     }
-    auto queries = generateRandomAccessQueries(data_size, query_num);
+    auto const alphabet = getAlphabet(data, data_size);
 
     auto wt = getSDSLTree(data, data_size);
 
-    std::vector<T> results(query_num);
+    auto queries = generateRandomRankQueries(data_size, query_num, alphabet);
+
+    std::vector<size_t> results(query_num);
     // warmup
     for (int i = 0; i < 5; ++i) {
 #pragma omp parallel for
       for (size_t j = 0; j < query_num; ++j) {
-        results[j] = wt[queries[j]];
+        results[j] = wt.rank(queries[j].index_, queries[j].symbol_);
       }
     }
     for (int i = 0; i < num_iters; ++i) {
       auto start = std::chrono::high_resolution_clock::now();
 #pragma omp parallel for
       for (size_t j = 0; j < query_num; ++j) {
-        results[j] = wt[queries[j]];
+        results[j] = wt.rank(queries[j].index_, queries[j].symbol_);
       }
       auto end = std::chrono::high_resolution_clock::now();
       times[i] =
@@ -155,7 +192,7 @@ int main(int argc, char** argv) {
 
   for (auto const& data_file : data_files) {
     std::string const output =
-        output_dir + "/access_SDSL_" +
+        output_dir + "/rank_SDSL_" +
         data_file.substr(data_file.find_last_of("/") + 1);
     std::ofstream out(output);
     out << "data_size,num_queries,time" << std::endl;
@@ -164,12 +201,12 @@ int main(int argc, char** argv) {
     for (auto const data_size : data_sizes) {
       if (data_file == input_dir + "/russian_CC.txt") {
         auto const data = readDataFromFile<uint16_t>(data_file, data_size);
-        BM_Access<uint16_t>(data.data(), data_size, num_queries, num_iters,
-                            output);
+        BM_Rank<uint16_t>(data.data(), data_size, num_queries, num_iters,
+                          output);
       } else {
         auto const data = readDataFromFile<uint8_t>(data_file, data_size);
-        BM_Access<uint8_t>(data.data(), data_size, num_queries, num_iters,
-                           output);
+        BM_Rank<uint8_t>(data.data(), data_size, num_queries, num_iters,
+                         output);
       }
     }
   }

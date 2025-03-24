@@ -385,7 +385,7 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesContent) {
     for (uint32_t i = 0; i < BA_sizes.size(); ++i) {
       getTotalNumValsKernel<<<1, 1>>>(rank_select, i, result, val);
       kernelCheck();
-      EXPECT_EQ(*result, rank_select.bit_array_.sizeHost(i));
+      EXPECT_EQ(*result, rank_select.bit_array_.size(i));
       getTotalNumValsKernel<<<1, 1>>>(rank_select, i, result, !val);
       kernelCheck();
       EXPECT_EQ(*result, 0);
@@ -569,7 +569,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
     std::default_random_engine generator;
     // for each array, test the rank of 100 random positions
     for (uint32_t i = 0; i < num_arrays; ++i) {
-      size_t bit_size = rank_select.bit_array_.sizeHost(i);
+      size_t bit_size = rank_select.bit_array_.size(i);
       std::random_device rd;
       std::mt19937 gen(rd());  // Random number generator
       std::uniform_int_distribution<> dis(1, bit_size - 1);
@@ -674,7 +674,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
 
   for (uint32_t i = 0; i < num_arrays; ++i) {
     helpers.emplace_back(sizes[i]);
-    size_t num_words = (bit_array.sizeHost(i) + WS - 1) / WS;
+    size_t num_words = (bit_array.size(i) + WS - 1) / WS;
     std::vector<uint32_t> words(num_words, word);
     uint32_t *d_words_arr;
     gpuErrchk(cudaMalloc(&d_words_arr, num_words * sizeof(uint32_t)));
@@ -700,7 +700,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
   std::default_random_engine generator;
   // for each array, test the rank of 100 random positions
   for (uint32_t i = 0; i < num_arrays; ++i) {
-    size_t bit_size = rank_select.bit_array_.sizeHost(i);
+    size_t bit_size = rank_select.bit_array_.size(i);
     std::random_device rd;
     std::mt19937 gen(rd());  // Random number generator
     std::uniform_int_distribution<> dis(1, bit_size - 1);

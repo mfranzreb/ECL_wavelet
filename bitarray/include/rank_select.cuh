@@ -117,7 +117,7 @@ class RankSelect {
     // Compute the number of L1 blocks.
     num_l1_blocks_.resize(num_arrays);
     for (size_t i = 0; i < num_arrays; ++i) {
-      num_l1_blocks_[i] = (bit_array_.sizeHost(i) + RSConfig::L1_BIT_SIZE - 1) /
+      num_l1_blocks_[i] = (bit_array_.size(i) + RSConfig::L1_BIT_SIZE - 1) /
                           RSConfig::L1_BIT_SIZE;
     }
     // transfer to device
@@ -154,7 +154,7 @@ class RankSelect {
     // Get how many l2 blocks each last L1 block has
     std::vector<uint16_t> num_last_l2_blocks(num_arrays);
     for (size_t i = 0; i < num_arrays; ++i) {
-      num_last_l2_blocks[i] = (bit_array_.sizeHost(i) % RSConfig::L1_BIT_SIZE +
+      num_last_l2_blocks[i] = (bit_array_.size(i) % RSConfig::L1_BIT_SIZE +
                                RSConfig::L2_BIT_SIZE - 1) /
                               RSConfig::L2_BIT_SIZE;
       if (num_last_l2_blocks[i] == 0) {
@@ -257,7 +257,7 @@ class RankSelect {
         calculateL2EntriesKernel<<<1, block_size>>>(
             *this, i, num_l2_blocks, num_l1_blocks, block_size,
             (RSConfig::NUM_L2_PER_L1 + block_size - 1) / block_size,
-            bit_array_.sizeHost(i));
+            bit_array_.size(i));
         kernelStreamCheck(cudaStreamPerThread);
       } else {
         IdealConfigs const& ideal_configs = getIdealConfigs(prop.name);
@@ -269,7 +269,7 @@ class RankSelect {
         calculateL2EntriesKernel<<<num_l1_blocks, block_size>>>(
             *this, i, num_last_l2_blocks[i], num_l1_blocks, block_size,
             (RSConfig::NUM_L2_PER_L1 + block_size - 1) / block_size,
-            bit_array_.sizeHost(i));
+            bit_array_.size(i));
         kernelStreamCheck(cudaStreamPerThread);
 
         RSConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
@@ -297,7 +297,7 @@ class RankSelect {
       num_ones_samples_per_array[i] =
           num_ones_per_array[i] / RSConfig::SELECT_SAMPLE_RATE;
       num_zeros_samples_per_array[i] =
-          (bit_array_.sizeHost(i) - num_ones_per_array[i]) /
+          (bit_array_.size(i) - num_ones_per_array[i]) /
           RSConfig::SELECT_SAMPLE_RATE;
     }
     size_t const total_ones_samples =

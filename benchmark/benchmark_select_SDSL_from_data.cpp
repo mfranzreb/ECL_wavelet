@@ -150,31 +150,38 @@ static void BM_Select(T const* data, size_t const data_size,
     auto queries = generateRandomSelectQueries<T>(hist, query_num, alphabet);
 
     std::vector<size_t> results(query_num);
-    // warmup
-    for (int i = 0; i < 5; ++i) {
-#pragma omp parallel for
-      for (size_t j = 0; j < query_num; ++j) {
-        results[j] = wt.select(queries[j].index_, queries[j].symbol_);
+    for (auto const sort_queries : {false, true}) {
+      if (sort_queries) {
+        std::sort(
+            queries.begin(), queries.end(),
+            [](auto const& a, auto const& b) { return a.symbol_ < b.symbol_; });
       }
-    }
-    for (int i = 0; i < num_iters; ++i) {
-      auto start = std::chrono::high_resolution_clock::now();
+      // warmup
+      for (int i = 0; i < 5; ++i) {
 #pragma omp parallel for
-      for (size_t j = 0; j < query_num; ++j) {
-        results[j] = wt.select(queries[j].index_, queries[j].symbol_);
+        for (size_t j = 0; j < query_num; ++j) {
+          results[j] = wt.select(queries[j].index_, queries[j].symbol_);
+        }
       }
-      auto end = std::chrono::high_resolution_clock::now();
-      times[i] =
-          std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-              .count();
+      for (int i = 0; i < num_iters; ++i) {
+        auto start = std::chrono::high_resolution_clock::now();
+#pragma omp parallel for
+        for (size_t j = 0; j < query_num; ++j) {
+          results[j] = wt.select(queries[j].index_, queries[j].symbol_);
+        }
+        auto end = std::chrono::high_resolution_clock::now();
+        times[i] =
+            std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+                .count();
+      }
+      // Get median and output
+      std::nth_element(times.begin(), times.begin() + times.size() / 2,
+                       times.end());
+      std::ofstream out(output, std::ios_base::app);
+      out << data_size << "," << query_num << "," << sort_queries << ","
+          << times[times.size() / 2] << std::endl;
+      out.close();
     }
-    // Get median and output
-    std::nth_element(times.begin(), times.begin() + times.size() / 2,
-                     times.end());
-    std::ofstream out(output, std::ios_base::app);
-    out << data_size << "," << query_num << "," << times[times.size() / 2]
-        << std::endl;
-    out.close();
   }
 }
 
@@ -205,7 +212,7 @@ int main(int argc, char** argv) {
         output_dir + "/select_SDSL_" +
         data_file.substr(data_file.find_last_of("/") + 1);
     std::ofstream out(output);
-    out << "data_size,num_queries,time" << std::endl;
+    out << "data_size,num_queries,sort_queries,time(mus)" << std::endl;
     out.close();
 
     for (auto const data_size : data_sizes) {

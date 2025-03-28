@@ -24,33 +24,41 @@ static void BM_Rank(T const* data, size_t const data_size,
 
     auto queries = generateRandomRankQueries(data_size, query_num, alphabet);
 
-    for (auto const pin_memory : {false, true}) {
-      if (pin_memory) {
-        gpuErrchk(cudaHostRegister(queries.data(),
-                                   query_num * sizeof(RankSelectQuery<T>),
-                                   cudaHostAllocPortable));
+    for (auto const sort_queries : {false, true}) {
+      if (sort_queries) {
+        std::sort(
+            queries.begin(), queries.end(),
+            [](auto const& a, auto const& b) { return a.symbol_ < b.symbol_; });
       }
-      // warmup
-      for (int i = 0; i < 5; ++i) {
-        auto results = wt.rank(queries.data(), query_num);
-      }
-      for (int i = 0; i < num_iters; ++i) {
-        auto start = std::chrono::high_resolution_clock::now();
-        auto results = wt.rank(queries.data(), query_num);
-        auto end = std::chrono::high_resolution_clock::now();
-        times[i] =
-            std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-                .count();
-      }
-      // Get median and output
-      std::nth_element(times.begin(), times.begin() + times.size() / 2,
-                       times.end());
-      std::ofstream out(output, std::ios_base::app);
-      out << data_size << "," << query_num << "," << pin_memory << ","
-          << times[times.size() / 2] << std::endl;
-      out.close();
-      if (pin_memory) {
-        gpuErrchk(cudaHostUnregister(queries.data()));
+
+      for (auto const pin_memory : {false, true}) {
+        if (pin_memory) {
+          gpuErrchk(cudaHostRegister(queries.data(),
+                                     query_num * sizeof(RankSelectQuery<T>),
+                                     cudaHostAllocPortable));
+        }
+        // warmup
+        for (int i = 0; i < 5; ++i) {
+          auto results = wt.rank(queries.data(), query_num);
+        }
+        for (int i = 0; i < num_iters; ++i) {
+          auto start = std::chrono::high_resolution_clock::now();
+          auto results = wt.rank(queries.data(), query_num);
+          auto end = std::chrono::high_resolution_clock::now();
+          times[i] =
+              std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+                  .count();
+        }
+        // Get median and output
+        std::nth_element(times.begin(), times.begin() + times.size() / 2,
+                         times.end());
+        std::ofstream out(output, std::ios_base::app);
+        out << data_size << "," << query_num << "," << pin_memory << ","
+            << sort_queries << "," << times[times.size() / 2] << std::endl;
+        out.close();
+        if (pin_memory) {
+          gpuErrchk(cudaHostUnregister(queries.data()));
+        }
       }
     }
   }
@@ -89,7 +97,8 @@ int main(int argc, char** argv) {
         output_dir + "/rank_" + "GPU_" + std::to_string(GPU_index) + "_" +
         data_file.substr(data_file.find_last_of("/") + 1);
     std::ofstream out(output);
-    out << "data_size,num_queries,pin_memory,time" << std::endl;
+    out << "data_size,num_queries,pin_memory,sort_queries,time(mus)"
+        << std::endl;
     out.close();
 
     for (auto const data_size : data_sizes) {

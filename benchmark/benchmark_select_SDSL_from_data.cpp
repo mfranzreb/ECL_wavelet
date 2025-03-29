@@ -196,9 +196,9 @@ int main(int argc, char** argv) {
   std::string const input_dir = argv[2];
   std::string const output_dir = argv[3];
 
-  std::vector<size_t> const data_sizes = {2ULL << 28, 2ULL << 29, 2ULL << 30,
-                                          2ULL << 31, 2ULL << 32, 2ULL << 33,
-                                          2ULL << 34};
+  std::vector<size_t> const data_sizes = {1ULL << 28, 1ULL << 29, 1ULL << 30,
+                                          1ULL << 31, 1ULL << 32, 1ULL << 33,
+                                          1ULL << 34};
 
   std::vector<size_t> const num_queries = {100'000, 500'000, 1'000'000,
                                            5'000'000, 10'000'000};

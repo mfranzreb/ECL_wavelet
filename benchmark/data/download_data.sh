@@ -160,11 +160,6 @@ for i in $(seq -f "%06g" 1 300); do
             echo "File does not exist: $ID"
         fi
     done
-    
-    # Print progress every 10 files
-    if [ $((i % 10)) -eq 0 ]; then
-        echo "Progress: Processed up to file $i of 300"
-    fi
 done
 
 # Check if output file exists and has content

@@ -35,7 +35,7 @@ static void BM_Rank(T const* data, size_t const data_size,
         if (pin_memory) {
           gpuErrchk(cudaHostRegister(queries.data(),
                                      query_num * sizeof(RankSelectQuery<T>),
-                                     cudaHostAllocPortable));
+                                     cudaHostRegisterPortable));
         }
         // warmup
         for (int i = 0; i < 5; ++i) {

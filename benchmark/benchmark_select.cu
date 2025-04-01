@@ -29,7 +29,7 @@ static void BM_Select(benchmark::State& state) {
   auto queries = generateRandomSelectQueries<T>(hist, num_queries, alphabet);
   if (pin_memory) {
     gpuErrchk(cudaHostRegister(queries.data(), num_queries * sizeof(size_t),
-                               cudaHostAllocPortable));
+                               cudaHostRegisterPortable));
   }
   if (sort_queries) {
     std::sort(queries.begin(), queries.end(), [](auto const& a, auto const& b) {

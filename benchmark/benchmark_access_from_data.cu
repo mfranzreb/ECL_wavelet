@@ -25,7 +25,7 @@ static void BM_Access(T const* data, size_t const data_size,
     for (auto const pin_memory : {false, true}) {
       if (pin_memory) {
         gpuErrchk(cudaHostRegister(queries.data(), query_num * sizeof(size_t),
-                                   cudaHostAllocPortable));
+                                   cudaHostRegisterPortable));
       }
       // warmup
       for (int i = 0; i < 5; ++i) {

@@ -889,6 +889,7 @@ class WaveletTree {
    * \param num_indices Number of indices.
    * \return Vector of symbols.
    */
+  // TODO: make const?
   __host__ [[nodiscard]] std::span<T> access(size_t* indices,
                                              size_t const num_indices) {
     // Number of threads per query, set to 1 since it showed the best

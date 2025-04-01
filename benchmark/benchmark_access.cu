@@ -27,7 +27,7 @@ static void BM_Access(benchmark::State& state) {
   auto queries = generateRandomAccessQueries(data_size, num_queries);
   if (pin_memory) {
     gpuErrchk(cudaHostRegister(queries.data(), num_queries * sizeof(size_t),
-                               cudaHostAllocPortable));
+                               cudaHostRegisterPortable));
   }
 
   auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);

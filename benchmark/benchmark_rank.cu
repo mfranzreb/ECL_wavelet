@@ -29,7 +29,7 @@ static void BM_Rank(benchmark::State& state) {
   auto queries = generateRandomRankQueries<T>(data_size, num_queries, alphabet);
   if (pin_memory) {
     gpuErrchk(cudaHostRegister(queries.data(), num_queries * sizeof(size_t),
-                               cudaHostAllocPortable));
+                               cudaHostRegisterPortable));
   }
 
   auto wt = WaveletTree<T>(data.data(), data_size, std::move(alphabet), 0);

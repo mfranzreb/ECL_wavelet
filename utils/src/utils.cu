@@ -139,4 +139,23 @@ __host__ IdealConfigs &getIdealConfigs(const std::string &GPU_name) {
   }
   return internal::ideal_configs;
 }
+
+int64_t getAvailableMemoryLinux() {
+  std::ifstream meminfo("/proc/meminfo");
+  std::string line;
+
+  while (std::getline(meminfo, line)) {
+    if (line.find("MemAvailable:") != std::string::npos) {
+      std::istringstream iss(line);
+      std::string label;
+      int64_t value;
+      std::string unit;
+
+      iss >> label >> value >> unit;
+      return value * 1024;  // Convert from KB to bytes
+    }
+  }
+
+  return -1;  // Could not determine available memory
+}
 }  // namespace ecl

@@ -32,7 +32,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
 #include <omp.h>
-#include <sys/sysinfo.h>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
@@ -649,10 +648,8 @@ class WaveletTree {
 
     if (use_data_unified_memory or use_sorted_data_unified_memory or
         use_cub_unified_memory) {
-      struct sysinfo info;
-      sysinfo(&info);
-      size_t const free_ram = info.freeram;
-      size_t needed_ram = 0;
+      int64_t const free_ram = getAvailableMemoryLinux();
+      int64_t needed_ram = 0;
       needed_ram +=
           use_data_unified_memory ? data_size * sizeof(T) : 0;  // d_data
       needed_ram += use_sorted_data_unified_memory ? data_size * sizeof(T)

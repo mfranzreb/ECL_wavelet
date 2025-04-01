@@ -326,4 +326,6 @@ struct RankSelectQuery {
   T symbol_;
 };
 
+int64_t getAvailableMemoryLinux();
+
 }  // namespace ecl

@@ -66,7 +66,7 @@ static void BM_Construction(T* data, size_t const data_size,
     auto wt = WaveletTree<T>(data, data_size, std::vector<T>(), GPU_index);
     done = true;
     t.join();
-    size_t free_mem_after_tree, total_mem;
+    size_t free_mem_after_tree;
     gpuErrchk(cudaMemGetInfo(&free_mem_after_tree, &total_mem));
     tree_mem_usage = free_mem_before_tree - free_mem_after_tree;
   }

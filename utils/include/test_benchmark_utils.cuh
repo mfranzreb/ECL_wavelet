@@ -502,4 +502,49 @@ __host__ std::vector<T> readDataFromFile(std::string const& filename,
 
   return data;
 }
+
+template <typename T>
+size_t convertDataToMinAlphabet(T* data, size_t const data_size) {
+  std::vector<T> alphabet;
+  std::unordered_set<T> alphabet_set;
+#pragma omp parallel
+  {
+    auto const t_id = omp_get_thread_num();
+    auto const num_threads = omp_get_num_threads();
+    size_t const start = t_id * data_size / num_threads;
+    size_t const end = t_id == num_threads - 1
+                           ? data_size
+                           : (t_id + 1) * data_size / num_threads;
+    auto local_set = std::unordered_set<T>();
+    for (size_t i = start; i < end; ++i) {
+      local_set.insert(data[i]);
+    }
+#pragma omp critical
+    {
+      alphabet_set.insert(local_set.begin(), local_set.end());
+    }
+  }
+  alphabet.assign(alphabet_set.begin(), alphabet_set.end());
+  std::sort(std::execution::par, alphabet.begin(), alphabet.end());
+
+#pragma omp parallel for
+  for (size_t i = 0; i < data_size; ++i) {
+    data[i] = std::distance(
+        alphabet.begin(),
+        std::lower_bound(alphabet.begin(), alphabet.end(), data[i]));
+  }
+  return alphabet.size();
+}
+
+template <typename T>
+size_t convertDataToMinAlphabet(T* data, size_t const data_size,
+                                std::vector<T> const& alphabet) {
+#pragma omp parallel for
+  for (size_t i = 0; i < data_size; ++i) {
+    data[i] = std::distance(
+        alphabet.begin(),
+        std::lower_bound(alphabet.begin(), alphabet.end(), data[i]));
+  }
+  return alphabet.size();
+}
 }  // namespace ecl

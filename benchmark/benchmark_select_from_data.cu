@@ -21,6 +21,11 @@ static void BM_Select(T const* data, size_t const data_size,
 
     WaveletTree<T> wt(data, data_size, std::vector<T>{}, GPU_index);
 
+    if (not wt.isMinAlphabet()) {
+      std::cerr << "Data is not in min alphabet, skipping..." << std::endl;
+      continue;
+    }
+
     auto alphabet = wt.getAlphabet();
 
     std::unordered_map<T, size_t> hist(alphabet.size());
@@ -91,12 +96,12 @@ int main(int argc, char** argv) {
                                           1ULL << 31, 1ULL << 32, 1ULL << 33,
                                           1ULL << 34};
 
-  std::vector<size_t> const num_queries = {100'000, 500'000, 1'000'000,
-                                           5'000'000, 10'000'000};
+  std::vector<size_t> const num_queries = {100'000,   500'000,    1'000'000,
+                                           5'000'000, 10'000'000, 100'000'000};
 
-  std::vector<std::string> const data_files = {
-      input_dir + "/dna.txt", input_dir + "/prot.txt",
-      input_dir + "/common_crawl.txt", input_dir + "/russian_CC.txt"};
+  std::vector<std::string> const data_files = {input_dir + "/dna.txt",
+                                               input_dir + "/prot.txt",
+                                               input_dir + "/common_crawl.txt"};
 
   for (auto const& data_file : data_files) {
     std::string const output =
@@ -108,17 +113,11 @@ int main(int argc, char** argv) {
     out.close();
 
     for (auto const data_size : data_sizes) {
-      if (data_file == input_dir + "/russian_CC.txt") {
-        auto const data = ecl::readDataFromFile<uint16_t>(data_file, data_size);
+      auto data = ecl::readDataFromFile<uint8_t>(data_file, data_size);
+      convertDataToMinAlphabet(data.data(), data_size);
 
-        ecl::BM_Select<uint16_t>(data.data(), data_size, num_queries, GPU_index,
-                                 num_iters, output);
-      } else {
-        auto const data = ecl::readDataFromFile<uint8_t>(data_file, data_size);
-
-        ecl::BM_Select<uint8_t>(data.data(), data_size, num_queries, GPU_index,
-                                num_iters, output);
-      }
+      ecl::BM_Select<uint8_t>(data.data(), data_size, num_queries, GPU_index,
+                              num_iters, output);
     }
   }
   return EXIT_SUCCESS;

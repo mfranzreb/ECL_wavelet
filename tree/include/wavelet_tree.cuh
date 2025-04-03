@@ -662,7 +662,8 @@ class WaveletTree {
       }
     }
 
-    // Placeholder allocation for bit array
+    // TODO: see if still necessary
+    //  Placeholder allocation for bit array
     void* d_placeholder;
     gpuErrchk(cudaMalloc(&d_placeholder, num_levels_ * data_size / 8));
 

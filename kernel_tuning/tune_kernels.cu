@@ -171,7 +171,8 @@ void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
   auto const& prop = getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
+  gpuErrchk(
+      cudaFuncGetAttributes(&funcAttrib, detail::calculateL2EntriesKernel));
   uint32_t max_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   size_t const data_size = prop.totalGlobalMem / 10;
@@ -205,8 +206,8 @@ void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
   for (auto const tpb : threads_per_block_vec) {
     // Warmup
     for (uint8_t i = 0; i < 2; ++i) {
-      calculateL2EntriesKernel<<<num_l1_blocks, tpb>>>(
-          rs, 0, num_last_l2_blocks, num_l1_blocks, tpb,
+      detail::calculateL2EntriesKernel<<<num_l1_blocks, tpb>>>(
+          rs, 0, num_last_l2_blocks, num_l1_blocks,
           (RSConfig::NUM_L2_PER_L1 + tpb - 1) / tpb, data_size);
       kernelCheck();
     }
@@ -214,8 +215,8 @@ void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
     std::vector<float> times(num_iters);
     for (uint8_t i = 0; i < num_iters; ++i) {
       cudaEventRecord(start);
-      calculateL2EntriesKernel<<<num_l1_blocks, tpb>>>(
-          rs, 0, num_last_l2_blocks, num_l1_blocks, tpb,
+      detail::calculateL2EntriesKernel<<<num_l1_blocks, tpb>>>(
+          rs, 0, num_last_l2_blocks, num_l1_blocks,
           (RSConfig::NUM_L2_PER_L1 + tpb - 1) / tpb, data_size);
       cudaEventRecord(stop);
       kernelCheck();
@@ -309,7 +310,7 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
   auto const& prop = getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateSelectSamplesKernel));
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, detail::calculateSelectSamplesKernel));
   uint32_t max_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   size_t const data_size = prop.totalGlobalMem / 10;
@@ -351,7 +352,7 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
     }
     // Warmup
     for (uint8_t i = 0; i < 2; ++i) {
-      calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
+      detail::calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
           rs, 0, num_blocks * block_size, num_ones_samples, num_zeros_samples);
       kernelCheck();
     }
@@ -359,7 +360,7 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
     std::vector<float> times(num_iters);
     for (uint8_t i = 0; i < num_iters; ++i) {
       cudaEventRecord(start);
-      calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
+      detail::calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
           rs, 0, num_blocks * block_size, num_ones_samples, num_zeros_samples);
       cudaEventRecord(stop);
       kernelCheck();
@@ -395,7 +396,7 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
     }
     // Warmup
     for (uint8_t i = 0; i < 2; ++i) {
-      calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
+      detail::calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
           rs, 0, num_blocks * block_size, num_ones_samples, num_zeros_samples);
       kernelCheck();
     }
@@ -403,7 +404,7 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
     std::vector<float> times(num_iters);
     for (uint8_t i = 0; i < num_iters; ++i) {
       cudaEventRecord(start);
-      calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
+      detail::calculateSelectSamplesKernel<<<num_blocks, block_size>>>(
           rs, 0, num_blocks * block_size, num_ones_samples, num_zeros_samples);
       cudaEventRecord(stop);
       kernelCheck();

@@ -38,7 +38,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace ecl {
 /*!
- * \brief Static configuration for \c RankSelect.
+ * \brief Compile-time configuration for \c RankSelect.
  */
 struct RSConfig {
   // Bits covered by an L2-block.
@@ -56,39 +56,21 @@ struct RSConfig {
   static constexpr size_t L1_WORD_SIZE = L1_BIT_SIZE / (sizeof(uint32_t) * 8);
 
   // Number of 1s and 0s between each sampled position.
-  static constexpr size_t SELECT_SAMPLE_RATE =
-      4096;  // TODO: try different sizes
+  static constexpr size_t SELECT_SAMPLE_RATE = 4096;
 
   using L1_TYPE = uint64_t;
   using L2_TYPE = uint16_t;
-};  // struct RankSelectConfiguration
+};  // struct RSConfig
 
+/*!
+ * \brief Return struct of a binary rank operation.alignas
+ * \details \c rank refers to the resulting rank, and \c bit to the bit at the
+ * position that was given as input.
+ */
 struct RankResult {
   size_t rank;
   bool bit;
 };
-
-class RankSelect;
-
-/*!
- * \brief Fill L2 indices and prepare L1 indices for prefix sum.
- * \param rank_select RankSelect object to fill indices for.
- * \param array_index Index of the bit array to be used.
- * \param num_last_l2_blocks Number of L2 blocks in the last L1 block.
- */
-__global__ static void calculateL2EntriesKernel(
-    RankSelect rank_select, uint32_t const array_index,
-    uint16_t const num_last_l2_blocks, size_t const num_l1_blocks,
-    uint32_t const num_threads, uint32_t const num_iters,
-    size_t const bit_array_size);
-
-__global__ static void calculateSelectSamplesKernel(
-    RankSelect rank_select, uint32_t const array_index,
-    size_t const num_threads, size_t const num_ones_samples,
-    size_t const num_zeros_samples);
-
-__global__ static void addNumOnesKernel(RankSelect rank_select,
-                                        uint32_t const num_arrays);
 
 /*!
  * \brief Rank and select support for the bit array.
@@ -108,277 +90,7 @@ class RankSelect {
    * \param bit_array \c BitArray to be used for queries.
    * \param GPU_index Index of the GPU to be used.
    */
-  __host__ RankSelect(BitArray&& bit_array, uint32_t const GPU_index) noexcept
-      : bit_array_(std::move(bit_array)), is_copy_(false) {
-    checkWarpSize(GPU_index);
-
-    auto const num_arrays = bit_array_.numArrays();
-
-    // Compute the number of L1 blocks.
-    num_l1_blocks_.resize(num_arrays);
-    for (size_t i = 0; i < num_arrays; ++i) {
-      num_l1_blocks_[i] = (bit_array_.size(i) + RSConfig::L1_BIT_SIZE - 1) /
-                          RSConfig::L1_BIT_SIZE;
-    }
-    // transfer to device
-    gpuErrchk(cudaMallocAsync(&d_num_l1_blocks_,
-                              num_l1_blocks_.size() * sizeof(size_t),
-                              cudaStreamDefault));
-    gpuErrchk(cudaMemcpyAsync(d_num_l1_blocks_, num_l1_blocks_.data(),
-                              num_l1_blocks_.size() * sizeof(size_t),
-                              cudaMemcpyHostToDevice, cudaStreamDefault));
-    size_t total_l1_blocks = 0;
-    for (auto const& num_blocks : num_l1_blocks_) {
-      total_l1_blocks += num_blocks;
-    }
-    // Allocate memory for the L1 index.
-    // For convenience, first entry is for the first block, which is
-    // always 0.
-    gpuErrchk(cudaMallocAsync(&d_l1_indices_,
-                              total_l1_blocks * sizeof(RSConfig::L1_TYPE),
-                              cudaStreamDefault));
-    gpuErrchk(cudaMemsetAsync(d_l1_indices_, 0,
-                              total_l1_blocks * sizeof(RSConfig::L1_TYPE),
-                              cudaStreamDefault));
-
-    std::vector<size_t> l1_offsets(num_l1_blocks_.size());
-
-    std::exclusive_scan(num_l1_blocks_.begin(), num_l1_blocks_.end(),
-                        l1_offsets.begin(), 0ULL);
-    gpuErrchk(cudaMallocAsync(
-        &d_l1_offsets_, l1_offsets.size() * sizeof(size_t), cudaStreamDefault));
-    gpuErrchk(cudaMemcpyAsync(d_l1_offsets_, l1_offsets.data(),
-                              l1_offsets.size() * sizeof(size_t),
-                              cudaMemcpyHostToDevice, cudaStreamDefault));
-
-    // Get how many l2 blocks each last L1 block has
-    std::vector<uint16_t> num_last_l2_blocks(num_arrays);
-    for (size_t i = 0; i < num_arrays; ++i) {
-      num_last_l2_blocks[i] = (bit_array_.size(i) % RSConfig::L1_BIT_SIZE +
-                               RSConfig::L2_BIT_SIZE - 1) /
-                              RSConfig::L2_BIT_SIZE;
-      if (num_last_l2_blocks[i] == 0) {
-        num_last_l2_blocks[i] = RSConfig::NUM_L2_PER_L1;
-      }
-    }
-    // transfer to device
-    gpuErrchk(cudaMallocAsync(&d_num_last_l2_blocks_,
-                              num_last_l2_blocks.size() * sizeof(uint16_t),
-                              cudaStreamDefault));
-    gpuErrchk(cudaMemcpyAsync(d_num_last_l2_blocks_, num_last_l2_blocks.data(),
-                              num_last_l2_blocks.size() * sizeof(uint16_t),
-                              cudaMemcpyHostToDevice, cudaStreamDefault));
-
-    std::vector<size_t> num_l2_blocks_per_arr(num_arrays);
-    for (size_t i = 0; i < num_arrays; ++i) {
-      num_l2_blocks_per_arr[i] =
-          (num_l1_blocks_[i] - 1) * RSConfig::NUM_L2_PER_L1 +
-          num_last_l2_blocks[i];
-    }
-
-    total_num_l2_blocks_ = 0;
-    for (auto const& num_blocks : num_l2_blocks_per_arr) {
-      total_num_l2_blocks_ += num_blocks;
-    }
-
-    // Allocate memory for the L2 index.
-    // For convenience, right now first entry is for the first block, which is
-    // always 0.
-    gpuErrchk(cudaMallocAsync(&d_l2_indices_,
-                              total_num_l2_blocks_ * sizeof(RSConfig::L2_TYPE),
-                              cudaStreamDefault));
-    gpuErrchk(cudaMemsetAsync(d_l2_indices_, 0,
-                              total_num_l2_blocks_ * sizeof(RSConfig::L2_TYPE),
-                              cudaStreamDefault));
-
-    std::exclusive_scan(num_l2_blocks_per_arr.begin(),
-                        num_l2_blocks_per_arr.end(),
-                        num_l2_blocks_per_arr.begin(), 0ULL);
-
-    gpuErrchk(cudaMallocAsync(&d_l2_offsets_,
-                              num_l2_blocks_per_arr.size() * sizeof(size_t),
-                              cudaStreamDefault));
-    gpuErrchk(cudaMemcpyAsync(d_l2_offsets_, num_l2_blocks_per_arr.data(),
-                              num_l2_blocks_per_arr.size() * sizeof(size_t),
-                              cudaMemcpyHostToDevice, cudaStreamDefault));
-
-    // OPT: loop unnecessary for wavelet tree, since array sizes are
-    // monotonically decreasing
-    // Get maximum storage needed for device sums
-    size_t temp_storage_bytes = 0;
-    for (uint32_t i = 0; i < num_arrays; i++) {
-      auto const num_l1_blocks = num_l1_blocks_[i];
-      RSConfig::L1_TYPE* d_data = getL1EntryPointer(i, 0);
-      size_t prev_storage_bytes = temp_storage_bytes;
-      gpuErrchk(cub::DeviceScan::InclusiveSum(nullptr, temp_storage_bytes,
-                                              d_data, num_l1_blocks));
-      temp_storage_bytes = std::max(temp_storage_bytes, prev_storage_bytes);
-    }
-    void* d_temp_storage = nullptr;
-    gpuErrchk(cudaMallocAsync(&d_temp_storage, temp_storage_bytes,
-                              cudaStreamDefault));
-
-    // Choose maximum possible items per thread
-    struct cudaFuncAttributes funcAttrib;
-    gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
-
-    auto max_block_size =
-        std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-
-    max_block_size = findLargestDivisor(kMaxTPB, max_block_size);
-
-    auto const& prop = getDeviceProperties();
-
-    auto min_block_size = kMinTPB;
-    while (prop.maxBlocksPerMultiProcessor * funcAttrib.sharedSizeBytes >
-           prop.sharedMemPerMultiprocessor) {
-      min_block_size += kMinTPB;
-    }
-    gpuErrchk(cudaMalloc(&d_total_num_ones_, num_arrays * sizeof(size_t)));
-    kernelCheck();
-#pragma omp parallel for num_threads(num_arrays)
-    for (uint32_t i = 0; i < num_arrays; i++) {
-      gpuErrchk(cudaSetDevice(GPU_index));
-      auto const num_l1_blocks = num_l1_blocks_[i];
-      auto const num_l2_blocks =
-          i == (num_arrays - 1u)
-              ? total_num_l2_blocks_ - num_l2_blocks_per_arr[i]
-              : num_l2_blocks_per_arr[i + 1] - num_l2_blocks_per_arr[i];
-
-      if (num_l1_blocks == 1) {
-        uint32_t block_size =
-            std::min(max_block_size, static_cast<uint32_t>(num_l2_blocks));
-
-        // Round up to next WS
-        if (block_size % WS != 0) {
-          block_size += (WS - block_size % WS);
-        }
-
-        calculateL2EntriesKernel<<<1, block_size>>>(
-            *this, i, num_l2_blocks, num_l1_blocks, block_size,
-            (RSConfig::NUM_L2_PER_L1 + block_size - 1) / block_size,
-            bit_array_.size(i));
-        kernelStreamCheck(cudaStreamPerThread);
-      } else {
-        IdealConfigs const& ideal_configs = getIdealConfigs(prop.name);
-        uint32_t const block_size =
-            ideal_configs.ideal_TPB_calculateL2EntriesKernel != 0
-                ? ideal_configs.ideal_TPB_calculateL2EntriesKernel
-                : min_block_size;
-        // calculate L2 entries for all L1 blocks
-        calculateL2EntriesKernel<<<num_l1_blocks, block_size>>>(
-            *this, i, num_last_l2_blocks[i], num_l1_blocks, block_size,
-            (RSConfig::NUM_L2_PER_L1 + block_size - 1) / block_size,
-            bit_array_.size(i));
-        kernelStreamCheck(cudaStreamPerThread);
-
-        RSConfig::L1_TYPE* const d_data = getL1EntryPointer(i, 0);
-
-#pragma omp critical
-        {  // Run inclusive prefix sum
-          gpuErrchk(cub::DeviceScan::InclusiveSum(
-              d_temp_storage, temp_storage_bytes, d_data, num_l1_blocks));
-          kernelCheck();
-        }
-      }
-    }
-    gpuErrchk(cudaFreeAsync(d_temp_storage, cudaStreamDefault));
-    addNumOnesKernel<<<1, std::min(kMaxTPB, static_cast<uint32_t>(num_arrays)),
-                       0, cudaStreamDefault>>>(*this, num_arrays);
-    // Get the number of ones per bit array
-    std::vector<size_t> num_ones_per_array(num_arrays);
-    gpuErrchk(cudaMemcpyAsync(num_ones_per_array.data(), d_total_num_ones_,
-                              num_arrays * sizeof(size_t),
-                              cudaMemcpyDeviceToHost, cudaStreamDefault));
-    std::vector<size_t> num_ones_samples_per_array(num_arrays);
-    std::vector<size_t> num_zeros_samples_per_array(num_arrays);
-    kernelCheck();
-    for (uint8_t i = 0; i < num_arrays; i++) {
-      num_ones_samples_per_array[i] =
-          num_ones_per_array[i] / RSConfig::SELECT_SAMPLE_RATE;
-      num_zeros_samples_per_array[i] =
-          (bit_array_.size(i) - num_ones_per_array[i]) /
-          RSConfig::SELECT_SAMPLE_RATE;
-    }
-    size_t const total_ones_samples =
-        std::accumulate(num_ones_samples_per_array.begin(),
-                        num_ones_samples_per_array.end(), 0ULL);
-    std::exclusive_scan(num_ones_samples_per_array.begin(),
-                        num_ones_samples_per_array.end(),
-                        num_ones_samples_per_array.begin(), 0ULL);
-    gpuErrchk(cudaMallocAsync(&d_select_samples_1_,
-                              total_ones_samples * sizeof(size_t),
-                              cudaStreamDefault));
-    gpuErrchk(cudaMallocAsync(&d_select_samples_1_offsets_,
-                              num_arrays * sizeof(size_t), cudaStreamDefault));
-    gpuErrchk(cudaMemcpyAsync(d_select_samples_1_offsets_,
-                              num_ones_samples_per_array.data(),
-                              num_arrays * sizeof(size_t),
-                              cudaMemcpyHostToDevice, cudaStreamDefault));
-
-    size_t const total_zeros_samples =
-        std::accumulate(num_zeros_samples_per_array.begin(),
-                        num_zeros_samples_per_array.end(), 0ULL);
-    std::exclusive_scan(num_zeros_samples_per_array.begin(),
-                        num_zeros_samples_per_array.end(),
-                        num_zeros_samples_per_array.begin(), 0ULL);
-    gpuErrchk(cudaMallocAsync(&d_select_samples_0_,
-                              total_zeros_samples * sizeof(size_t),
-                              cudaStreamDefault));
-    gpuErrchk(cudaMallocAsync(&d_select_samples_0_offsets_,
-                              num_arrays * sizeof(size_t), cudaStreamDefault));
-    gpuErrchk(cudaMemcpy(d_select_samples_0_offsets_,
-                         num_zeros_samples_per_array.data(),
-                         num_arrays * sizeof(size_t), cudaMemcpyHostToDevice));
-    kernelCheck();
-
-    if (total_ones_samples > 0 or total_zeros_samples > 0) {
-      IdealConfigs const& ideal_configs = getIdealConfigs(prop.name);
-#pragma omp parallel for num_threads(num_arrays)
-      for (uint8_t i = 0; i < num_arrays; i++) {
-        gpuErrchk(cudaSetDevice(GPU_index));
-
-        size_t const num_ones_samples =
-            i == num_arrays - 1
-                ? total_ones_samples - num_ones_samples_per_array[i]
-                : num_ones_samples_per_array[i + 1] -
-                      num_ones_samples_per_array[i];
-        size_t const num_zeros_samples =
-            i == num_arrays - 1
-                ? total_zeros_samples - num_zeros_samples_per_array[i]
-                : num_zeros_samples_per_array[i + 1] -
-                      num_zeros_samples_per_array[i];
-
-        if (num_ones_samples > 0 or num_zeros_samples > 0) {
-          size_t const num_warps =
-              ideal_configs.ideal_tot_threads_calculateSelectSamplesKernel != 0
-                  ? std::min(
-                        num_ones_samples + num_zeros_samples,
-                        ideal_configs
-                                .ideal_tot_threads_calculateSelectSamplesKernel /
-                            WS)
-                  : std::min(
-                        static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
-                                                 prop.multiProcessorCount +
-                                             WS - 1) /
-                                            WS),
-                        num_ones_samples + num_zeros_samples);
-          auto const [blocks, threads] =
-              ideal_configs.ideal_TPB_calculateSelectSamplesKernel != 0
-                  ? getLaunchConfig(
-                        num_warps,
-                        ideal_configs.ideal_TPB_calculateSelectSamplesKernel,
-                        ideal_configs.ideal_TPB_calculateSelectSamplesKernel)
-                  : getLaunchConfig(num_warps, kMinTPB, kMaxTPB);
-
-          calculateSelectSamplesKernel<<<blocks, threads>>>(
-              *this, i, blocks * threads, num_ones_samples, num_zeros_samples);
-          kernelStreamCheck(cudaStreamPerThread);
-        }
-      }
-    }
-    kernelCheck();
-  }
+  __host__ RankSelect(BitArray&& bit_array, uint32_t const GPU_index) noexcept;
 
   /*!
    * \brief Copy constructor.
@@ -392,15 +104,22 @@ class RankSelect {
    */
   __host__ RankSelect& operator=(RankSelect&& other) noexcept;
 
+  /*!
+   * \brief Destructor.
+   */
   __host__ ~RankSelect();
 
   /*!
-   * \brief Computes rank of zeros.
-   * \tparam NumThreads Number of threads accessing the function.
+   * \brief Computes rank of zeros or ones for a bit array.
+   * \tparam NumThreads Number of threads accessing the function. Must be less
+   * than or equal to 32.
+   * \tparam GetBit If true, the bit at the index is also returned.
+   * \tparam Value 0 for zeros, 1 for ones.
    * \param array_index Index of the bit array to be used.
-   * \param index Index the rank of zeros is computed for.
-   * \return Number of zeros (rank) before position \c index, i.e. in the slice
-   * [0, i).
+   * \param index Index the rank of \c Value is computed for.
+   * \param offset Index in the underlying array where the bit array starts.
+   * \return Number of \c Value occurrences (rank) before position \c index,
+   * i.e. in the slice [0, i).
    */
   // TODO: try to make loop coalesced
   template <int NumThreads, bool GetBit, int Value>
@@ -491,11 +210,14 @@ class RankSelect {
   /*!
    * \brief Get position of i-th zero or one. Starting from 1.
    * \tparam Value 0 for zeros, 1 for ones.
+   * \tparam NumThreads Number of threads accessing the function. Must be less
+   * than or equal to 32.
+   * \param UseSamples If true, the function uses the select samples to
+   * accelerate the search. Should always be true. False only used for
+   * construction of the support structure.
    * \param array_index Index of the bit array to be used.
-   * \param i i-th zero or one.
-   * \param local_t_id Thread ID, has to start at 0.
-   * \param num_threads Number of threads accessing the function. Right now 32
-   * is assumed.
+   * \param i i-th zero or one, starting from 1.
+   * \param BA_offset Index in the underlying array where the bit array starts.
    * \return Position of the i-th zero/one. If i is larger than the number of
    * zeros/ones, the function returns the size of the bit array.
    */
@@ -503,7 +225,7 @@ class RankSelect {
   __device__ [[nodiscard]] size_t select(uint32_t const array_index, size_t i,
                                          size_t const BA_offset) {
     static_assert(Value == 0 or Value == 1, "Value must be 0 or 1.");
-    static_assert(NumThreads <= 32);
+    static_assert(NumThreads <= WS);
     assert(array_index < bit_array_.numArrays());
     assert(i > 0);
     if constexpr (Value == 0) {
@@ -836,6 +558,12 @@ class RankSelect {
     return d_num_last_l2_blocks_[array_index];
   }
 
+  /*!
+   * \brief Get the total number of zeros or ones in a bit array.
+   * \tparam Value 0 for zeros, 1 for ones.
+   * \param array_index Index of the bit array to be used.
+   * \return Total number of zeros or ones in the bit array.
+   */
   template <uint32_t Value>
   __device__ [[nodiscard]] __forceinline__ size_t
   getTotalNumVals(uint32_t const array_index) const noexcept {
@@ -847,6 +575,13 @@ class RankSelect {
     }
   }
 
+  /*!
+   * \brief Get the select sample for a bit array.
+   * \tparam Value 0 for zeros, 1 for ones.
+   * \param array_index Index of the bit array to be used.
+   * \param index Local index of the select sample to be returned.
+   * \return Select sample.
+   */
   template <uint32_t Value>
   __device__ [[nodiscard]] __forceinline__ size_t getSelectSample(
       uint32_t const array_index, size_t const index) const noexcept {
@@ -887,12 +622,24 @@ class RankSelect {
     d_l1_indices_[d_l1_offsets_[array_index] + index] = value;
   }
 
+  /*!
+   * \brief Write the number of ones in a bit array.
+   * \param array_index Index of the bit array to be used.
+   * \param value Number of ones in the bit array.
+   */
   __device__ __forceinline__ void writeTotalNumOnes(
       uint32_t const array_index, size_t const value) noexcept {
     assert(array_index < bit_array_.numArrays());
     d_total_num_ones_[array_index] = value;
   }
 
+  /*!
+   * \brief Write a select sample for a bit array.
+   * \tparam Value 0 for zeros, 1 for ones.
+   * \param array_index Index of the bit array to be used.
+   * \param index Local index of the select sample to be written to.
+   * \param value Value to be written.
+   */
   template <uint32_t Value>
   __device__ __forceinline__ void writeSelectSample(
       uint32_t const array_index, size_t const index,
@@ -954,11 +701,12 @@ class RankSelect {
   }
 
   /*!
-   * \brief Do a sum reduction with a subset of a warp.
+   * \brief Do a sum reduction with at most 32 threads.
    * \tparam T Type of the value to be summed.
-   * \tparam NumThreads Number of threads accessing the function.
+   * \tparam NumThreads Number of threads accessing the function, must be less
+   * than or equal to 32.
    * \param mask Mask representing the threads that should participate in the
-   * reduction.
+   * reduction. First thread corresponds to the least significant bit.
    * \param val Value to be summed.
    * \return Sum of the values of the threads in the mask. Only valid for the
    * first thread in the mask.
@@ -966,6 +714,7 @@ class RankSelect {
 
   template <typename T, int NumThreads>
   __device__ __forceinline__ T warpReduce(uint32_t const mask, T val) {
+    static_assert(NumThreads <= WS);
 #pragma unroll
     for (int offset = NumThreads / 2; offset > 0; offset /= 2) {
       val += __shfl_down_sync(mask, val, offset);
@@ -973,9 +722,23 @@ class RankSelect {
     return val;
   }
 
+  /*!
+   * \brief Do a prefix sum with at most 32 threads.
+   * \tparam T Type of the value to be summed.
+   * \tparam NumThreads Number of threads accessing the function, must be less
+   * than or equal to 32.
+   * \tparam IsInclusive If true, the sum is an inclusive prefix sum, else it is
+   * an exclusive prefix sum.
+   * \param input Value to be summed.
+   * \param output Sum of the values of the threads in the mask. Only valid for
+   * the first thread in the mask.
+   * \param mask Mask representing the threads that should participate in the
+   * reduction. First thread corresponds to the least significant bit.
+   */
   template <typename T, int NumThreads, bool IsInclusive>
   __device__ __forceinline__ void warpSum(T& input, T& output,
                                           uint32_t const mask) {
+    static_assert(NumThreads <= WS);
     T val = input;
     uint8_t const lane = threadIdx.x % NumThreads;
 
@@ -998,6 +761,7 @@ class RankSelect {
    * \brief Get the position of the n-th 0 or 1 bit in a word, starting from
    * the least significant bit.
    * \tparam Value 0 for zeros, 1 for ones.
+   * \tparam T Type of the word, must be an integral type.
    * \param n Rank of the bit. Starts from 1.
    * \param word Word the bit is in.
    * \return Position of the n-th bit. Starts from 0.
@@ -1044,6 +808,13 @@ class RankSelect {
     return base;
   }
 
+  /*!
+   * \brief Get an upper bound to the amount of GPU memory needed for the
+   * RankSelect structure.
+   * \param size Maximum size of a bit array.
+   * \param num_arrays Number of bit arrays.
+   * \return Amount of memory needed in bytes.
+   */
   __host__ [[nodiscard]] static size_t getNeededGPUMemory(
       size_t const size, uint8_t const num_arrays) noexcept;
 
@@ -1083,191 +854,47 @@ class RankSelect {
                     copy.*/
 };  // class RankSelect
 
+namespace detail {
 /*!
  * \brief Fill L2 indices and prepare L1 indices for prefix sum.
  * \param rank_select RankSelect object to fill indices for.
  * \param array_index Index of the bit array to be used.
  * \param num_last_l2_blocks Number of L2 blocks in the last L1 block.
+ * \param num_l1_blocks Number of L1 blocks.
+ * \param num_iters Number of iterations necessary to perform the exclusive
+ * prefix sum over all L2 blocks inside an L1 block where each warp performs its
+ * own sum.
+ * \param bit_array_size Size of the bit array in bits.
  */
-__global__ LB(MAX_TPB, MIN_BPM) static void calculateL2EntriesKernel(
-    RankSelect rank_select, uint32_t const array_index,
-    uint16_t const num_last_l2_blocks, size_t const num_l1_blocks,
-    uint32_t const num_threads, uint32_t const num_iters,
-    size_t const bit_array_size) {
-  assert(blockDim.x % WS == 0);
-  static_assert(RSConfig::NUM_L2_PER_L1 % WS == 0);
-  __shared__ RSConfig::L2_TYPE l2_entries[RSConfig::NUM_L2_PER_L1];
+__global__ void calculateL2EntriesKernel(RankSelect rank_select,
+                                         uint32_t const array_index,
+                                         uint16_t const num_last_l2_blocks,
+                                         size_t const num_l1_blocks,
+                                         uint32_t const num_iters,
+                                         size_t const bit_array_size);
 
-  auto t_id = threadIdx.x;
-  if (blockIdx.x < gridDim.x - 1) {
-    size_t const offset = rank_select.bit_array_.getOffset(array_index);
-    // find L1 block index
-    auto const l1_index = blockIdx.x;
+/*!
+ * \brief Calculate the select samples for the select support.
+ * \param rank_select RankSelect object to calculate the select samples for.
+ * \param array_index Index of the bit array to be used.
+ * \param num_threads Total number of threads the kernel is launched with.
+ * \param num_ones_samples Number of ones samples.
+ * \param num_zeros_samples Number of zeros samples.
+ */
+__global__ void calculateSelectSamplesKernel(RankSelect rank_select,
+                                             uint32_t const array_index,
+                                             size_t const num_threads,
+                                             size_t const num_ones_samples,
+                                             size_t const num_zeros_samples);
 
-    for (uint32_t i = t_id; i < RSConfig::NUM_L2_PER_L1; i += num_threads) {
-      RSConfig::L2_TYPE num_ones = 0;
-      size_t const start_word =
-          l1_index * RSConfig::L1_WORD_SIZE + i * RSConfig::L2_WORD_SIZE;
-
-      size_t const end_word = start_word + RSConfig::L2_WORD_SIZE;
-      for (size_t j = start_word; j < end_word; j += 2) {
-        // Global memory load
-        // load as 64 bits.
-        uint64_t const word =
-            rank_select.bit_array_.twoWords(array_index, j, offset);
-        num_ones += __popcll(word);
-      }
-      l2_entries[i] = num_ones;
-    }
-
-    __syncthreads();
-    auto warp_id = threadIdx.x / WS;
-    RSConfig::L2_TYPE l2_entry_sum, l2_entry;
-    for (auto i = 0; i < num_iters; i++) {
-      if (warp_id < RSConfig::NUM_L2_PER_L1 / WS) {
-        l2_entry = l2_entries[t_id];
-        rank_select.warpSum<RSConfig::L2_TYPE, WS, false>(l2_entry,
-                                                          l2_entry_sum, ~0);
-        __syncwarp();
-      }
-      __syncthreads();
-      if (warp_id < RSConfig::NUM_L2_PER_L1 / WS) {
-        // Last thread in warp writes aggregated value to shmem
-        if (t_id % WS == WS - 1) {
-          l2_entries[warp_id] = l2_entry_sum + l2_entry;
-        }
-      }
-      __syncthreads();
-      if (warp_id < RSConfig::NUM_L2_PER_L1 / WS) {
-        // Get aggregates from previous warps and sum them to own result
-        for (auto j = 0; j < warp_id; j++) {
-          l2_entry_sum += l2_entries[j];
-        }
-        // Write result to global memory
-        rank_select.writeL2Index(array_index,
-                                 l1_index * RSConfig::NUM_L2_PER_L1 + t_id,
-                                 l2_entry_sum);
-        if (t_id == RSConfig::NUM_L2_PER_L1 - 1) {
-          rank_select.writeL1Index(array_index, l1_index + 1,
-                                   l2_entry_sum + l2_entry);
-        }
-      }
-      warp_id += blockDim.x / WS;
-      t_id += blockDim.x;
-    }
-  }
-
-  else {
-    if (threadIdx.x == 0) {
-      rank_select.writeNumLastL2Blocks(array_index, num_last_l2_blocks);
-    }
-
-    auto const l1_start_word =
-        (rank_select.getNumL1Blocks(array_index) - 1) * RSConfig::L1_WORD_SIZE;
-
-    for (uint32_t i = t_id; i < num_last_l2_blocks; i += num_threads) {
-      RSConfig::L2_TYPE num_ones = 0;
-      size_t const start_word = l1_start_word + i * RSConfig::L2_WORD_SIZE;
-
-      size_t const end_word =
-          min(rank_select.bit_array_.sizeInWords(array_index),
-              start_word + RSConfig::L2_WORD_SIZE);
-      for (size_t j = start_word; j < end_word; j++) {
-        uint32_t word = rank_select.bit_array_.word(array_index, j);
-
-        if (j == (bit_array_size + sizeof(uint32_t) * 8 - 1) /
-                         (sizeof(uint32_t) * 8) -
-                     1) {
-          uint8_t const bit_index = bit_array_size % (sizeof(uint32_t) * 8);
-          if (bit_index != 0) {
-            word = rank_select.bit_array_.partialWord(word, bit_index);
-          }
-        }
-        num_ones += __popc(word);
-      }
-      l2_entries[i] = num_ones;
-    }
-
-    __syncthreads();
-    auto warp_id = threadIdx.x / WS;
-    RSConfig::L2_TYPE l2_entry_sum, l2_entry;
-    uint32_t const needed_iters =
-        (num_last_l2_blocks + blockDim.x - 1) / blockDim.x;
-    uint8_t needed_warps = (num_last_l2_blocks + WS - 1) / WS;
-    for (auto i = 0; i < needed_iters; i++) {
-      if (warp_id < needed_warps) {
-        l2_entry = l2_entries[t_id];
-        rank_select.warpSum<RSConfig::L2_TYPE, WS, false>(l2_entry,
-                                                          l2_entry_sum, ~0);
-        __syncwarp();
-      }
-      __syncthreads();
-      if (warp_id < needed_warps) {
-        // Last thread in warp writes aggregated value to shmem
-        if (t_id < num_last_l2_blocks and
-            (t_id % WS == WS - 1 or t_id == num_last_l2_blocks - 1)) {
-          l2_entries[warp_id] = l2_entry_sum + l2_entry;
-        }
-      }
-      __syncthreads();
-      if (warp_id < needed_warps) {
-        // Get aggregates from previous warps and sum them to own result
-        for (auto j = 0; j < warp_id; j++) {
-          l2_entry_sum += l2_entries[j];
-        }
-        // Write result to global memory
-        if (t_id < num_last_l2_blocks) {
-          rank_select.writeL2Index(
-              array_index, (num_l1_blocks - 1) * RSConfig::NUM_L2_PER_L1 + t_id,
-              l2_entry_sum);
-        }
-        if (t_id == num_last_l2_blocks - 1) {
-          rank_select.writeTotalNumOnes(array_index, l2_entry_sum + l2_entry);
-        }
-      }
-      warp_id += blockDim.x / WS;
-      t_id += blockDim.x;
-    }
-  }
-  return;
-}
-
-__global__ LB(MAX_TPB, MIN_BPM) static void calculateSelectSamplesKernel(
-    RankSelect rank_select, uint32_t const array_index,
-    size_t const num_threads, size_t const num_ones_samples,
-    size_t const num_zeros_samples) {
-  assert(blockDim.x % WS == 0);
-
-  size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
-  size_t const offset = rank_select.bit_array_.getOffset(array_index);
-  // 0-th sample not taken
-  for (size_t i = global_t_id; i < num_ones_samples; i += num_threads) {
-    size_t const pos = rank_select.select<1, 1, false>(
-        array_index, (i + 1) * RSConfig::SELECT_SAMPLE_RATE, offset);
-
-    assert(pos < rank_select.bit_array_.size(array_index));
-    rank_select.writeSelectSample<1>(array_index, i, pos);
-  }
-
-  for (size_t i = global_t_id; i < num_zeros_samples; i += num_threads) {
-    size_t const pos = rank_select.select<0, 1, false>(
-        array_index, (i + 1) * RSConfig::SELECT_SAMPLE_RATE, offset);
-
-    assert(pos < rank_select.bit_array_.size(array_index));
-    rank_select.writeSelectSample<0>(array_index, i, pos);
-  }
-}
-
-__global__ LB(MAX_TPB,
-              MIN_BPM) static void addNumOnesKernel(RankSelect rank_select,
-                                                    uint32_t const num_arrays) {
-  size_t const global_t_id = blockIdx.x * blockDim.x + threadIdx.x;
-  if (global_t_id < num_arrays) {
-    auto const total_num_ones =
-        rank_select.getTotalNumVals<1>(global_t_id) +
-        rank_select.getL1Entry(global_t_id,
-                               rank_select.getNumL1Blocks(global_t_id) - 1);
-    rank_select.writeTotalNumOnes(global_t_id, total_num_ones);
-  }
-}
+/*!
+ * \brief Helper kernel to write the total number of ones in the bit arrays
+ * after the L1 indices have been calculated.
+ * \param rank_select RankSelect object to calculate the total numbers of ones
+ * for.
+ * \param num_arrays Number of bit arrays.
+ */
+__global__ void addNumOnesKernel(RankSelect rank_select,
+                                 uint32_t const num_arrays);
+}  // namespace detail
 }  // namespace ecl

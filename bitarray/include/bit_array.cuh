@@ -53,7 +53,7 @@ class BitArray {
   BitArray& operator=(BitArray const&) = delete;
 
   /*!
-   * \brief Constructor. Creates a number of bit array that hold a specific,
+   * \brief Constructor. Creates a group of bit arrays that hold a specific,
    * fixed number of bits.
    * \param sizes Number of bits each bit array contains. IMPORTANT: A BitArray
    * object cannot hold more than 256 bit arrays.
@@ -61,9 +61,10 @@ class BitArray {
   __host__ BitArray(std::vector<size_t> const& sizes);
 
   /*!
-   * \brief Constructor. Creates a number of bit array that hold a specific,
+   * \brief Constructor. Creates a group of bit arrays that hold a specific,
    * fixed number of bits, set to the value given as parameter.
-   * \param sizes Number of bits each bit array contains.
+   * \param sizes Number of bits each bit array contains. IMPORTANT: A BitArray
+   * object cannot hold more than 256 bit arrays.
    * \param init_value Value to which the bits are set.
    */
   __host__ BitArray(std::vector<size_t> const& sizes, bool const init_value);
@@ -87,9 +88,9 @@ class BitArray {
   __host__ ~BitArray();
 
   /*!
-   * \brief Access operator to read to a bit of the bit array.
+   * \brief Access operator to read to a bit from a bit array.
    * \param array_index Index of the bit array to be read from.
-   * \param index Index of the bit to be read to in the bit array.
+   * \param index Index of the bit to be read in the bit array.
    * \return boolean representing the bit.
    */
   __device__ [[nodiscard]] __forceinline__ bool access(
@@ -102,6 +103,14 @@ class BitArray {
     return (d_data_[d_offsets_[array_index] + (index >> 5)] >> offset) & 1U;
   }
 
+  /*!
+   * \brief Access operator to read to a bit from a bit array.
+   * \param array_index Index of the bit array to be read from.
+   * \param index Index of the bit to be read in the bit array.
+   * \param offset Index of the underlying data buffer where the bit array at
+   * the given array index starts.
+   * \return boolean representing the bit.
+   */
   __device__ [[nodiscard]] __forceinline__ bool access(
       size_t const array_index, size_t const index,
       size_t const offset) const noexcept {
@@ -114,7 +123,7 @@ class BitArray {
   }
 
   /*!
-   * \brief Access operator to write to a whole word of the bit array.
+   * \brief Access operator to write to a whole word of a bit array.
    * \param array_index Index of the bit array to be written to.
    * \param index Index of the word to be written to.
    * \param value Word to be written. Least significant bit corresponds to the
@@ -129,7 +138,7 @@ class BitArray {
   }
 
   /*!
-   * \brief Access operator to write to a whole word of the bit array.
+   * \brief Access operator to write to a whole word of a bit array.
    * \param array_index Index of the bit array to be written to.
    * \param index Index of a bit that is inside the word to be written to.
    * \param value Word to be written. Least significant bit corresponds to the
@@ -144,12 +153,13 @@ class BitArray {
   }
 
   /*!
-   * \brief Access operator to write to a whole word of the bit array.
+   * \brief Access operator to write to a whole word of a bit array.
    * \param array_index Index of the bit array to be written to.
    * \param index Index of a bit that is inside the word to be written to.
    * \param value Word to be written. Least significant bit corresponds to the
    * first bit of the word.
-   * \param offset Offset to the bit array to be written to.
+   * \param offset Index of the underlying data buffer where the bit array at
+   * the given array index starts.
    */
   __device__ __forceinline__ void writeWordAtBit(size_t const array_index,
                                                  size_t const index,
@@ -167,7 +177,7 @@ class BitArray {
   }
 
   /*!
-   * \brief Direct access to one word of the raw data of the bit
+   * \brief Direct access to one word of the raw data of a bit
    * array.
    * \param array_index Index of the bit array to be read from.
    * \param index Index of the word that should be returned.
@@ -181,6 +191,16 @@ class BitArray {
     return d_data_[d_offsets_[array_index] + index];
   }
 
+  /*!
+   * \brief Direct access to one word of the raw data of a bit
+   * array.
+   * \param array_index Index of the bit array to be read from.
+   * \param index Index of the word that should be returned.
+   * \param offset Index of the underlying data buffer where the bit array at
+   * the given array index starts.
+   * \return index-th word of the raw bit array data. Least significant bit
+   * corresponds to the first bit of the word.
+   */
   __device__ [[nodiscard]] __forceinline__ uint32_t
   word(size_t const array_index, size_t const index,
        size_t const offset) const noexcept {
@@ -206,6 +226,16 @@ class BitArray {
         d_data_)[(d_offsets_[array_index] + index) / 2];
   }
 
+  /*!
+   * \brief Direct access to two words of the raw data of the bit
+   * array.
+   * \param array_index Index of the bit array to be read from.
+   * \param index Index of the first word that should be returned. Must be even.
+   * \param offset Index of the underlying data buffer where the bit array at
+   * the given array index starts.
+   * \return index-th and index-th + 1 words of the raw bit array data. Least
+   * significant bit corresponds to the first bit of each word.
+   */
   __device__ [[nodiscard]] __forceinline__ uint64_t
   twoWords(size_t const array_index, size_t const index,
            size_t const offset) const noexcept {
@@ -231,13 +261,12 @@ class BitArray {
   }
 
   /*!
-   * \brief Direct access to one word of the raw data of the bit
-   * array.
+   * \brief Get partial word of the raw data of the bit array.
    * \param word Word to be modified.
    * \param bit_index Index up to which the bits should be returned. Exclusive.
-   * \return index-th word of the raw bit array data, with the bits [0,
-   * bit_index) left unchanged, and all others set to 0. Least significant bit
-   * corresponds to the first bit of the word.
+   * \return Modified word, with the bits [0,
+   * bit_index) left unchanged, and all others set to 0. 0 corresponds to the
+   * least significant bit.
    */
   __device__ [[nodiscard]] __forceinline__ uint32_t
   partialWord(uint32_t word, uint8_t const bit_index) const noexcept {
@@ -245,13 +274,21 @@ class BitArray {
     return word & ((1UL << bit_index) - 1);
   }
 
+  /*!
+   * \brief Get partial 64-bit word of the raw data of the bit array.
+   * \param word 64-bit word to be modified.
+   * \param bit_index Index up to which the bits should be returned. Exclusive.
+   * \return Modified word, with the bits [0,
+   * bit_index) left unchanged, and all others set to 0. 0 corresponds to the
+   * least significant bit.
+   */
   __device__ [[nodiscard]] __forceinline__ uint64_t
   partialTwoWords(uint64_t word, uint8_t const bit_index) const noexcept {
     assert(bit_index <= sizeof(uint64_t) * 8);
     return word & ((1ULL << bit_index) - 1);
   }
   /*!
-   * \brief Get the size of the bit array in
+   * \brief Get the size of a bit array in
    * bits.
    * \param array_index Index of the bit array to get the size of.
    * \return Size of the bit array in bits.
@@ -267,7 +304,7 @@ class BitArray {
   }
 
   /*!
-   * \brief Get the size of the bit array in
+   * \brief Get the size of a bit array in
    * words.
    * \param array_index Index of the bit array to get the size of.
    * \return Size of the bit array in words.
@@ -288,20 +325,26 @@ class BitArray {
     return num_arrays_;
   }
 
+  /*!
+   * \brief Get an upper bound to the total size the object needs in GPU memory.
+   * \return Upper bound to the total size the object needs in GPU memory.
+   */
   __host__ [[nodiscard]] static size_t getNeededGPUMemory(
       size_t const size, uint8_t const num_arrays) noexcept;
 
  private:
   uint8_t num_arrays_; /*!< Number of bit arrays stored in the global array.*/
   size_t total_size_;  /*!< Total size of the global array in words.*/
-  size_t* d_bit_sizes_ = nullptr; /*!< Size of each array in bits.*/
+  size_t* d_bit_sizes_ = nullptr; /*!< Size of each array in bits. Only
+                           acessible from device.*/
   std::vector<size_t>
       bit_sizes_; /*!< Size of each array in bits. Only acessible from host.*/
 
   uint32_t* d_data_ = nullptr;  /*!< Array of 32-bit words used to store the
-                           content of  the bit array.*/
+                           content of  the bit array. Only acessible from
+                            device.*/
   size_t* d_offsets_ = nullptr; /*!< Array of offsets (in words) to the start of
-                           each bit array.*/
+                           each bit array. Only acessible from device.*/
   bool is_copy_; /*!< Flag to signal whether current object is a copy.*/
 
 };  // class BitArray

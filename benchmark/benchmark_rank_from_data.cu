@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
     for (auto const data_size : data_sizes) {
       auto data = ecl::readDataFromFile<uint8_t>(data_file, data_size);
 
-      convertDataToMinAlphabet(data.data(), data_size);
+      ecl::convertDataToMinAlphabet(data.data(), data_size);
 
       ecl::BM_Rank<uint8_t>(data.data(), data_size, num_queries, GPU_index,
                             num_iters, output);

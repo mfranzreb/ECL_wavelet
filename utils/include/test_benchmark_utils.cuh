@@ -34,6 +34,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <algorithm>
 #include <bit_array.cuh>
+#include <execution>
 #include <utils.cuh>
 #include <vector>
 

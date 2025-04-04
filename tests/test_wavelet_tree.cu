@@ -283,8 +283,9 @@ TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogram) {
   // Create the wavelet tree
   WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet_copy),
                             kGPUIndex);
-  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
-      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size, 0);
+  detail::computeGlobalHistogramKernel<TypeParam, true, false, false>
+      <<<1, 32>>>(wt, d_data, data.size(), d_histogram, d_alphabet,
+                  alphabet_size, 0);
   kernelCheck();
 
   // Pass the histogram to the host
@@ -302,8 +303,9 @@ TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogram) {
                        cudaMemcpyHostToDevice));
 
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
-  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
-      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size, 0);
+  detail::computeGlobalHistogramKernel<TypeParam, true, false, false>
+      <<<1, 32>>>(wt, d_data, data.size(), d_histogram, d_alphabet,
+                  alphabet_size, 0);
   kernelCheck();
 
   gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
@@ -326,8 +328,9 @@ TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogram) {
                        cudaMemcpyHostToDevice));
 
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
-  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
-      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size, 0);
+  detail::computeGlobalHistogramKernel<TypeParam, true, false, false>
+      <<<1, 32>>>(wt, d_data, data.size(), d_histogram, d_alphabet,
+                  alphabet_size, 0);
   kernelCheck();
 
   gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,
@@ -354,8 +357,9 @@ TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogram) {
                        cudaMemcpyHostToDevice));
 
   gpuErrchk(cudaMemset(d_histogram, 0, sizeof(size_t) * alphabet_size));
-  computeGlobalHistogramKernel<TypeParam, true, false, false><<<1, 32>>>(
-      wt, d_data, data.size(), d_histogram, d_alphabet, alphabet_size, 0);
+  detail::computeGlobalHistogramKernel<TypeParam, true, false, false>
+      <<<1, 32>>>(wt, d_data, data.size(), d_histogram, d_alphabet,
+                  alphabet_size, 0);
   kernelCheck();
 
   gpuErrchk(cudaMemcpy(h_histogram.data(), d_histogram,

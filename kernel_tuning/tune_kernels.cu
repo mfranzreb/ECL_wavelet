@@ -68,7 +68,7 @@ void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
 
   // create graphs for each number of chunks
   for (auto chunk : num_chunks_vec) {
-    queries_graph_cache[chunk] = createQueriesGraph(chunk, 2);
+    detail::queries_graph_cache[chunk] = detail::createQueriesGraph(chunk, 2);
   }
 
   std::chrono::high_resolution_clock::time_point start_time, end_time;
@@ -236,8 +236,8 @@ void tuneFillLevelKernel(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
   auto const& prop = getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(
-      cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<uint16_t, true>));
+  gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
+                                  detail::fillLevelKernel<uint16_t, true>));
   uint32_t max_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   size_t const data_size = prop.totalGlobalMem / 10;
@@ -310,7 +310,8 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
   auto const& prop = getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
-  gpuErrchk(cudaFuncGetAttributes(&funcAttrib, detail::calculateSelectSamplesKernel));
+  gpuErrchk(
+      cudaFuncGetAttributes(&funcAttrib, detail::calculateSelectSamplesKernel));
   uint32_t max_size =
       std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   size_t const data_size = prop.totalGlobalMem / 10;

@@ -55,11 +55,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace ecl {
 typedef unsigned long long int cu_size_t;
 
+/* Thrust host vector that allocates pinned memory */
 template <typename T>
 using PinnedVector = thrust::host_vector<
     T, thrust::mr::stateless_resource_allocator<
            T, thrust::system::cuda::universal_host_pinned_memory_resource>>;
 
+template <typename T>
+class WaveletTree;
+
+namespace detail {
 struct GraphContents {
   cudaGraphExec_t graph_exec;
   std::vector<cudaGraphNode_t> copy_indices_nodes;
@@ -75,51 +80,17 @@ struct NodeInfo {
 std::unordered_map<uint16_t, GraphContents> queries_graph_cache;
 
 /*!
- * \brief Struct for creating a rank or select query.
+ * \brief Empty kernel for creating a graph node.
  */
-template <typename T>
-struct RankSelectQuery;
-
-template <typename T>
-__global__ LB(MAX_TPB,
-              MIN_BPM) void compactArrayKernel(size_t* select_results,
-                                               uint16_t const num_chunks,
-                                               T* data,
-                                               size_t const chunk_size) {
-  assert(num_chunks > 1);
-  assert(chunk_size > 0);
-  size_t offset = select_results[0];
-  for (uint16_t i = 1; i < num_chunks; ++i) {
-    if (offset == i * chunk_size) {
-      offset += select_results[i];
-      continue;
-    }
-    size_t const reduce_slice_size = select_results[i];
-    size_t const src_offset = i * chunk_size;
-    assert(src_offset > offset);
-    size_t const max_copy_size = src_offset - offset;
-    size_t const iters =
-        (reduce_slice_size + max_copy_size - 1) / max_copy_size;
-    size_t const last_copy_size = reduce_slice_size % max_copy_size == 0
-                                      ? max_copy_size
-                                      : reduce_slice_size % max_copy_size;
-    assert(max_copy_size * (iters - 1) + last_copy_size == reduce_slice_size);
-    for (size_t j = 0; j < iters; ++j) {
-      T* dst = data + offset + j * max_copy_size;
-      T* src = data + src_offset + j * max_copy_size;
-      assert(dst + max_copy_size <= src);
-      gpuErrchk(cudaMemcpyAsync(dst, src,
-                                j == iters - 1 ? last_copy_size * sizeof(T)
-                                               : max_copy_size * sizeof(T),
-                                cudaMemcpyDeviceToDevice));
-    }
-    offset += reduce_slice_size;
-  }
-  select_results[num_chunks] = offset;
-}
-
 __global__ LB(MAX_TPB, MIN_BPM) void emptyKernel() {}
 
+/*!
+ * \brief Creates a graph for the processing of queries from the host.
+ * \param num_chunks Number of chunks the queries will be divided into.
+ * \param num_buffers Number of buffers that will be used to store the chunks on
+ * the device.
+ * \return GraphContents object.
+ */
 __host__ [[nodiscard]] GraphContents createQueriesGraph(
     uint16_t const num_chunks, uint16_t const num_buffers) {
   assert(num_chunks > 0);
@@ -179,18 +150,22 @@ __host__ [[nodiscard]] GraphContents createQueriesGraph(
                        copy_results_nodes};
 }
 
-template <typename T>
-class WaveletTree;
-
 /*!
  * \brief Kernel to compute the global histogram of the input data.
- * \details Also replaces the data with the codes instead of original symbols.
+ * \details Also replaces the data with the codes or minimal alphabet instead of
+ * original symbols.
+ * \tparam T Type of the input data.
+ * \tparam isMinAlphabet Whether the alphabet of the input data is minimal.
+ * \tparam isPowTwo Whether the alphabet size is a power of two.
+ * \tparam UseShmem Whether to use shared memory for histogram computation.
  * \param tree Wavelet tree.
- * \param data Input data.
+ * \param data Pointer to input data.
  * \param data_size Number of elements in the input data.
- * \param counts Array to store the counts.
+ * \param counts Array to store the counts of the histogram.
  * \param alphabet Alphabet of the input data.
  * \param alphabet_size Size of the alphabet.
+ * \param hists_per_block Number of histograms that fit in the shared memory of
+ * each block.
  */
 template <typename T, bool isMinAlphabet, bool isPowTwo, bool UseShmem>
 __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
@@ -253,11 +228,15 @@ __global__ LB(MAX_TPB, MIN_BPM) void computeGlobalHistogramKernel(
 
 /*!
  * \brief Kernel to fill a level of the wavelet tree.
+ * \tparam T Type of the input data.
+ * \tparam UseShmemPerThread Whether to use shared memory per thread.
  * \param bit_array Bit array the level will be stored in.
  * \param data Data to be filled in the level.
  * \param data_size Size of the data.
  * \param alphabet_start_bit Bit where the alphabet starts. 0 is the LSB.
  * \param level Level to be filled.
+ * \param num_threads Total number of threads the kernel is launched with.
+ * \param warps_per_block Number of warps per block.
  */
 template <typename T, bool UseShmemPerThread>
 __global__ LB(MAX_TPB, MIN_BPM) void fillLevelKernel(
@@ -341,6 +320,13 @@ __global__ LB(MAX_TPB, MIN_BPM) void fillLevelKernel(
   }
 }
 
+/*!
+ * \brief Kernel to precompute the ranks of the wavelet tree.
+ * \tparam T Type of the input data.
+ * \param tree Wavelet tree.
+ * \param node_starts Array of node information.
+ * \param total_num_nodes Total number of nodes in the tree.
+ */
 template <typename T>
 __global__ LB(MAX_TPB, MIN_BPM) void precomputeRanksKernel(
     WaveletTree<T> tree, NodeInfo<T>* const node_starts,
@@ -363,12 +349,30 @@ __global__ LB(MAX_TPB, MIN_BPM) void precomputeRanksKernel(
   }
 }
 
+}  // namespace detail
+
+/*!
+ * \brief Struct for creating a rank or select query.
+ */
+template <typename T>
+struct RankSelectQuery;
+
 /*!
  * \brief Kernel for computing access queries on the wavelet tree.
+ * \tparam T Type of the wavelet tree.
+ * \tparam ShmemCounts Whether to use shared memory for counts.
+ * \tparam ThreadsPerQuery Number of threads per query.
+ * \tparam ShmemOffsets Whether to use shared memory for offsets.
+ * \tparam ShmemRanks Whether to use shared memory for precomputed ranks.
  * \param tree Wavelet tree.
  * \param indices Indices of the symbols to be accessed.
  * \param num_indices Number of indices.
  * \param results Array to store the accessed symbols.
+ * \param alphabet_size Size of the alphabet.
+ * \param num_groups Total number of groups of threads. Equates to total number
+ * of threads divided by ThreadsPerQuery.
+ * \param num_levels Number of levels in the wavelet tree.
+ * \param num_ranks Number of precomputed ranks in the wavelet tree.
  */
 template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets,
           bool ShmemRanks>
@@ -423,10 +427,22 @@ __global__ LB(MAX_TPB, MIN_BPM) void accessKernel(
 
 /*!
  * \brief Kernel for computing rank queries on the wavelet tree.
+ * \tparam T Type of the wavelet tree.
+ * \tparam ShmemCounts Whether to use shared memory for counts.
+ * \tparam ThreadsPerQuery Number of threads per query.
+ * \tparam ShmemOffsets Whether to use shared memory for offsets.
+ * \tparam ShmemRanks Whether to use shared memory for precomputed ranks.
  * \param tree Wavelet tree.
  * \param queries Array of rank queries.
  * \param num_queries Number of queries.
- * \param ranks Array to store the ranks.
+ * \param results Array to store the ranks.
+ * \param num_groups Total number of groups of threads. Equates to total number
+ * of threads divided by ThreadsPerQuery.
+ * \param alphabet_size Size of the alphabet.
+ * \param num_levels Number of levels in the wavelet tree.
+ * \param num_ranks Number of precomputed ranks in the wavelet tree.
+ * \param is_pow_two Whether the alphabet size is a power of two.
+ *
  */
 template <typename T, bool ShmemCounts, int ThreadsPerQuery, bool ShmemOffsets,
           bool ShmemRanks>
@@ -483,10 +499,17 @@ __global__ LB(MAX_TPB, MIN_BPM) void rankKernel(
 
 /*!
  * \brief Kernel for computing select queries on the wavelet tree.
+ * \tparam T Type of the wavelet tree.
+ * \tparam ThreadsPerQuery Number of threads per query.
+ * \tparam ShmemRanks Whether to use shared memory for precomputed ranks.
  * \param tree Wavelet tree.
  * \param queries Array of select queries.
  * \param num_queries Number of queries.
- * \param ranks Array to store the selected indices.
+ * \param results Array to store the select results.
+ * \param num_groups Total number of groups of threads. Equates to total number
+ * of threads divided by ThreadsPerQuery.
+ * \param is_pow_two Whether the alphabet size is a power of two.
+ * \param num_ranks Number of precomputed ranks in the wavelet tree.
  */
 template <typename T, int ThreadsPerQuery, bool ShmemRanks>
 __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
@@ -526,7 +549,8 @@ __global__ LB(MAX_TPB, MIN_BPM) void selectKernel(
 
 /*!
  * \brief Wavelet tree class.
- * \tparam T Type of the text data the tree will be built upon.
+ * \tparam T Type of the text data the tree will be built upon. Must be an
+ * unsigned integral type.
  */
 template <typename T>
 class WaveletTree {
@@ -545,7 +569,8 @@ class WaveletTree {
    * \brief Constructor. Builds the wavelet tree from the input data.
    * \param data Input data to build the wavelet tree.
    * \param data_size Number of elements in the input data.
-   * \param alphabet Alphabet of the input data. Must be sorted.
+   * \param alphabet Alphabet of the input data. If not sure of it, pass an
+   * empty vector. Must be sorted.
    * \param GPU_index Index of the GPU to use.
    */
   __host__ WaveletTree(T const* data, size_t data_size,
@@ -595,7 +620,7 @@ class WaveletTree {
                     [i = 0u](unsigned value) mutable { return value == i++; });
 
     std::vector<Code> codes;
-    std::vector<NodeInfo<T>> node_starts;
+    std::vector<detail::NodeInfo<T>> node_starts;
     // make minimal alphabet
     if (not is_min_alphabet_) {
       auto min_alphabet = std::vector<T>(alphabet_size_);
@@ -801,14 +826,15 @@ class WaveletTree {
     rank_select_ = RankSelect(std::move(bit_array), GPU_index_);
 
     if (num_ranks_ > 0) {
-      NodeInfo<T>* d_node_starts = nullptr;
-      gpuErrchk(cudaMallocAsync(
-          &d_node_starts, num_ranks_ * sizeof(NodeInfo<T>), cudaStreamDefault));
+      detail::NodeInfo<T>* d_node_starts = nullptr;
+      gpuErrchk(cudaMallocAsync(&d_node_starts,
+                                num_ranks_ * sizeof(detail::NodeInfo<T>),
+                                cudaStreamDefault));
       gpuErrchk(cudaMemcpyAsync(d_node_starts, node_starts.data(),
-                                num_ranks_ * sizeof(NodeInfo<T>),
+                                num_ranks_ * sizeof(detail::NodeInfo<T>),
                                 cudaMemcpyHostToDevice, cudaStreamDefault));
       cudaFuncAttributes attr;
-      cudaFuncGetAttributes(&attr, precomputeRanksKernel<T>);
+      cudaFuncGetAttributes(&attr, detail::precomputeRanksKernel<T>);
 
       auto const& prop = getDeviceProperties();
       auto const num_warps =
@@ -818,8 +844,9 @@ class WaveletTree {
       auto const [blocks, threads] = getLaunchConfig(
           num_warps, kMinTPB,
           std::min(kMaxTPB, static_cast<uint32_t>(attr.maxThreadsPerBlock)));
-      precomputeRanksKernel<T><<<blocks, threads, 0, cudaStreamDefault>>>(
-          *this, d_node_starts, num_ranks_);
+      detail::precomputeRanksKernel<T>
+          <<<blocks, threads, 0, cudaStreamDefault>>>(*this, d_node_starts,
+                                                      num_ranks_);
       gpuErrchk(cudaFreeAsync(d_node_starts, cudaStreamDefault));
     }
 
@@ -881,11 +908,13 @@ class WaveletTree {
   }
 
   /*!
-   * \brief Access the symbols at the given indices in the wavelet tree. The
-   * indices array must be allocated with pinned memory.
+   * \brief Access the symbols at the given indices in the wavelet tree.
+   * \details For best performance, allocate the indices array in pinned
+   * memory.
    * \param indices Pointer to the indices of the symbols to be accessed.
    * \param num_indices Number of indices.
-   * \return Vector of symbols.
+   * \return Access to the memory pool containing the accessed symbols.
+   * Processing new access queries may overwrite old ones.
    */
   // TODO: make const?
   __host__ [[nodiscard]] std::span<T> access(size_t* indices,
@@ -1080,12 +1109,13 @@ class WaveletTree {
 
     uint32_t const num_groups = (num_blocks * threads_per_block) / NumThreads;
 
-    GraphContents graph_contents;
-    if (queries_graph_cache.find(num_chunks) == queries_graph_cache.end()) {
-      graph_contents = createQueriesGraph(num_chunks, num_buffers);
-      queries_graph_cache[num_chunks] = graph_contents;
+    detail::GraphContents graph_contents;
+    if (detail::queries_graph_cache.find(num_chunks) ==
+        detail::queries_graph_cache.end()) {
+      graph_contents = detail::createQueriesGraph(num_chunks, num_buffers);
+      detail::queries_graph_cache[num_chunks] = graph_contents;
     } else {
-      graph_contents = queries_graph_cache[num_chunks];
+      graph_contents = detail::queries_graph_cache[num_chunks];
     }
 
     // Change parameters of graph
@@ -1194,8 +1224,11 @@ class WaveletTree {
   /*!
    * \brief Rank queries on the wavelet tree. Number of occurrences of a symbol
    * up to a given index (exclusive).
-   * \param queries Vector of rank queries.
-   * \return Vector of ranks.
+   * \param queries Array of rank queries. For best performance, allocate the
+   * queries array in pinned memory.
+   * \param num_queries Number of queries.
+   * \return Access to the memory pool containing the rank results.
+   * Processing new rank queries may overwrite old ones.
    */
   __host__ [[nodiscard]] std::span<size_t> rank(RankSelectQuery<T>* queries,
                                                 size_t const num_queries) {
@@ -1414,12 +1447,13 @@ class WaveletTree {
       }
     }
 
-    GraphContents graph_contents;
-    if (queries_graph_cache.find(num_chunks) == queries_graph_cache.end()) {
-      graph_contents = createQueriesGraph(num_chunks, num_buffers);
-      queries_graph_cache[num_chunks] = graph_contents;
+    detail::GraphContents graph_contents;
+    if (detail::queries_graph_cache.find(num_chunks) ==
+        detail::queries_graph_cache.end()) {
+      graph_contents = detail::createQueriesGraph(num_chunks, num_buffers);
+      detail::queries_graph_cache[num_chunks] = graph_contents;
     } else {
-      graph_contents = queries_graph_cache[num_chunks];
+      graph_contents = detail::queries_graph_cache[num_chunks];
     }
 
     bool is_pow_two = isPowTwo(alphabet_size_);
@@ -1531,8 +1565,11 @@ class WaveletTree {
   /*!
    * \brief Select queries on the wavelet tree. Find the index of the k-th
    * occurrence of a symbol. Starts counting from 1.
-   * \param queries Vector of select queries.
-   * \return Vector of selected indices.
+   * \param queries Array of select queries. For best performance, allocate the
+   * queries array in pinned memory.
+   * \param num_queries Number of queries.
+   * \return Access to the memory pool containing the select results.
+   * Processing new select queries may overwrite old ones.
    */
   // TODO: when documenting, emphasize the power of sorting queries
   __host__ [[nodiscard]] std::span<size_t> select(RankSelectQuery<T>* queries,
@@ -1703,12 +1740,13 @@ class WaveletTree {
       }
     }
 
-    GraphContents graph_contents;
-    if (queries_graph_cache.find(num_chunks) == queries_graph_cache.end()) {
-      graph_contents = createQueriesGraph(num_chunks, num_buffers);
-      queries_graph_cache[num_chunks] = graph_contents;
+    detail::GraphContents graph_contents;
+    if (detail::queries_graph_cache.find(num_chunks) ==
+        detail::queries_graph_cache.end()) {
+      graph_contents = detail::createQueriesGraph(num_chunks, num_buffers);
+      detail::queries_graph_cache[num_chunks] = graph_contents;
     } else {
-      graph_contents = queries_graph_cache[num_chunks];
+      graph_contents = detail::queries_graph_cache[num_chunks];
     }
     bool is_pow_two = isPowTwo(alphabet_size_);
     // Change parameters of graph
@@ -1791,11 +1829,31 @@ class WaveletTree {
     return std::span<size_t>(results, num_queries);
   }
 
+  /*!
+   * \brief Access the symbol at a given index in the wavelet tree.
+   * \tparam ThreadsPerQuery Number of threads per query. Must be a divisor
+   * of 32. The best performance is obtained with 1 thread per query, given
+   * enough parallelism. More than 8 should be avoided since the main work is a
+   * loop that has at most 8 iterations.
+   * \param index Index of the symbol to access.
+   * \param is_pow_two Whether the alphabet size is a power of two.
+   * \param counts Pointer to the shared memory counts array. If nullptr, the
+   * default counts array is used.
+   * \param offsets Pointer to the shared memory offsets array. If nullptr, the
+   * default offsets array is used.
+   * \param ranks Pointer to the shared memory precomputed ranks array. If
+   * nullptr, the default ranks array is used.
+   * \return The symbol at the given index.
+   */
   template <int ThreadsPerQuery>
   __device__ [[nodiscard]] T deviceAccess(size_t index, bool const is_pow_two,
                                           size_t* counts = nullptr,
                                           size_t* offsets = nullptr,
                                           size_t* ranks = nullptr) {
+    static_assert(
+        ThreadsPerQuery > 0 and ThreadsPerQuery <= 32 and
+            (32 % ThreadsPerQuery) == 0,
+        "ThreadsPerQuery must be a divisor of 32 and greater than 0.");
     if (counts == nullptr) {
       counts = d_counts_;
     }
@@ -1850,12 +1908,33 @@ class WaveletTree {
     return char_start;
   }
 
+  /*!
+   * \brief Rank query on the wavelet tree. Number of occurrences of a symbol
+   * up to a given index (exclusive).
+   * \tparam ThreadsPerQuery Number of threads per query. Must be a divisor
+   * of 32. The best performance is obtained with 1 thread per query, given
+   * enough parallelism. More than 8 should be avoided since the main work is a
+   * loop that has at most 8 iterations.
+   * \param query Rank query.
+   * \param is_pow_two Whether the alphabet size is a power of two.
+   * \param counts Pointer to the shared memory counts array. If nullptr, the
+   * default counts array is used.
+   * \param offsets Pointer to the shared memory offsets array. If nullptr, the
+   * default offsets array is used.
+   * \param ranks Pointer to the shared memory precomputed ranks array. If
+   * nullptr, the default ranks array is used.
+   * \return The rank result.
+   */
   template <int ThreadsPerQuery>
   __device__ [[nodiscard]] size_t deviceRank(RankSelectQuery<T> const& query,
                                              bool const is_pow_two,
                                              size_t* counts = nullptr,
                                              size_t* offsets = nullptr,
                                              size_t* ranks = nullptr) {
+    static_assert(
+        ThreadsPerQuery > 0 and ThreadsPerQuery <= 32 and
+            (32 % ThreadsPerQuery) == 0,
+        "ThreadsPerQuery must be a divisor of 32 and greater than 0.");
     if (counts == nullptr) {
       counts = d_counts_;
     }
@@ -1907,6 +1986,18 @@ class WaveletTree {
     return result;
   }
 
+  /*!
+   * \brief Get the start of the node containing a given character at a level.
+   * \tparam IsPowTwo Whether the alphabet size is a power of two.
+   * \param char_start Character for which to get the start.
+   * \param is_rightmost_child Whether the character is in the rightmost node of
+   * the level, i.e. all the bits up until that level are 1.
+   * \param alphabet_size Size of the alphabet.
+   * \param level Level of the node.
+   * \param num_levels Number of levels in the wavelet tree.
+   * \param code_len Length of the code.
+   * \return The start of the node containing the character.
+   */
   template <bool IsPowTwo>
   __device__ [[nodiscard]] T getPrevCharStart(T const char_start,
                                               bool const is_rightmost_child,
@@ -1931,6 +2022,19 @@ class WaveletTree {
     }
   }
 
+  /*!
+   * \brief Select query on the wavelet tree. Find the index of the k-th
+   * occurrence of a symbol. Starts counting from 1.
+   * \tparam ThreadsPerQuery Number of threads per query. Must be a divisor
+   * of 32. The best performance is obtained with 1 thread per query, given
+   * enough parallelism. More than 8 should be avoided since the main work is a
+   * loop that has at most 8 iterations.
+   * \param query Select query.
+   * \param is_pow_two Whether the alphabet size is a power of two.
+   * \param ranks Pointer to the shared memory precomputed ranks array. If
+   * nullptr, the default ranks array is used.
+   * \return The select result.
+   */
   template <int ThreadsPerQuery>
   __device__ [[nodiscard]] size_t deviceSelect(RankSelectQuery<T> const& query,
                                                bool const is_pow_two,
@@ -2093,6 +2197,10 @@ class WaveletTree {
     return alphabet_size_;
   }
 
+  /*!
+   * \brief Get a copy the alphabet.
+   * \return Alphabet.
+   */
   __host__ std::vector<T> const& getAlphabet() const noexcept {
     return alphabet_;
   }
@@ -2108,8 +2216,10 @@ class WaveletTree {
   /*!
    * \brief Get the number of occurrences of all symbols that are
    * lexicographically smaller than the i-th symbol in the alphabet. Starting
-   * from 0. \param i Index of the symbol in the alphabet. \return Number of
-   * occurrences of all symbols that are lexicographically smaller.
+   * from 0.
+   * \param i Index of the symbol in the alphabet.
+   * \return Number of occurrences of all symbols that are lexicographically
+   * smaller.
    */
   __host__ __device__ [[nodiscard]] size_t getCounts(size_t i) const noexcept {
     assert(i < alphabet_size_);
@@ -2120,6 +2230,11 @@ class WaveletTree {
 #endif
   }
 
+  /*!
+   * \brief Get the number of occurrences of a symbol.
+   * \param i Index of the symbol in the alphabet.
+   * \return Number of occurrences of the i-th symbol in the alphabet.
+   */
   __host__ __device__ [[nodiscard]] size_t getTotalAppearances(
       size_t i) const noexcept {
     if (i == alphabet_size_ - 1) {
@@ -2145,6 +2260,15 @@ class WaveletTree {
     return codes_start_;
   }
 
+  /*!
+   * \brief Get the position of a node at a given level, i.e. whether it is the
+   * first, second...
+   * \tparam IsPowTwo Whether the alphabet size is a power of two.
+   * \param symbol Symbol that marks the start of the node.
+   * \param level Level of the node.
+   * \return Position of the node at the given level. Zero if it is the second
+   * node of the level.
+   */
   template <bool IsPowTwo>
   __device__ [[nodiscard]] T getNodePosAtLevel(
       T symbol, uint8_t const level) const noexcept {
@@ -2190,6 +2314,14 @@ class WaveletTree {
  protected:
   std::vector<T> alphabet_; /*!< Alphabet of the wavelet tree*/
 
+  /*!
+   * \brief Compute the global histogram of the data.
+   * \param is_pow_two Whether the alphabet size is a power of two.
+   * \param data_size Size of the data.
+   * \param d_data Pointer to the data on the device.
+   * \param d_alphabet Pointer to the alphabet on the device.
+   * \param d_histogram Pointer to the histogram on the device.
+   */
   __host__ void computeGlobalHistogram(bool const is_pow_two,
                                        size_t const data_size, T* d_data,
                                        T* d_alphabet,
@@ -2198,18 +2330,22 @@ class WaveletTree {
     if (is_pow_two) {
       if (is_min_alphabet_) {
         gpuErrchk(cudaFuncGetAttributes(
-            &funcAttrib, computeGlobalHistogramKernel<T, true, true, true>));
+            &funcAttrib,
+            detail::computeGlobalHistogramKernel<T, true, true, true>));
       } else {
         gpuErrchk(cudaFuncGetAttributes(
-            &funcAttrib, computeGlobalHistogramKernel<T, false, true, true>));
+            &funcAttrib,
+            detail::computeGlobalHistogramKernel<T, false, true, true>));
       }
     } else {
       if (is_min_alphabet_) {
         gpuErrchk(cudaFuncGetAttributes(
-            &funcAttrib, computeGlobalHistogramKernel<T, true, false, true>));
+            &funcAttrib,
+            detail::computeGlobalHistogramKernel<T, true, false, true>));
       } else {
         gpuErrchk(cudaFuncGetAttributes(
-            &funcAttrib, computeGlobalHistogramKernel<T, false, false, true>));
+            &funcAttrib,
+            detail::computeGlobalHistogramKernel<T, false, false, true>));
       }
     }
     struct cudaDeviceProp& prop = getDeviceProperties();
@@ -2253,24 +2389,24 @@ class WaveletTree {
     if (is_pow_two) {
       if (is_min_alphabet_) {
         if (hists_per_block > 0) {
-          computeGlobalHistogramKernel<T, true, true, true>
+          detail::computeGlobalHistogramKernel<T, true, true, true>
               <<<num_blocks, threads_per_block, used_shmem>>>(
                   *this, d_data, data_size, d_histogram, d_alphabet,
                   alphabet_size_, hists_per_block);
         } else {
-          computeGlobalHistogramKernel<T, true, true, false>
+          detail::computeGlobalHistogramKernel<T, true, true, false>
               <<<num_blocks, threads_per_block>>>(
                   *this, d_data, data_size, d_histogram, d_alphabet,
                   alphabet_size_, hists_per_block);
         }
       } else {
         if (hists_per_block > 0) {
-          computeGlobalHistogramKernel<T, false, true, true>
+          detail::computeGlobalHistogramKernel<T, false, true, true>
               <<<num_blocks, threads_per_block, used_shmem>>>(
                   *this, d_data, data_size, d_histogram, d_alphabet,
                   alphabet_size_, hists_per_block);
         } else {
-          computeGlobalHistogramKernel<T, false, true, false>
+          detail::computeGlobalHistogramKernel<T, false, true, false>
               <<<num_blocks, threads_per_block>>>(
                   *this, d_data, data_size, d_histogram, d_alphabet,
                   alphabet_size_, hists_per_block);
@@ -2279,24 +2415,24 @@ class WaveletTree {
     } else {
       if (is_min_alphabet_) {
         if (hists_per_block > 0) {
-          computeGlobalHistogramKernel<T, true, false, true>
+          detail::computeGlobalHistogramKernel<T, true, false, true>
               <<<num_blocks, threads_per_block, used_shmem>>>(
                   *this, d_data, data_size, d_histogram, d_alphabet,
                   alphabet_size_, hists_per_block);
         } else {
-          computeGlobalHistogramKernel<T, true, false, false>
+          detail::computeGlobalHistogramKernel<T, true, false, false>
               <<<num_blocks, threads_per_block>>>(
                   *this, d_data, data_size, d_histogram, d_alphabet,
                   alphabet_size_, hists_per_block);
         }
       } else {
         if (hists_per_block > 0) {
-          computeGlobalHistogramKernel<T, false, false, true>
+          detail::computeGlobalHistogramKernel<T, false, false, true>
               <<<num_blocks, threads_per_block, used_shmem>>>(
                   *this, d_data, data_size, d_histogram, d_alphabet,
                   alphabet_size_, hists_per_block);
         } else {
-          computeGlobalHistogramKernel<T, false, false, false>
+          detail::computeGlobalHistogramKernel<T, false, false, false>
               <<<num_blocks, threads_per_block>>>(
                   *this, d_data, data_size, d_histogram, d_alphabet,
                   alphabet_size_, hists_per_block);
@@ -2306,14 +2442,23 @@ class WaveletTree {
     kernelCheck();
   }
 
-  __host__ void fillLevel(BitArray& bit_array, T* const data,
+  /*!
+   * \brief Fill the level of the wavelet tree with the data.
+   * \param bit_array Bit array to fill.
+   * \param d_data Data to fill the bit array with, on the device.
+   * \param data_size Size of the data.
+   * \param level Level of the wavelet tree to fill.
+   */
+  __host__ void fillLevel(BitArray& bit_array, T* const d_data,
                           size_t const data_size,
                           uint32_t const level) const noexcept {
     struct cudaFuncAttributes funcAttrib;
-    gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T, true>));
+    gpuErrchk(
+        cudaFuncGetAttributes(&funcAttrib, detail::fillLevelKernel<T, true>));
     uint32_t maxThreadsPerBlockFillLevel =
         std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
-    gpuErrchk(cudaFuncGetAttributes(&funcAttrib, fillLevelKernel<T, false>));
+    gpuErrchk(
+        cudaFuncGetAttributes(&funcAttrib, detail::fillLevelKernel<T, false>));
     maxThreadsPerBlockFillLevel =
         std::min(maxThreadsPerBlockFillLevel,
                  static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
@@ -2324,7 +2469,8 @@ class WaveletTree {
     struct cudaDeviceProp& prop = getDeviceProperties();
     if (level == 0) {
       gpuErrchk(cudaFuncSetAttribute(
-          fillLevelKernel<T, true>, cudaFuncAttributeMaxDynamicSharedMemorySize,
+          detail::fillLevelKernel<T, true>,
+          cudaFuncAttributeMaxDynamicSharedMemorySize,
           prop.sharedMemPerBlockOptin - funcAttrib.sharedSizeBytes));
     }
 
@@ -2368,21 +2514,28 @@ class WaveletTree {
     }
 
     if (enough_shmem) {
-      fillLevelKernel<T, true><<<num_blocks, threads_per_block,
-                                 shmem_per_thread * threads_per_block>>>(
-          bit_array, data, data_size, alphabet_start_bit_, level,
-          num_blocks * threads_per_block, threads_per_block / WS);
+      detail::fillLevelKernel<T, true>
+          <<<num_blocks, threads_per_block,
+             shmem_per_thread * threads_per_block>>>(
+              bit_array, d_data, data_size, alphabet_start_bit_, level,
+              num_blocks * threads_per_block, threads_per_block / WS);
     } else {
-      fillLevelKernel<T, false>
+      detail::fillLevelKernel<T, false>
           <<<num_blocks, threads_per_block,
              sizeof(uint32_t) * (threads_per_block / WS)>>>(
-              bit_array, data, data_size, alphabet_start_bit_, level,
+              bit_array, d_data, data_size, alphabet_start_bit_, level,
               num_blocks * threads_per_block, threads_per_block / WS);
     }
     kernelCheck();
   }
 
-  __host__ [[nodiscard]] static std::vector<NodeInfo<T>> getNodeInfos(
+  /*!
+   * \brief Get the node information for the wavelet tree.
+   * \param alphabet Alphabet of the wavelet tree.
+   * \param codes Codes of the alphabet.
+   * \return Vector of node information.
+   */
+  __host__ [[nodiscard]] static std::vector<detail::NodeInfo<T>> getNodeInfos(
       std::vector<T> const& alphabet, std::vector<Code> const& codes) noexcept {
     auto const alphabet_size = alphabet.size();
     auto const symbol_len = static_cast<uint8_t>(ceilLog2Host(alphabet_size));
@@ -2397,7 +2550,7 @@ class WaveletTree {
       }
     }
 
-    std::vector<NodeInfo<T>> node_starts;
+    std::vector<detail::NodeInfo<T>> node_starts;
     for (uint8_t l = 1; l < symbol_len; ++l) {
       // Find each position where the l-th MSB of the symbol is 0 and the
       // previous 1
@@ -2412,16 +2565,25 @@ class WaveletTree {
     return node_starts;
   }
 
+  /*!
+   * \brief Get an upper bound of size of the GPU memory needed for the wavelet
+   * tree.
+   * \param data_size Size of the data.
+   * \param alphabet_size Size of the alphabet.
+   * \param num_levels Number of levels in the wavelet tree.
+   * \param num_codes Number of codes in the alphabet.
+   * \return Upper bound of size of the GPU memory needed for the wavelet tree.
+   */
   __host__ [[nodiscard]] static size_t getNeededGPUMemory(
       size_t const data_size, size_t const alphabet_size,
       uint8_t const num_levels, T const num_codes) noexcept {
     size_t total_size = 0;
     total_size += num_codes * sizeof(Code);      // d_codes_
     total_size += (num_levels - 1) * sizeof(T);  // d_num_nodes_at_level_
-    total_size +=
-        alphabet_size *
-        (sizeof(size_t) +
-         sizeof(NodeInfo<T>));  // Upper bound for d_ranks_ and d_node_starts
+    total_size += alphabet_size *
+                  (sizeof(size_t) +
+                   sizeof(detail::NodeInfo<T>));   // Upper bound for d_ranks_
+                                                   // and d_node_starts
     total_size += alphabet_size * sizeof(size_t);  // d_counts_
     total_size += BitArray::getNeededGPUMemory(data_size, num_levels);
     total_size += RankSelect::getNeededGPUMemory(data_size, num_levels);
@@ -2442,19 +2604,19 @@ class WaveletTree {
                             minimal*/
   T codes_start_;        /*!< Minimal alphabet symbol where the codes start*/
   bool is_copy_;         /*!< Flag to signal whether current object is a copy*/
-  T* access_pinned_mem_pool_;
+  T* access_pinned_mem_pool_; /*!< Pinned memory pool for access queries*/
   size_t access_mem_pool_size_ = 10'000'000;
-  size_t* rank_pinned_mem_pool_;
+  size_t* rank_pinned_mem_pool_; /*!< Pinned memory pool for rank queries*/
   size_t rank_mem_pool_size_ = 10'000'000;
-  size_t* select_pinned_mem_pool_;
+  size_t* select_pinned_mem_pool_; /*!< Pinned memory pool for select queries*/
   size_t select_mem_pool_size_ = 10'000'000;
 
-  T num_nodes_until_last_level_;
+  T num_nodes_until_last_level_; /*!< Number of nodes until the last level*/
   size_t* d_ranks_ = nullptr;
   T* d_num_nodes_at_level_ =
-      nullptr; /*!< Number of nodes at each level, without counting nodes that
-                  start at 0*/
-  T num_ranks_;
+      nullptr;  /*!< Number of nodes at each level, without counting nodes that
+                   start at 0*/
+  T num_ranks_; /*!< Number of precomputed ranks in the wavelet tree*/
   uint32_t GPU_index_; /*!< Index of the GPU to use*/
 };
 }  // namespace ecl

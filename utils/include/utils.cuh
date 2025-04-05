@@ -93,23 +93,23 @@ __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
 }
 
 /*!
- * \brief Get a launch configuration for a kernel given a number of warps, so
- * that threads per block are maximised.
- * \details If no combination is found that
- * perfectly matches the number of warps, the function will return the
- * combination that minimises the difference.
+ * \brief Get a launch configuration for a kernel given a number of warps that
+ * matches the given number of warps as closely as possible while ensuring that
+ * the block size will fully occupy an SM.
+ * \details If no appropriate match is found, it returns -1 for both.
  * \param num_warps Number of warps to launch.
- * \param min_block_size Minimum number of threads per block. If num_warps is
- * smaller, the function will return a block size smaller than this.
+ * \param min_block_size Minimum number of threads per block.
  * \param max_block_size Maximum number of threads per block.
  * \return A pair of integers, the first one being the number of blocks and the
  * second one being the number of threads per block.
  */
-// TODO maybe measure effect of wasted warps
 __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
                                              int const min_block_size,
                                              int max_block_size);
 
+/*!
+ * \brief Get a reference to the device properties of the current GPU.
+ */
 __host__ cudaDeviceProp &getDeviceProperties();
 
 /*!
@@ -155,29 +155,6 @@ __device__ T getPrevPowTwo(T n) {
   return 0;
 }
 
-/*! @copydoc getPrevPowTwo */
-template <typename T>
-__host__ T getPrevPowTwoHost(T n) {
-  static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
-                "T must be an unsigned integral type.");
-  if (n == 0) {
-    return 0;
-  }
-  if (isPowTwo(n)) {
-    return n >> 1;
-  }
-  if constexpr (sizeof(T) == 8) {
-    return (1ULL << (sizeof(T) * 8 - __builtin_clzll(n) - 1));
-  } else if constexpr (sizeof(T) == 4) {
-    return (1UL << (sizeof(T) * 8 - __builtin_clz(n) - 1));
-  } else if constexpr (sizeof(T) == 2) {
-    return (1U << (sizeof(T) * 8 - (__builtin_clz(n) - 16) - 1));
-  } else if constexpr (sizeof(T) == 1) {
-    return (1U << (sizeof(T) * 8 - (__builtin_clz(n) - 24) - 1));
-  }
-  return 0;
-}
-
 /*!
  * \brief Calculate 2^n.
  * \tparam T Type of the number to calculate the power of two for. Must be an
@@ -192,6 +169,11 @@ __host__ __device__ T powTwo(T n) {
   return 1 << n;
 }
 
+/*!
+ * \brief Check if the warp size is 32, and initialize the device dependent
+ * variables.
+ * \param GPU_index Index of the GPU to check.
+ */
 __host__ void checkWarpSize(uint32_t const GPU_index);
 
 #define gpuErrchkInternal(ans, file, line) \
@@ -226,9 +208,10 @@ __host__ __device__ bool getBit(uint8_t const i, T const c) {
 }
 
 template <typename T>
-__device__ uint8_t ceilLog2(T n) {
+__host__ __device__ uint8_t ceilLog2(T n) {
   static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
                 "T must be an unsigned integral type.");
+#ifdef __CUDA_ARCH__
   if constexpr (sizeof(T) == 8) {
     auto highest_set_bit_pos = sizeof(T) * 8 - __clzll(n) - 1;
     return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
@@ -242,12 +225,7 @@ __device__ uint8_t ceilLog2(T n) {
     auto highest_set_bit_pos = sizeof(T) * 8 - (__clz(n) - 24) - 1;
     return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
   }
-}
-
-template <typename T>
-__host__ uint8_t ceilLog2Host(T n) {
-  static_assert(std::is_integral<T>::value and std::is_unsigned<T>::value,
-                "T must be an unsigned integral type.");
+#else
   if constexpr (sizeof(T) == 8) {
     auto highest_set_bit_pos = sizeof(T) * 8 - std::__countl_zero(n) - 1;
     return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
@@ -261,6 +239,7 @@ __host__ uint8_t ceilLog2Host(T n) {
     auto highest_set_bit_pos = sizeof(T) * 8 - std::__countl_zero(n) - 1;
     return isPowTwo<T>(n) ? highest_set_bit_pos : highest_set_bit_pos + 1;
   }
+#endif
 }
 
 struct LogRel {
@@ -283,6 +262,12 @@ struct IdealConfigs {
   uint32_t ideal_TPB_fillLevelKernel = 0;
 };
 
+/*!
+ * \brief Get the ideal configurations for a given GPU. Only valid if GPU has
+ * been tuned.
+ * \param GPU_name Name of the GPU to get the configurations for.
+ * \return Ideal configurations for the given GPU.
+ */
 __host__ IdealConfigs &getIdealConfigs(const std::string &GPU_name);
 
 /*!
@@ -299,19 +284,19 @@ __host__ T findLargestDivisor(T const n, T const divisor) {
 }
 
 /*!
- * \brief Helper function to share a variable between all threads in a warp.
+ * \brief Helper function to share a variable between certain threads in a warp.
  * \tparam T Type of the variable to be shared. Must be an integral or
  * floating point type.
- * \param condition Condition to be met for sharing the
- * variable. Only one thread should fulfill it.
+ * \param condition Condition to be met for being the source of the share. Only
+ * one thread should fulfill it.
  * \param var Variable to be shared.
- * \param mask Mask representing the threads that should share the variable.
+ * \param mask Mask representing the threads that should participate.
  */
 template <typename T>
 __device__ void shareVar(bool condition, T &var, uint32_t const mask) {
   static_assert(std::is_integral<T>::value or std::is_floating_point<T>::value,
                 "T must be an integral or floating-point type.");
-  __syncwarp(mask);  // Crazy behaviour on Volta
+  __syncwarp(mask);  // Crazy behaviour on Volta if removed
   uint32_t src_thread = __ballot_sync(mask, condition);
   if (src_thread != 0) {
     // Get the value from the first thread that fulfills the condition
@@ -326,6 +311,9 @@ struct RankSelectQuery {
   T symbol_;
 };
 
+/*!
+ * \brief Get the available RAM memory on a Linux system.
+ */
 int64_t getAvailableMemoryLinux();
 
 }  // namespace ecl

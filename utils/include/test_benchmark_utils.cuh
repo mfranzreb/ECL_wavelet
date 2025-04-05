@@ -39,9 +39,25 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 
 namespace ecl {
+
+/*!
+ * \brief Write words to a bit array in parallel.
+ * \param bit_array The bit array to write to.
+ * \param array_index The index of the bit array to write to.
+ * \param words Array of words to write.
+ * \param num_words The number of words to write.
+ */
 __global__ void writeWordsParallelKernel(BitArray bit_array, size_t array_index,
                                          uint32_t* words, size_t num_words);
 
+/*!
+ * \brief Generate random numbers in a given range, inclusive.
+ * \tparam T Type of the numbers to generate.
+ * \tparam UseLogDist If true, generate numbers in a logarithmic distribution.
+ * \param nums_vec Vector to store the generated numbers.
+ * \param min Minimum value of the range.
+ * \param max Maximum value of the range.
+ */
 template <typename T, bool UseLogDist = false>
 void generateRandomNums(std::vector<T>& nums_vec, T const min, T const max) {
   std::random_device rd;
@@ -61,6 +77,12 @@ void generateRandomNums(std::vector<T>& nums_vec, T const min, T const max) {
   }
 }
 
+/*!
+ * \brief Generate a random alphabet of a given size.
+ * \tparam T Type of the elements in the alphabet.
+ * \param alphabet_size Size of the alphabet to generate.
+ * \return Random alphabet.
+ */
 template <typename T>
 std::vector<T> generateRandomAlphabet(size_t const alphabet_size) {
   std::vector<T> alphabet(alphabet_size);
@@ -88,6 +110,9 @@ std::vector<T> generateRandomAlphabet(size_t const alphabet_size) {
  * \brief Create a random bit array with a given size and percentage of ones.
  * \param size Size of the bit array at each level.
  * \param num_levels Number of levels of the bit array.
+ * \param is_adversarial If true, the distribution of ones is adversarial.
+ * \param fill_rate Percentage of ones in the bit array.
+ * \param one_bits_out Pointer to store the number of ones in the bit array.
  * \return Random bit array.
  */
 __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels,
@@ -95,6 +120,14 @@ __host__ BitArray createRandomBitArray(size_t size, uint8_t const num_levels,
                                        uint8_t const fill_rate = 50,
                                        size_t* one_bits_out = nullptr);
 
+/*!
+ * \brief Generate random alphabet and data.
+ * \tparam T Type of the elements in the alphabet and data.
+ * \param alphabet_size Size of the alphabet to generate.
+ * \param data_size Size of the data to generate.
+ * \param enforce_alphabet_size If true, enforce the alphabet size.
+ * \return A pair containing the generated alphabet and data.
+ */
 template <typename T>
 std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
     size_t const alphabet_size, size_t const data_size,
@@ -146,6 +179,13 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
   return std::make_pair(alphabet, data);
 }
 
+/*!
+ * \brief Generate random data from a given alphabet.
+ * \tparam T Type of the elements in the data.
+ * \param alphabet Alphabet to generate data from.
+ * \param data_size Size of the data to generate.
+ * \return Random data.
+ */
 template <typename T>
 std::vector<T> generateRandomData(std::vector<T> const& alphabet,
                                   size_t const data_size) {
@@ -167,12 +207,34 @@ std::vector<T> generateRandomData(std::vector<T> const& alphabet,
   return data;
 }
 
+/*!
+ * \brief Measure the maximum memory usage of a given GPU.
+ * \param stop Atomic boolean to stop the measurement.
+ * \param can_start Atomic boolean to indicate when the function is ready to
+ * start measuring, must be set to false.
+ * \param max_memory_usage Reference to store the maximum memory usage.
+ * \param GPU_index Index of the GPU to measure.
+ */
 void measureMemoryUsage(std::atomic_bool& stop, std::atomic_bool& can_start,
                         size_t& max_memory_usage, uint32_t const GPU_index);
 
+/*!
+ * \brief Generate random access queries.
+ * \param data_size Size of the data.
+ * \param num_queries Number of queries to generate.
+ * \return Vector of random access queries.
+ */
 std::vector<size_t> generateRandomAccessQueries(size_t const data_size,
                                                 size_t const num_queries);
 
+/*!
+ * \brief Generate random rank queries.
+ * \tparam T Type of the elements in the queries.
+ * \param data_size Size of the data.
+ * \param num_queries Number of queries to generate.
+ * \param alphabet Alphabet to generate queries from.
+ * \return Vector of random rank queries.
+ */
 template <typename T>
 std::vector<RankSelectQuery<T>> generateRandomRankQueries(
     size_t const data_size, size_t const num_queries,
@@ -196,6 +258,14 @@ std::vector<RankSelectQuery<T>> generateRandomRankQueries(
   return queries;
 }
 
+/*!
+ * \brief Generate random select queries.
+ * \tparam T Type of the elements in the queries.
+ * \param hist Histogram of the data.
+ * \param num_queries Number of queries to generate.
+ * \param alphabet Alphabet to generate queries from.
+ * \return Vector of random select queries.
+ */
 template <typename T>
 std::vector<RankSelectQuery<T>> generateRandomSelectQueries(
     std::unordered_map<T, size_t> const& hist, size_t const num_queries,
@@ -224,6 +294,13 @@ std::vector<RankSelectQuery<T>> generateRandomSelectQueries(
   return queries;
 }
 
+/*!
+ * \brief Generate random data and histogram.
+ * \tparam T Type of the elements in the data and histogram.
+ * \param alphabet Alphabet to generate data from.
+ * \param data_size Size of the data to generate.
+ * \return A pair containing the generated data and histogram.
+ */
 template <typename T>
 std::pair<std::vector<T>, std::unordered_map<T, size_t>>
 generateRandomDataAndHist(std::vector<T> const& alphabet,
@@ -249,6 +326,14 @@ generateRandomDataAndHist(std::vector<T> const& alphabet,
   return std::make_pair(data, hist);
 }
 
+/*!
+ * \brief Generate random alphabet data and histogram.
+ * \tparam T Type of the elements in the data and histogram.
+ * \param alphabet_size Size of the alphabet to generate.
+ * \param data_size Size of the data to generate.
+ * \param hist Histogram to fill with the generated data.
+ * \return A pair containing the generated alphabet and data.
+ */
 template <typename T>
 std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetDataAndHist(
     size_t const alphabet_size, size_t const data_size,
@@ -315,6 +400,18 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetDataAndHist(
   return std::make_pair(alphabet, data);
 }
 
+/*!
+ * \brief Generate random data and rank/select queries.
+ * \tparam T Type of the elements in the data and queries.
+ * \param alphabet Alphabet to generate data from.
+ * \param data_size Size of the data to generate.
+ * \param num_queries Number of queries to generate.
+ * \param rank_queries Vector to store the generated rank queries.
+ * \param select_queries Vector to store the generated select queries.
+ * \param rank_results Vector to store the results of the rank queries.
+ * \param select_results Vector to store the results of the select queries.
+ * \return Generated data.
+ */
 template <typename T>
 std::vector<T> generateRandomDataAndRSQueries(
     std::vector<T> const& alphabet, size_t const data_size,
@@ -428,6 +525,14 @@ std::vector<T> generateRandomDataAndRSQueries(
   return data;
 }
 
+/*!
+ * \brief Generate random alphabet and data sizes.
+ * \tparam T Type of the elements in the alphabet and data.
+ * \param min_data_size Minimum size of the data.
+ * \param max_data_size Maximum size of the data.
+ * \param num_sizes Number of sizes to generate.
+ * \return A pair containing the generated alphabet sizes and data sizes.
+ */
 template <typename T, bool UseLogDist = false>
 std::pair<std::vector<size_t>, std::vector<size_t>>
 generateRandomAlphabetAndDataSizes(size_t const min_data_size,
@@ -471,6 +576,13 @@ generateRandomAlphabetAndDataSizes(size_t const min_data_size,
   return std::make_pair(alphabet_sizes, data_sizes);
 }
 
+/*!
+ * \brief Read data from a file.
+ * \tparam T Type of the data to read.
+ * \param filename Name of the file to read from.
+ * \param num_symbols Number of symbols to read.
+ * \return Vector containing the read data.
+ */
 template <typename T>
 __host__ std::vector<T> readDataFromFile(std::string const& filename,
                                          size_t const num_symbols) {
@@ -504,6 +616,13 @@ __host__ std::vector<T> readDataFromFile(std::string const& filename,
   return data;
 }
 
+/*!
+ * \brief Convert data to a minimal alphabet.
+ * \tparam T Type of the data to convert.
+ * \param data Pointer to the data to convert.
+ * \param data_size Size of the data.
+ * \return Size of the minimal alphabet.
+ */
 template <typename T>
 size_t convertDataToMinAlphabet(T* data, size_t const data_size) {
   std::vector<T> alphabet;
@@ -537,6 +656,14 @@ size_t convertDataToMinAlphabet(T* data, size_t const data_size) {
   return alphabet.size();
 }
 
+/*!
+ * \brief Convert data to a minimal alphabet.
+ * \tparam T Type of the data to convert.
+ * \param data Pointer to the data to convert.
+ * \param data_size Size of the data.
+ * \param alphabet Alphabet of the data.
+ * \return Size of the minimal alphabet, same as alphabet.size().
+ */
 template <typename T>
 size_t convertDataToMinAlphabet(T* data, size_t const data_size,
                                 std::vector<T> const& alphabet) {

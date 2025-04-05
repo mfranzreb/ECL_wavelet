@@ -33,10 +33,8 @@ TYPED_TEST(UtilsTest, getPrevPowTwo) {
   TypeParam expected = 0;
   for (TypeParam i = 0; i < limit; ++i) {
     getPrevPowTwoKernel<TypeParam><<<1, 1>>>(i, this->result);
-    auto host_result = getPrevPowTwoHost<TypeParam>(i);
     kernelCheck();
     EXPECT_EQ(*this->result, expected);
-    EXPECT_EQ(host_result, expected);
     if (isPowTwo(i)) {
       expected = i;
     }
@@ -48,7 +46,7 @@ TYPED_TEST(UtilsTest, ceilLog2) {
       size_t(1024), static_cast<size_t>(std::numeric_limits<TypeParam>::max()));
   uint32_t expected = 0;
   for (TypeParam i = 1; i < limit; ++i) {
-    EXPECT_EQ(ceilLog2Host<TypeParam>(i), expected);
+    EXPECT_EQ(ceilLog2<TypeParam>(i), expected);
     ceilLog2Kernel<TypeParam><<<1, 1>>>(i, this->result);
     kernelCheck();
     EXPECT_EQ(*this->result, expected);

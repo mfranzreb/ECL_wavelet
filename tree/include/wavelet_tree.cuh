@@ -636,7 +636,7 @@ class WaveletTree {
       node_starts = getNodeInfos(alphabet_, codes);
     }
 
-    num_levels_ = ceilLog2Host(alphabet_size_);
+    num_levels_ = ceilLog2(alphabet_size_);
     alphabet_start_bit_ = num_levels_ - 1;
     codes_start_ = alphabet_size_ - codes.size();
 
@@ -2136,7 +2136,7 @@ class WaveletTree {
     }
     size_t total_num_codes = 0;
     std::vector<Code> codes(alphabet_size);
-    uint8_t const total_num_bits = ceilLog2Host<size_t>(alphabet_size);
+    uint8_t const total_num_bits = ceilLog2<size_t>(alphabet_size);
     uint8_t const alphabet_start_bit = total_num_bits - 1;
 #pragma omp parallel for
     for (size_t i = 0; i < alphabet_size; ++i) {
@@ -2168,7 +2168,7 @@ class WaveletTree {
         codes[alphabet_size - 1].code_ =
             ((1UL << start_bit) - 1) << (alphabet_start_bit + 1 - start_bit);
       } else {
-        code_len = ceilLog2Host<T>(num_codes);
+        code_len = ceilLog2<T>(num_codes);
 #pragma omp parallel for
         for (size_t i = alphabet_size - num_codes; i < alphabet_size; i++) {
           // Code of local subtree
@@ -2538,7 +2538,7 @@ class WaveletTree {
   __host__ [[nodiscard]] static std::vector<detail::NodeInfo<T>> getNodeInfos(
       std::vector<T> const& alphabet, std::vector<Code> const& codes) noexcept {
     auto const alphabet_size = alphabet.size();
-    auto const symbol_len = static_cast<uint8_t>(ceilLog2Host(alphabet_size));
+    auto const symbol_len = static_cast<uint8_t>(ceilLog2(alphabet_size));
 
     std::vector<Code> alphabet_codes(alphabet_size);
     for (size_t i = 0; i < alphabet_size; ++i) {

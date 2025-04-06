@@ -1,12 +1,13 @@
 #include <algorithm>
-#include <bit_array.cuh>
 #include <chrono>
 #include <cstdint>
-#include <rank_select.cuh>
-#include <test_benchmark_utils.cuh>
-#include <utils.cuh>
 #include <vector>
-#include <wavelet_tree.cuh>
+
+#include "ecl_wavelet/bitarray/bit_array.cuh"
+#include "ecl_wavelet/bitarray/rank_select.cuh"
+#include "ecl_wavelet/tree/wavelet_tree.cuh"
+#include "ecl_wavelet/utils/test_benchmark_utils.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
 
@@ -424,7 +425,7 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
 
 }  // namespace ecl
 
-int main(int argc, char* argv[]) {
+int main([[maybe_unused]] int argc, char* argv[]) {
   auto const parent_dir = argv[1];
   auto const GPU_index = std::stoi(argv[2]);
   ecl::checkWarpSize(GPU_index);

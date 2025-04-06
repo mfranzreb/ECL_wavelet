@@ -33,10 +33,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <omp.h>
 
 #include <algorithm>
-#include <bit_array.cuh>
 #include <execution>
-#include <utils.cuh>
 #include <vector>
+
+#include "ecl_wavelet/bitarray/bit_array.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
 

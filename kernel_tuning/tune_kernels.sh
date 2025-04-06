@@ -33,7 +33,7 @@ SOURCE_DIR=$DIR/..
 
 BUILD_DIR=$SOURCE_DIR/build
 
-TUNE_FILE=$SOURCE_DIR/utils/src/GPU_tunes.hpp
+TUNE_FILE=$SOURCE_DIR/src/utils/GPU_tunes.hpp
 
 cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_KERNEL_TUNER=ON -S $SOURCE_DIR -B $BUILD_DIR
 cmake --build $BUILD_DIR --target ecl_tune_kernels

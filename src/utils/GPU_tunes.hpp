@@ -1,7 +1,8 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
-#include <utils.cuh>
+
+#include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
 

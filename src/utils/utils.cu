@@ -35,7 +35,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cstdlib>
 #include <limits>
 
-#include "utils.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
 namespace internal {

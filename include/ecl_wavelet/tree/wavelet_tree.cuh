@@ -48,8 +48,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <unordered_set>
 #include <vector>
 
-#include "rank_select.cuh"
-#include "utils.cuh"
+#include "ecl_wavelet/bitarray/rank_select.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 // TODO: check if shmem helpful for all kernels
 namespace ecl {
@@ -565,8 +565,12 @@ class WaveletTree {
   RankSelect
       rank_select_; /*!< RankSelect structure for constant time binary queries*/
 
+  /*! Default constructor*/
+  WaveletTree() = default;
+
   /*!
    * \brief Constructor. Builds the wavelet tree from the input data.
+   * \throws std::runtime_error if not enough memory is available.
    * \param data Input data to build the wavelet tree.
    * \param data_size Number of elements in the input data.
    * \param alphabet Alphabet of the input data. If not sure of it, pass an
@@ -787,6 +791,7 @@ class WaveletTree {
         }
       }
     }
+    std::exclusive_scan(counts_.begin(), counts_.end(), counts_.begin(), 0ULL);
 
     gpuErrchk(cudaFree(d_placeholder));
     BitArray bit_array(bit_array_sizes, false);
@@ -890,7 +895,39 @@ class WaveletTree {
   WaveletTree(WaveletTree&&) = delete;
 
   /*! Deleted move assignment operator*/
-  WaveletTree& operator=(WaveletTree&&) = delete;
+  WaveletTree& operator=(WaveletTree&& other) {
+    rank_select_ = std::move(other.rank_select_);
+    alphabet_ = std::move(other.alphabet_);
+    alphabet_size_ = other.alphabet_size_;
+    alphabet_start_bit_ = other.alphabet_start_bit_;
+    d_codes_ = other.d_codes_;
+    other.d_codes_ = nullptr;
+    d_counts_ = other.d_counts_;
+    other.d_counts_ = nullptr;
+    counts_ = std::move(other.counts_);
+    num_levels_ = other.num_levels_;
+    is_min_alphabet_ = other.is_min_alphabet_;
+    codes_start_ = other.codes_start_;
+    is_copy_ = other.is_copy_;
+    other.is_copy_ = true;
+    access_pinned_mem_pool_ = other.access_pinned_mem_pool_;
+    other.access_pinned_mem_pool_ = nullptr;
+    access_mem_pool_size_ = other.access_mem_pool_size_;
+    rank_pinned_mem_pool_ = other.rank_pinned_mem_pool_;
+    other.rank_pinned_mem_pool_ = nullptr;
+    rank_mem_pool_size_ = other.rank_mem_pool_size_;
+    select_pinned_mem_pool_ = other.select_pinned_mem_pool_;
+    other.select_pinned_mem_pool_ = nullptr;
+    select_mem_pool_size_ = other.select_mem_pool_size_;
+    num_nodes_until_last_level_ = other.num_nodes_until_last_level_;
+    d_ranks_ = other.d_ranks_;
+    other.d_ranks_ = nullptr;
+    d_num_nodes_at_level_ = other.d_num_nodes_at_level_;
+    other.d_num_nodes_at_level_ = nullptr;
+    num_ranks_ = other.num_ranks_;
+    GPU_index_ = other.GPU_index_;
+    return *this;
+  }
 
   /*! Destructor*/
   ~WaveletTree() {
@@ -911,6 +948,8 @@ class WaveletTree {
    * \brief Access the symbols at the given indices in the wavelet tree.
    * \details For best performance, allocate the indices array in pinned
    * memory.
+   * \throws std::runtime_error if not enough GPU memory is available for the
+   * queries. If it happens, try to process the queries in smaller batches.
    * \param indices Pointer to the indices of the symbols to be accessed.
    * \param num_indices Number of indices.
    * \return Access to the memory pool containing the accessed symbols.
@@ -936,7 +975,7 @@ class WaveletTree {
             sizeof(size_t);  // 3 instead of two for having a small buffer
     if (needed_memory > free_mem) {
       throw std::runtime_error(
-          "Not enough memory available for the access queries.");
+          "Not enough GPU memory available for the access queries.");
     }
 
     // CHeck if indices ptr points to pinned memory
@@ -1161,7 +1200,7 @@ class WaveletTree {
         gpuErrchk(cudaHostUnregister(indices));
       }
       throw std::runtime_error(
-          "Not enough memory available for the access queries.");
+          "Not enough GPU memory available for the access queries.");
     }
     for (uint16_t i = 0; i < num_chunks; ++i) {
       auto const current_chunk_size =
@@ -1222,8 +1261,12 @@ class WaveletTree {
   }
 
   /*!
-   * \brief Rank queries on the wavelet tree. Number of occurrences of a symbol
-   * up to a given index (exclusive).
+   * \brief Rank queries on the wavelet tree. Number of occurrences of a
+   * symbol up to a given index (exclusive).
+   * \details For best performance, allocate the queries array in pinned
+   * memory.
+   * \throws std::runtime_error if not enough GPU memory is available for the
+   * queries. If it happens, try to process the queries in smaller batches.
    * \param queries Array of rank queries. For best performance, allocate the
    * queries array in pinned memory.
    * \param num_queries Number of queries.
@@ -1250,11 +1293,11 @@ class WaveletTree {
     size_t const needed_memory =
         num_queries * sizeof(size_t) +
         3 * (num_queries / kMaxNumChunks + num_queries % kMaxNumChunks) *
-            sizeof(RankSelectQuery<T>);  // 3 instead of two for having a small
-                                         // buffer
+            sizeof(RankSelectQuery<T>);  // 3 instead of two for having a
+                                         // small buffer
     if (needed_memory > free_mem) {
       throw std::runtime_error(
-          "Not enough memory available for the rank queries.");
+          "Not enough GPU memory available for the rank queries.");
     }
 
     cudaPointerAttributes attr;
@@ -1510,7 +1553,7 @@ class WaveletTree {
         gpuErrchk(cudaHostUnregister(queries));
       }
       throw std::runtime_error(
-          "Not enough memory available for the rank queries.");
+          "Not enough GPU memory available for the rank queries.");
     }
     for (uint16_t i = 0; i < num_chunks; ++i) {
       auto const current_chunk_size =
@@ -1565,8 +1608,12 @@ class WaveletTree {
   /*!
    * \brief Select queries on the wavelet tree. Find the index of the k-th
    * occurrence of a symbol. Starts counting from 1.
-   * \param queries Array of select queries. For best performance, allocate the
-   * queries array in pinned memory.
+   * \details For best performance, allocate the queries array in pinned
+   * memory.
+   * \throws std::runtime_error if not enough GPU memory is available for the
+   * queries. If it happens, try to process the queries in smaller batches.
+   * \param queries Array of select queries. For best performance, allocate
+   * the queries array in pinned memory.
    * \param num_queries Number of queries.
    * \return Access to the memory pool containing the select results.
    * Processing new select queries may overwrite old ones.
@@ -1591,11 +1638,11 @@ class WaveletTree {
     size_t const needed_memory =
         num_queries * sizeof(size_t) +
         3 * (num_queries / kMaxNumChunks + num_queries % kMaxNumChunks) *
-            sizeof(RankSelectQuery<T>);  // 3 instead of two for having a small
-                                         // buffer
+            sizeof(RankSelectQuery<T>);  // 3 instead of two for having a
+                                         // small buffer
     if (needed_memory > free_mem) {
       throw std::runtime_error(
-          "Not enough memory available for the select queries.");
+          "Not enough GPU memory available for the select queries.");
     }
 
     cudaPointerAttributes attr;
@@ -1779,7 +1826,7 @@ class WaveletTree {
         gpuErrchk(cudaHostUnregister(queries));
       }
       throw std::runtime_error(
-          "Not enough memory available for the select queries.");
+          "Not enough GPU memory available for the select queries.");
     }
     for (uint16_t i = 0; i < num_chunks; ++i) {
       auto const current_chunk_size =
@@ -1833,14 +1880,14 @@ class WaveletTree {
    * \brief Access the symbol at a given index in the wavelet tree.
    * \tparam ThreadsPerQuery Number of threads per query. Must be a divisor
    * of 32. The best performance is obtained with 1 thread per query, given
-   * enough parallelism. More than 8 should be avoided since the main work is a
-   * loop that has at most 8 iterations.
+   * enough parallelism. More than 8 should be avoided since the main work is
+   * a loop that has at most 8 iterations.
    * \param index Index of the symbol to access.
    * \param is_pow_two Whether the alphabet size is a power of two.
    * \param counts Pointer to the shared memory counts array. If nullptr, the
    * default counts array is used.
-   * \param offsets Pointer to the shared memory offsets array. If nullptr, the
-   * default offsets array is used.
+   * \param offsets Pointer to the shared memory offsets array. If nullptr,
+   * the default offsets array is used.
    * \param ranks Pointer to the shared memory precomputed ranks array. If
    * nullptr, the default ranks array is used.
    * \return The symbol at the given index.
@@ -1913,14 +1960,14 @@ class WaveletTree {
    * up to a given index (exclusive).
    * \tparam ThreadsPerQuery Number of threads per query. Must be a divisor
    * of 32. The best performance is obtained with 1 thread per query, given
-   * enough parallelism. More than 8 should be avoided since the main work is a
-   * loop that has at most 8 iterations.
+   * enough parallelism. More than 8 should be avoided since the main work is
+   * a loop that has at most 8 iterations.
    * \param query Rank query.
    * \param is_pow_two Whether the alphabet size is a power of two.
    * \param counts Pointer to the shared memory counts array. If nullptr, the
    * default counts array is used.
-   * \param offsets Pointer to the shared memory offsets array. If nullptr, the
-   * default offsets array is used.
+   * \param offsets Pointer to the shared memory offsets array. If nullptr,
+   * the default offsets array is used.
    * \param ranks Pointer to the shared memory precomputed ranks array. If
    * nullptr, the default ranks array is used.
    * \return The rank result.
@@ -1990,8 +2037,8 @@ class WaveletTree {
    * \brief Get the start of the node containing a given character at a level.
    * \tparam IsPowTwo Whether the alphabet size is a power of two.
    * \param char_start Character for which to get the start.
-   * \param is_rightmost_child Whether the character is in the rightmost node of
-   * the level, i.e. all the bits up until that level are 1.
+   * \param is_rightmost_child Whether the character is in the rightmost node
+   * of the level, i.e. all the bits up until that level are 1.
    * \param alphabet_size Size of the alphabet.
    * \param level Level of the node.
    * \param num_levels Number of levels in the wavelet tree.
@@ -2027,8 +2074,8 @@ class WaveletTree {
    * occurrence of a symbol. Starts counting from 1.
    * \tparam ThreadsPerQuery Number of threads per query. Must be a divisor
    * of 32. The best performance is obtained with 1 thread per query, given
-   * enough parallelism. More than 8 should be avoided since the main work is a
-   * loop that has at most 8 iterations.
+   * enough parallelism. More than 8 should be avoided since the main work is
+   * a loop that has at most 8 iterations.
    * \param query Select query.
    * \param is_pow_two Whether the alphabet size is a power of two.
    * \param ranks Pointer to the shared memory precomputed ranks array. If
@@ -2123,8 +2170,8 @@ class WaveletTree {
 
   /*!
    * \brief Creates minimal codes for the alphabet. Codes are only created for
-   * the symbols that are bigger than the previous power of two of the alphabet
-   * size.
+   * the symbols that are bigger than the previous power of two of the
+   * alphabet size.
    * \param alphabet Alphabet to create codes for.
    * \return Vector of codes.
    */
@@ -2261,8 +2308,8 @@ class WaveletTree {
   }
 
   /*!
-   * \brief Get the position of a node at a given level, i.e. whether it is the
-   * first, second...
+   * \brief Get the position of a node at a given level, i.e. whether it is
+   * the first, second...
    * \tparam IsPowTwo Whether the alphabet size is a power of two.
    * \param symbol Symbol that marks the start of the node.
    * \param level Level of the node.
@@ -2481,8 +2528,8 @@ class WaveletTree {
     // Pad shmem banks if memory suffices
     size_t padded_shmem = std::numeric_limits<size_t>::max();
     if constexpr (kBankSizeBytes <= sizeof(T)) {
-      // If the bank size is smaller than or equal to T, one element of padding
-      // per thread is needed.
+      // If the bank size is smaller than or equal to T, one element of
+      // padding per thread is needed.
       padded_shmem = shmem_per_thread * max_threads_per_SM +
                      sizeof(T) * max_threads_per_SM;
     } else {
@@ -2566,13 +2613,14 @@ class WaveletTree {
   }
 
   /*!
-   * \brief Get an upper bound of size of the GPU memory needed for the wavelet
-   * tree.
+   * \brief Get an upper bound of size of the GPU memory needed for the
+   * wavelet tree.
    * \param data_size Size of the data.
    * \param alphabet_size Size of the alphabet.
    * \param num_levels Number of levels in the wavelet tree.
    * \param num_codes Number of codes in the alphabet.
-   * \return Upper bound of size of the GPU memory needed for the wavelet tree.
+   * \return Upper bound of size of the GPU memory needed for the wavelet
+   * tree.
    */
   __host__ [[nodiscard]] static size_t getNeededGPUMemory(
       size_t const data_size, size_t const alphabet_size,

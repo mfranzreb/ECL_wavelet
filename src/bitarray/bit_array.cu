@@ -33,8 +33,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <numeric>
 #include <vector>
 
-#include "bit_array.cuh"
-#include "utils.cuh"
+#include "ecl_wavelet/bitarray/bit_array.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 // TODO: For funcs that use offsets, give the opt to pass the offset, and avoid
 // a mem access

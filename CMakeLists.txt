@@ -42,12 +42,9 @@ if(PROFILE AND CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo --ptxas-options=-v")
 endif()
 
-add_subdirectory(utils)
+add_subdirectory(include/ecl_wavelet)
 
-add_subdirectory(bitarray)
-
-add_subdirectory(tree)
-
+add_subdirectory(src)
 
 message(STATUS "OpenMP_CXX_FLAGS: ${OpenMP_CXX_FLAGS}")
 message(STATUS "CUDAToolkit_FLAGS: ${CMAKE_CUDA_FLAGS}")
@@ -57,7 +54,6 @@ if(BUILD_BENCHMARKS)
     add_subdirectory(third_party/benchmark)
     add_subdirectory(benchmark)
     set(GPU_ARCHITECTURE "sm_62")
-    add_subdirectory(third_party/NVBIO)
 endif()
 
 
@@ -69,4 +65,8 @@ endif()
 
 if(BUILD_KERNEL_TUNER)
     add_subdirectory(kernel_tuning)
+endif()
+
+if(BUILD_EXAMPLES)
+    add_subdirectory(example)
 endif()

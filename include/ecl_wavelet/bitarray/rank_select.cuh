@@ -32,9 +32,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
 
-#include <bit_array.cuh>
 #include <cstdint>
 #include <cub/device/device_scan.cuh>
+
+#include "ecl_wavelet/bitarray/bit_array.cuh"
 
 namespace ecl {
 /*!
@@ -82,7 +83,7 @@ class RankSelect {
   /*!
    * \brief Default constructor.
    */
-  __host__ RankSelect() noexcept = default;
+  RankSelect() noexcept = default;
 
   /*!
    * \brief Constructor. Creates the auxiliary information for efficient rank

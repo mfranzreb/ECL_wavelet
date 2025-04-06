@@ -6,9 +6,9 @@
 #include <random>
 #include <unordered_map>
 #include <vector>
-#include <wavelet_tree.cuh>
 
-#include "test_benchmark_utils.cuh"
+#include "ecl_wavelet/tree/wavelet_tree.cuh"
+#include "ecl_wavelet/utils/test_benchmark_utils.cuh"
 
 namespace ecl {
 

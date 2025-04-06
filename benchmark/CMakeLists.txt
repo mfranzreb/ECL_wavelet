@@ -5,7 +5,7 @@ set(TARGET ecl_RS_benchmarks)
 add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_rank_select_structure.cu")
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/bitarray/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
 
 
 # target_link_libraries(runTests YourMainProjectLibrary)
@@ -30,7 +30,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/profile_rank_select_constr
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/bitarray/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -77,7 +77,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_tree_constructio
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -106,7 +106,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_tree_constructio
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -135,7 +135,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_hist_computation
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/utils/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -163,7 +163,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/profile_tree_construction.
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -191,7 +191,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/profile_access.cu")
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -218,7 +218,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_access.cu")
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -247,7 +247,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_access_from_data
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -274,7 +274,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_queries.cu")
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -348,7 +348,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/profile_rank.cu")
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -375,7 +375,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_rank.cu")
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -427,7 +427,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_rank_from_data.c
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -454,7 +454,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/profile_select.cu")
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -481,7 +481,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_select.cu")
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include" "${CMAKE_SOURCE_DIR}/third_party/benchmark/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS
@@ -510,7 +510,7 @@ add_executable(${TARGET} "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_select_from_data
 
 
 # Add the ./include folder to the list of include directories
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/tree/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS

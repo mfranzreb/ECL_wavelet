@@ -1,9 +1,9 @@
 #include <random>
-#include <wavelet_tree.cuh>
 
-#include "test_benchmark_utils.cuh"
+#include "ecl_wavelet/tree/wavelet_tree.cuh"
+#include "ecl_wavelet/utils/test_benchmark_utils.cuh"
 
-int main(int argc, char** argv) {
+int main([[maybe_unused]] int argc, char** argv) {
   // size is first command line argument
   auto const data_size = std::stoul(argv[1]);
   auto const alphabet_size = std::stoul(argv[2]);

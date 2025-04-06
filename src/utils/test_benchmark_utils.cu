@@ -31,11 +31,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <omp.h>
 
 #include <algorithm>
-#include <bit_array.cuh>
 #include <random>
-#include <test_benchmark_utils.cuh>
-#include <utils.cuh>
 #include <vector>
+
+#include "ecl_wavelet/bitarray/bit_array.cuh"
+#include "ecl_wavelet/utils/test_benchmark_utils.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
 __global__ void writeWordsParallelKernel(BitArray bit_array, size_t array_index,

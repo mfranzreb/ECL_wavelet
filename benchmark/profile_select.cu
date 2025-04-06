@@ -1,9 +1,9 @@
 #include <cuda_profiler_api.h>
 
 #include <random>
-#include <wavelet_tree.cuh>
 
-#include "test_benchmark_utils.cuh"
+#include "ecl_wavelet/tree/wavelet_tree.cuh"
+#include "ecl_wavelet/utils/test_benchmark_utils.cuh"
 
 template <typename T>
 void profileSelect(size_t const data_size, size_t const alphabet_size,

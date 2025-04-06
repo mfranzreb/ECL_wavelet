@@ -39,7 +39,7 @@ std::vector<T> readDataFromFile(std::string const& filename,
   if (file_size == -1) {
     throw std::runtime_error("Failed to get file size: " + filename);
   }
-  if (num_symbols * sizeof(T) > file_size) {
+  if (num_symbols * sizeof(T) > static_cast<size_t>(file_size)) {
     throw std::runtime_error("Data size is larger than file size");
   }
   file.seekg(0, std::ios::beg);

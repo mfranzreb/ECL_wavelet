@@ -3,9 +3,9 @@
 #include <random>
 #include <sdsl/int_vector.hpp>
 #include <sdsl/wavelet_trees.hpp>
-#include <utils.cuh>
 
-#include "test_benchmark_utils.cuh"
+#include "ecl_wavelet/utils/test_benchmark_utils.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
 

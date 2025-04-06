@@ -1,10 +1,10 @@
 #include <benchmark/benchmark.h>
 
-#include <bit_array.cuh>
 #include <random>
-#include <rank_select.cuh>
 
-#include "test_benchmark_utils.cuh"
+#include "ecl_wavelet/bitarray/bit_array.cuh"
+#include "ecl_wavelet/bitarray/rank_select.cuh"
+#include "ecl_wavelet/utils/test_benchmark_utils.cuh"
 
 namespace ecl {
 

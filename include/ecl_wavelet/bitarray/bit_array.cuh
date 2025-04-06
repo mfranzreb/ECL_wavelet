@@ -32,7 +32,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cstdint>
 #include <vector>
 
-#include "utils.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
 

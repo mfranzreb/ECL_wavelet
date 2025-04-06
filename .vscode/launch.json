@@ -64,7 +64,7 @@
       "name": "Debug bitarray benchmarks CUDA",
       "type": "cuda-gdb",
       "request": "launch",
-      "program": "${workspaceFolder}/build/benchmark/ecl_RS_benchmarks",
+      "program": "${workspaceFolder}/build/benchmark/pasta_RS_benchmarks",
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "build bitarray benchmarks"
@@ -73,7 +73,7 @@
       "name": "Debug bitarray benchmarks",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/benchmark/ecl_RS_benchmarks",
+      "program": "${workspaceFolder}/build/benchmark/pasta_RS_benchmarks",
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "MIMode": "gdb",
@@ -104,8 +104,8 @@
       "name": "Debug tune plot",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/kernel_tuning/plot_kernel_tunes.py",
-      "args": ["kernel_tuning/FLK.csv", "."],
+      "program": "${workspaceFolder}/benchmark/plot_queries.py",
+      "args": ["./benchmark/results_final/", "."],
       "console": "integratedTerminal"
     },
     {
@@ -191,7 +191,7 @@
       "name": "Debug RS benchmark",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/benchmark/ecl_RS_benchmarks",
+      "program": "${workspaceFolder}/build/benchmark/pasta_RS_benchmarks",
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "MIMode": "gdb",
@@ -267,10 +267,33 @@
       "preLaunchTask": "build WT bm"
     },
     {
+      "name": "Debug example",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/example/ecl_example",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set Disassembly Flavor to Intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build example"
+    },
+    {
       "name": "Debug access bm from data",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/benchmark/ecl_access_benchmark_from_data",
+      "program": "${workspaceFolder}/build/benchmark/ecl_bm_tree_construction_from_data",
       "args": ["0", "1", "./benchmark/data", "."],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",

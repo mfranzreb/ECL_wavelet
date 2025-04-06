@@ -1,9 +1,9 @@
 set(TARGET ecl_wavelet_tree)
 
 
-add_library(${TARGET} STATIC "${CMAKE_CURRENT_SOURCE_DIR}/include/wavelet_tree.cuh")  
+add_library(${TARGET} STATIC "${CMAKE_CURRENT_SOURCE_DIR}/tree/wavelet_tree.cuh")  
 
-include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/bitarray/include" "${CMAKE_SOURCE_DIR}/utils/include")
+include_directories(${TARGET} "${CMAKE_SOURCE_DIR}/include")
 
 target_include_directories(${TARGET}
     PRIVATE OpenMP_<CXX>_INCLUDE_DIRS

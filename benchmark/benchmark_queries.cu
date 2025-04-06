@@ -1,6 +1,6 @@
-#include <test_benchmark_utils.cuh>
-#include <utils.cuh>
-#include <wavelet_tree.cuh>
+#include "ecl_wavelet/tree/wavelet_tree.cuh"
+#include "ecl_wavelet/utils/test_benchmark_utils.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
 

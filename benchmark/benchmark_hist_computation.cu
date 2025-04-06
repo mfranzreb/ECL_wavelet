@@ -3,7 +3,7 @@
 #include <cub/device/device_histogram.cuh>
 #include <random>
 
-#include "test_benchmark_utils.cuh"
+#include "ecl_wavelet/utils/test_benchmark_utils.cuh"
 
 namespace ecl {
 
@@ -146,7 +146,7 @@ static void BM_HistComputation(benchmark::State& state) {
   gpuErrchk(cudaMemcpy(d_alphabet, alphabet.data(), alphabet_size * sizeof(T),
                        cudaMemcpyHostToDevice));
   gpuErrchk(cudaMalloc(&d_histogram, alphabet_size * sizeof(size_t)));
-  bool could_use_shmem;
+  bool could_use_shmem = false;
   for (auto _ : state) {
     gpuErrchk(cudaMemset(d_histogram, 0, alphabet_size * sizeof(size_t)));
     could_use_shmem =

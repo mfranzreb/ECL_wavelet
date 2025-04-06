@@ -30,7 +30,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 #include <omp.h>
 
-#include <bit_array.cuh>
 #include <cassert>
 #include <condition_variable>
 #include <cstdint>
@@ -38,9 +37,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <mutex>
 #include <numeric>
 #include <queue>
-#include <rank_select.cuh>
-#include <utils.cuh>
 #include <vector>
+
+#include "ecl_wavelet/bitarray/bit_array.cuh"
+#include "ecl_wavelet/bitarray/rank_select.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
 

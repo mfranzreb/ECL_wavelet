@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include <omp.h>
 
-#include "test_benchmark_utils.cuh"
-#include "utils.cuh"
+#include "ecl_wavelet/utils/test_benchmark_utils.cuh"
+#include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
 

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "bit_array.cuh"
+#include "ecl_wavelet/bitarray/bit_array.cuh"
 
 namespace ecl {
 

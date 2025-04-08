@@ -39,6 +39,7 @@ for name, df in gpu_dfs.items():
     fill_rates = gpu_construct_dfs[name]["param.fill_rate"].unique()
 
 plt.rcParams["font.family"] = "cmr10"
+plt.rcParams["font.size"] = 14
 
 # Plot configuration
 fig, axes = plt.subplots(2, len(fill_rates), figsize=(5 * len(fill_rates), 10))
@@ -81,13 +82,13 @@ for row, is_adversarial in enumerate([0, 1]):
 fig.tight_layout()
 plt.savefig(basedir + "/results/RS_construction.png", dpi=300)
 
-cpu_rank_0_dfs = {}
+cpu_rank_dfs = {}
 for name, df in cpu_dfs.items():
-    cpu_rank_0_dfs[name] = df[df["name"].str.lower().str.contains("binaryrank<0>")]
+    cpu_rank_dfs[name] = df[df["name"].str.lower().str.contains("binaryrank")]
 
-gpu_rank_0_dfs = {}
+gpu_rank_dfs = {}
 for name, df in gpu_dfs.items():
-    gpu_rank_0_dfs[name] = df[df["name"].str.lower().str.contains("binaryrank<0>")]
+    gpu_rank_dfs[name] = df[df["name"].str.lower().str.contains("binaryrank")]
 
 # Plot configuration
 fig, axes = plt.subplots(2, len(fill_rates), figsize=(5 * len(fill_rates), 10))
@@ -95,49 +96,83 @@ fig, axes = plt.subplots(2, len(fill_rates), figsize=(5 * len(fill_rates), 10))
 for row, is_adversarial in enumerate([0, 1]):
     for col, fill_rate in enumerate(fill_rates):
         ax = axes[row, col]
-        for name, df in cpu_rank_0_dfs.items():
+        for name, df in cpu_rank_dfs.items():
             group = df[df["param.fill_rate"] == fill_rate]
             group = group[group["param.is_adversarial"] == is_adversarial]
-            ax.plot(
-                group["param.size"],
-                # convert to throughput
-                1000 * (group["param.num_queries"] / group["median_real_time"]),
-                label=name,
-                marker="o",
-                color="blue",
-            )
-        for name, df in gpu_rank_0_dfs.items():
+            for query_type in [0, 1]:
+                subgroup = group[
+                    group["name"].str.lower().str.contains(f"binaryrank<{query_type}>")
+                ]
+                ax.plot(
+                    subgroup["param.size"],
+                    # convert to throughput
+                    1000
+                    * (subgroup["param.num_queries"] / subgroup["median_real_time"]),
+                    marker="o",
+                    color="blue",
+                    linestyle="--" if query_type == 0 else "-",
+                )
+        for name, df in gpu_rank_dfs.items():
             group = df[df["param.fill_rate"] == fill_rate]
             group = group[group["param.is_adversarial"] == is_adversarial]
-            ax.plot(
-                group["param.size"],
-                1000 * (group["param.num_queries"] / group["median_real_time"]),
-                label=name,
-                marker="o",
-                color="red" if name == "A100" else "green",
-            )
+            for query_type in [0, 1]:
+                subgroup = group[
+                    group["name"].str.lower().str.contains(f"binaryrank<{query_type}>")
+                ]
+                ax.plot(
+                    subgroup["param.size"],
+                    # convert to throughput
+                    1000
+                    * (subgroup["param.num_queries"] / subgroup["median_real_time"]),
+                    marker="o",
+                    color="red" if name == "A100" else "green",
+                    linestyle="--" if query_type == 0 else "-",
+                )
         ax.set_title("Fill count: " + str(fill_rate) + " %")
         ax.set_xlabel("bits")
         if col == 0:
             ax.set_ylabel(
                 f"Throughput (queries/s) - {'Adversarial' if is_adversarial else 'Uniform'} distribution"
             )
-            if row == 0:
-                ax.legend(loc="upper left", bbox_to_anchor=(0.0, 1))
         ax.set_xscale("log", base=2)
         ax.set_yscale("log")
         ax.grid()
 
+# manual legend
+handles = [
+    plt.Line2D([0], [0], color="blue", lw=2),
+    plt.Line2D([0], [0], color="red", lw=2),
+    plt.Line2D([0], [0], color="green", lw=2),
+    plt.Line2D([0], [0], color="black", lw=2, linestyle="--"),
+    plt.Line2D([0], [0], color="black", lw=2),
+]
+labels = [
+    "CPU",
+    "A100",
+    "3090",
+    r"Rank$_0$",
+    r"Rank$_1$",
+]
+fig.legend(
+    handles,
+    labels,
+    loc="lower center",
+    bbox_to_anchor=(0.5, 0.0),
+    ncol=5,
+    fontsize=14,
+)
 fig.tight_layout()
-plt.savefig(basedir + "/results/RS_rank_0.png", dpi=300)
+# add extra space at the bottom
+fig.subplots_adjust(bottom=0.1)
+plt.savefig(basedir + "/results/RS_rank.png", dpi=300)
 
-cpu_rank_1_dfs = {}
+cpu_select_dfs = {}
 for name, df in cpu_dfs.items():
-    cpu_rank_1_dfs[name] = df[df["name"].str.lower().str.contains("binaryrank<1>")]
+    cpu_select_dfs[name] = df[df["name"].str.lower().str.contains("binaryselect")]
 
-gpu_rank_1_dfs = {}
+gpu_select_dfs = {}
 for name, df in gpu_dfs.items():
-    gpu_rank_1_dfs[name] = df[df["name"].str.lower().str.contains("binaryrank<1>")]
+    gpu_select_dfs[name] = df[df["name"].str.lower().str.contains("binaryselect")]
 
 # Plot configuration
 fig, axes = plt.subplots(2, len(fill_rates), figsize=(5 * len(fill_rates), 10))
@@ -145,135 +180,77 @@ fig, axes = plt.subplots(2, len(fill_rates), figsize=(5 * len(fill_rates), 10))
 for row, is_adversarial in enumerate([0, 1]):
     for col, fill_rate in enumerate(fill_rates):
         ax = axes[row, col]
-        for name, df in cpu_rank_1_dfs.items():
+        for name, df in cpu_select_dfs.items():
             group = df[df["param.fill_rate"] == fill_rate]
             group = group[group["param.is_adversarial"] == is_adversarial]
-            ax.plot(
-                group["param.size"],
-                1000 * (group["param.num_queries"] / group["median_real_time"]),
-                label=name,
-                marker="o",
-                color="blue",
-            )
-        for name, df in gpu_rank_1_dfs.items():
+            for query_type in [0, 1]:
+                subgroup = group[
+                    group["name"]
+                    .str.lower()
+                    .str.contains(f"binaryselect<{query_type}>")
+                ]
+                ax.plot(
+                    subgroup["param.size"],
+                    # convert to throughput
+                    1000
+                    * (subgroup["param.num_queries"] / subgroup["median_real_time"]),
+                    marker="o",
+                    color="blue",
+                    linestyle="--" if query_type == 0 else "-",
+                )
+        for name, df in gpu_select_dfs.items():
             group = df[df["param.fill_rate"] == fill_rate]
             group = group[group["param.is_adversarial"] == is_adversarial]
-            ax.plot(
-                group["param.size"],
-                1000 * (group["param.num_queries"] / group["median_real_time"]),
-                label=name,
-                marker="o",
-                color="red" if name == "A100" else "green",
-            )
+            for query_type in [0, 1]:
+                subgroup = group[
+                    group["name"]
+                    .str.lower()
+                    .str.contains(f"binaryselect<{query_type}>")
+                ]
+                ax.plot(
+                    subgroup["param.size"],
+                    # convert to throughput
+                    1000
+                    * (subgroup["param.num_queries"] / subgroup["median_real_time"]),
+                    marker="o",
+                    color="red" if name == "A100" else "green",
+                    linestyle="--" if query_type == 0 else "-",
+                )
         ax.set_title("Fill count: " + str(fill_rate) + " %")
         ax.set_xlabel("bits")
         if col == 0:
             ax.set_ylabel(
                 f"Throughput (queries/s) - {'Adversarial' if is_adversarial else 'Uniform'} distribution"
             )
-            if row == 0:
-                ax.legend(loc="upper left", bbox_to_anchor=(0.0, 1))
         ax.set_xscale("log", base=2)
         ax.set_yscale("log")
         ax.grid()
 
+# manual legend
+handles = [
+    plt.Line2D([0], [0], color="blue", lw=2),
+    plt.Line2D([0], [0], color="red", lw=2),
+    plt.Line2D([0], [0], color="green", lw=2),
+    plt.Line2D([0], [0], color="black", lw=2, linestyle="--"),
+    plt.Line2D([0], [0], color="black", lw=2),
+]
+labels = [
+    "CPU",
+    "A100",
+    "3090",
+    r"Select$_0$",
+    r"Select$_1$",
+]
+fig.legend(
+    handles,
+    labels,
+    loc="lower center",
+    bbox_to_anchor=(0.5, 0.0),
+    ncol=5,
+    fontsize=14,
+)
 fig.tight_layout()
-plt.savefig(basedir + "/results/RS_rank_1.png", dpi=300)
-
-cpu_select_0_dfs = {}
-for name, df in cpu_dfs.items():
-    cpu_select_0_dfs[name] = df[df["name"].str.lower().str.contains("binaryselect<0>")]
-
-gpu_select_0_dfs = {}
-for name, df in gpu_dfs.items():
-    gpu_select_0_dfs[name] = df[df["name"].str.lower().str.contains("binaryselect<0>")]
-
-# Plot configuration
-fig, axes = plt.subplots(2, len(fill_rates), figsize=(5 * len(fill_rates), 10))
-
-for row, is_adversarial in enumerate([0, 1]):
-    for col, fill_rate in enumerate(fill_rates):
-        ax = axes[row, col]
-        for name, df in cpu_select_0_dfs.items():
-            group = df[df["param.fill_rate"] == fill_rate]
-            group = group[group["param.is_adversarial"] == is_adversarial]
-            ax.plot(
-                group["param.size"],
-                1000 * (group["param.num_queries"] / group["median_real_time"]),
-                label=name,
-                marker="o",
-                color="blue",
-            )
-        for name, df in gpu_select_0_dfs.items():
-            group = df[df["param.fill_rate"] == fill_rate]
-            group = group[group["param.is_adversarial"] == is_adversarial]
-            ax.plot(
-                group["param.size"],
-                1000 * (group["param.num_queries"] / group["median_real_time"]),
-                label=name,
-                marker="o",
-                color="red" if name == "A100" else "green",
-            )
-        ax.set_title("Fill count: " + str(fill_rate) + " %")
-        ax.set_xlabel("bits")
-        if col == 0:
-            ax.set_ylabel(
-                f"Throughput (queries/s) - {'Adversarial' if is_adversarial else 'Uniform'} distribution"
-            )
-            if row == 0:
-                ax.legend(loc="upper left", bbox_to_anchor=(0.0, 1))
-        ax.set_xscale("log", base=2)
-        ax.set_yscale("log")
-        ax.grid()
-
-fig.tight_layout()
-plt.savefig(basedir + "/results/RS_select_0.png", dpi=300)
-
-cpu_select_1_dfs = {}
-for name, df in cpu_dfs.items():
-    cpu_select_1_dfs[name] = df[df["name"].str.lower().str.contains("binaryselect<1>")]
-
-gpu_select_1_dfs = {}
-for name, df in gpu_dfs.items():
-    gpu_select_1_dfs[name] = df[df["name"].str.lower().str.contains("binaryselect<1>")]
-
-# Plot configuration
-fig, axes = plt.subplots(2, len(fill_rates), figsize=(5 * len(fill_rates), 10))
-
-for row, is_adversarial in enumerate([0, 1]):
-    for col, fill_rate in enumerate(fill_rates):
-        ax = axes[row, col]
-        for name, df in cpu_select_1_dfs.items():
-            group = df[df["param.fill_rate"] == fill_rate]
-            group = group[group["param.is_adversarial"] == is_adversarial]
-            ax.plot(
-                group["param.size"],
-                1000 * (group["param.num_queries"] / group["median_real_time"]),
-                label=name,
-                marker="o",
-                color="blue",
-            )
-        for name, df in gpu_select_1_dfs.items():
-            group = df[df["param.fill_rate"] == fill_rate]
-            group = group[group["param.is_adversarial"] == is_adversarial]
-            ax.plot(
-                group["param.size"],
-                1000 * (group["param.num_queries"] / group["median_real_time"]),
-                label=name,
-                marker="o",
-                color="red" if name == "A100" else "green",
-            )
-        ax.set_title("Fill count: " + str(fill_rate) + " %")
-        ax.set_xlabel("bits")
-        if col == 0:
-            ax.set_ylabel(
-                f"Throughput (queries/s) - {'Adversarial' if is_adversarial else 'Uniform'} distribution"
-            )
-            if row == 0:
-                ax.legend(loc="upper left", bbox_to_anchor=(0.0, 1))
-        ax.set_xscale("log", base=2)
-        ax.set_yscale("log")
-        ax.grid()
-
-fig.tight_layout()
-plt.savefig(basedir + "/results/RS_select_1.png", dpi=300)
+# add extra space at the bottom
+fig.subplots_adjust(bottom=0.1)
+plt.savefig(basedir + "/results/RS_select.png", dpi=300)
+plt.close("all")

@@ -13,8 +13,9 @@ void profileAccess(size_t const data_size, size_t const alphabet_size,
   std::vector<T> data;
   alphabet = std::vector<T>(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-  data = ecl::generateRandomData<T>(alphabet, data_size);
-  auto queries = ecl::generateRandomAccessQueries(data_size, num_queries);
+  data = ecl::utils::generateRandomData<T>(alphabet, data_size);
+  auto queries =
+      ecl::utils::generateRandomAccessQueries(data_size, num_queries);
   ecl::WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), 0);
   auto results = wt.access(queries.data(), num_queries);
   if (use_profiler_api) {
@@ -31,7 +32,8 @@ int main(int argc, char** argv) {
   auto const num_queries = std::stoul(argv[3]);
   bool const use_profiler_api = argc > 4 ? std::stoi(argv[4]) : false;
 
-  auto queries = ecl::generateRandomAccessQueries(data_size, num_queries);
+  auto queries =
+      ecl::utils::generateRandomAccessQueries(data_size, num_queries);
 
   if (alphabet_size < std::numeric_limits<uint8_t>::max()) {
     profileAccess<uint8_t>(data_size, alphabet_size, num_queries,

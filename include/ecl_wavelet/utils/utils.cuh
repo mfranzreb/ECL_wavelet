@@ -67,6 +67,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 namespace ecl {
+template <typename T>
+struct RankSelectQuery {
+  size_t index_;
+  T symbol_;
+};
+namespace utils {
 inline uint32_t kMaxTPB = 0;
 inline uint32_t kMinTPB = 0;
 inline uint32_t kMinBPM = 0;
@@ -74,10 +80,6 @@ constexpr uint8_t kBankSizeBytes = 4;
 constexpr uint8_t kBanksPerLine = 32;
 static constexpr uint8_t kMinAlphabetSize = 2;
 
-#define gpuErrchk(ans)                    \
-  {                                       \
-    gpuAssert((ans), __FILE__, __LINE__); \
-  }
 __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
                                           int line, bool abort = true) {
   if (code != cudaSuccess) {
@@ -91,7 +93,6 @@ __host__ __device__ inline void gpuAssert(cudaError_t code, const char *file,
     }
   }
 }
-
 /*!
  * \brief Get a launch configuration for a kernel given a number of warps that
  * matches the given number of warps as closely as possible while ensuring that
@@ -180,15 +181,11 @@ __host__ void checkWarpSize(uint32_t const GPU_index);
   {                                        \
     gpuAssert((ans), file, line);          \
   }
-
-#define kernelCheck() kernelCheckFunc(__FILE__, __LINE__)
 __host__ inline void kernelCheckFunc(const char *file, int line) {
   gpuErrchkInternal(cudaGetLastError(), file, line);
   gpuErrchkInternal(cudaDeviceSynchronize(), file, line);
 }
 
-#define kernelStreamCheck(stream) \
-  kernelStreamCheckFunc(stream, __FILE__, __LINE__)
 __host__ inline void kernelStreamCheckFunc(cudaStream_t stream,
                                            const char *file, int line) {
   gpuErrchkInternal(cudaGetLastError(), file, line);
@@ -305,15 +302,20 @@ __device__ void shareVar(bool condition, T &var, uint32_t const mask) {
   }
 }
 
-template <typename T>
-struct RankSelectQuery {
-  size_t index_;
-  T symbol_;
-};
-
 /*!
  * \brief Get the available RAM memory on a Linux system.
  */
 int64_t getAvailableMemoryLinux();
 
+}  // namespace utils
 }  // namespace ecl
+
+#define gpuErrchk(ans)                                \
+  {                                                   \
+    ecl::utils::gpuAssert((ans), __FILE__, __LINE__); \
+  }
+
+#define kernelStreamCheck(stream) \
+  ecl::utils::kernelStreamCheckFunc(stream, __FILE__, __LINE__)
+
+#define kernelCheck() ecl::utils::kernelCheckFunc(__FILE__, __LINE__)

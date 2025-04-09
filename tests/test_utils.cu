@@ -16,12 +16,12 @@ class UtilsTest : public ::testing::Test {
 
 template <typename T>
 __global__ void getPrevPowTwoKernel(T n, T *result) {
-  *result = getPrevPowTwo(n);
+  *result = utils::getPrevPowTwo(n);
 }
 
 template <typename T>
 __global__ void ceilLog2Kernel(T n, T *result) {
-  *result = ceilLog2<T>(n);
+  *result = utils::ceilLog2<T>(n);
 }
 
 using MyTypes = testing::Types<uint8_t, uint16_t, uint32_t, uint64_t>;
@@ -35,7 +35,7 @@ TYPED_TEST(UtilsTest, getPrevPowTwo) {
     getPrevPowTwoKernel<TypeParam><<<1, 1>>>(i, this->result);
     kernelCheck();
     EXPECT_EQ(*this->result, expected);
-    if (isPowTwo(i)) {
+    if (utils::isPowTwo(i)) {
       expected = i;
     }
   }
@@ -46,11 +46,11 @@ TYPED_TEST(UtilsTest, ceilLog2) {
       size_t(1024), static_cast<size_t>(std::numeric_limits<TypeParam>::max()));
   uint32_t expected = 0;
   for (TypeParam i = 1; i < limit; ++i) {
-    EXPECT_EQ(ceilLog2<TypeParam>(i), expected);
+    EXPECT_EQ(utils::ceilLog2<TypeParam>(i), expected);
     ceilLog2Kernel<TypeParam><<<1, 1>>>(i, this->result);
     kernelCheck();
     EXPECT_EQ(*this->result, expected);
-    if (isPowTwo(i)) {
+    if (utils::isPowTwo(i)) {
       expected++;
     }
   }
@@ -61,7 +61,7 @@ TYPED_TEST(UtilsTest, RSQueriesGenerator) {
     size_t constexpr kNumIters = 100;
     size_t const num_queries = omp_get_num_procs();
     auto [alphabet_sizes, data_sizes] =
-        generateRandomAlphabetAndDataSizes<TypeParam, true>(
+        utils::generateRandomAlphabetAndDataSizes<TypeParam, true>(
             1000, static_cast<size_t>(2e9) / sizeof(TypeParam), kNumIters);
     std::vector<RankSelectQuery<TypeParam>> rank_queries(num_queries);
     std::vector<RankSelectQuery<TypeParam>> select_queries(num_queries);
@@ -70,8 +70,8 @@ TYPED_TEST(UtilsTest, RSQueriesGenerator) {
     for (size_t i = 0; i < kNumIters; ++i) {
       size_t const data_size = data_sizes[i];
       size_t const alphabet_size = alphabet_sizes[i];
-      auto alphabet = generateRandomAlphabet<TypeParam>(alphabet_size);
-      auto data = generateRandomDataAndRSQueries<TypeParam>(
+      auto alphabet = utils::generateRandomAlphabet<TypeParam>(alphabet_size);
+      auto data = utils::generateRandomDataAndRSQueries<TypeParam>(
           alphabet, data_size, num_queries, rank_queries, select_queries,
           rank_results, select_results);
 #pragma omp parallel for

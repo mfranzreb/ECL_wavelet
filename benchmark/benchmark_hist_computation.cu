@@ -64,12 +64,13 @@ __host__ bool computeGlobalHistogram(size_t const data_size, T* d_data,
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
                                   computeGlobalHistogramKernel<T, true>));
 
-  uint32_t maxThreadsPerBlockHist =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  uint32_t maxThreadsPerBlockHist = std::min(
+      utils::kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
 
-  maxThreadsPerBlockHist = findLargestDivisor(kMaxTPB, maxThreadsPerBlockHist);
+  maxThreadsPerBlockHist =
+      utils::findLargestDivisor(utils::kMaxTPB, maxThreadsPerBlockHist);
 
-  struct cudaDeviceProp prop = getDeviceProperties();
+  struct cudaDeviceProp prop = utils::getDeviceProperties();
 
   auto const max_shmem_per_SM = prop.sharedMemPerMultiprocessor;
   auto const max_threads_per_SM = prop.maxThreadsPerMultiProcessor;
@@ -78,9 +79,9 @@ __host__ bool computeGlobalHistogram(size_t const data_size, T* d_data,
   auto const hists_per_SM = max_shmem_per_SM / hist_size;
 
   auto min_block_size =
-      hists_per_SM < kMinBPM
-          ? kMinTPB
-          : std::max(kMinTPB,
+      hists_per_SM < utils::kMinBPM
+          ? utils::kMinTPB
+          : std::max(utils::kMinTPB,
                      static_cast<uint32_t>(max_threads_per_SM / hists_per_SM));
 
   // Make the minimum block size a multiple of WS
@@ -95,7 +96,7 @@ __host__ bool computeGlobalHistogram(size_t const data_size, T* d_data,
   }
 
   auto [num_blocks, threads_per_block] =
-      getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockHist);
+      utils::getLaunchConfig(num_warps, min_block_size, maxThreadsPerBlockHist);
 
   uint16_t const blocks_per_SM = max_threads_per_SM / threads_per_block;
 
@@ -120,7 +121,7 @@ __host__ bool computeGlobalHistogram(size_t const data_size, T* d_data,
 
 template <typename T>
 static void BM_HistComputation(benchmark::State& state) {
-  checkWarpSize(0);
+  utils::checkWarpSize(0);
 
   auto const data_size = state.range(0);
   auto const alphabet_size = state.range(1);
@@ -129,7 +130,7 @@ static void BM_HistComputation(benchmark::State& state) {
 
   auto alphabet = std::vector<T>(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-  auto data = generateRandomData<T>(alphabet, data_size);
+  auto data = utils::generateRandomData<T>(alphabet, data_size);
 
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;
@@ -167,7 +168,7 @@ static void BM_HistComputationCUB(benchmark::State& state) {
 
   auto alphabet = std::vector<T>(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-  auto data = generateRandomData<T>(alphabet, data_size);
+  auto data = utils::generateRandomData<T>(alphabet, data_size);
 
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;

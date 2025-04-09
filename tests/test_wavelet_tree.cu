@@ -95,7 +95,7 @@ using MyTypes = testing::Types<uint8_t, uint16_t, uint32_t, uint64_t>;
 TYPED_TEST_SUITE(WaveletTreeTestFixture, MyTypes);
 
 TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
-  checkWarpSize(kGPUIndex);
+  utils::checkWarpSize(kGPUIndex);
   std::vector<TypeParam> data{1, 2, 3, 4, 5, 6, 7, 8, 9};
   {
     std::vector<TypeParam> alphabet{1, 2, 3, 4, 5, 6, 7, 8, 9};
@@ -132,7 +132,8 @@ TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
         data[i] = i % alphabet.size();
       }
       std::vector<size_t> data_sizes(50);
-      generateRandomNums<size_t, true>(data_sizes, size_t(1000), max_data_size);
+      utils::generateRandomNums<size_t, true>(data_sizes, size_t(1000),
+                                              max_data_size);
       for (size_t data_size : data_sizes) {
         auto alphabet_copy = alphabet;
         try {
@@ -154,7 +155,7 @@ TYPED_TEST(WaveletTreeTestFixture, WaveletTreeConstructor) {
         data[i] = i % alphabet.size();
       }
       std::vector<size_t> data_sizes(50);
-      generateRandomNums(data_sizes, size_t(1000), max_data_size);
+      utils::generateRandomNums(data_sizes, size_t(1000), max_data_size);
       for (size_t data_size : data_sizes) {
         auto alphabet_copy = alphabet;
         try {
@@ -224,8 +225,9 @@ TYPED_TEST(WaveletTreeTestFixture, getNodePosRandom) {
 #pragma nv_diag_default 128
     size_t alphabet_size =
 
-        kMinAlphabetSize +
-        (rand() % (std::numeric_limits<TypeParam>::max() - kMinAlphabetSize));
+        utils::kMinAlphabetSize +
+        (rand() %
+         (std::numeric_limits<TypeParam>::max() - utils::kMinAlphabetSize));
 
     std::vector<TypeParam> alphabet(alphabet_size);
     std::iota(alphabet.begin(), alphabet.end(), 0ULL);
@@ -238,7 +240,7 @@ TYPED_TEST(WaveletTreeTestFixture, getNodePosRandom) {
     auto const node_starts =
         WaveletTreeTest<TypeParam>::getNodeInfos(alphabet, codes);
     TypeParam node_counter = 0;
-    bool const is_pow_two = isPowTwo<TypeParam>(alphabet_size);
+    bool const is_pow_two = utils::isPowTwo<TypeParam>(alphabet_size);
     for (size_t j = 0; j < node_starts.size(); ++j) {
       if (j > 0 and node_starts[j].level_ != node_starts[j - 1].level_) {
         node_counter = 0;
@@ -381,14 +383,14 @@ TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogramRandom) {
   size_t free_mem, total_mem;
   gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
   auto [alphabet_sizes, data_sizes] =
-      generateRandomAlphabetAndDataSizes<TypeParam, true>(
+      utils::generateRandomAlphabetAndDataSizes<TypeParam, true>(
           1000, free_mem / (3 * sizeof(TypeParam)), kNumIters);
   for (size_t i = 0; i < kNumIters; i++) {
     size_t const data_size = data_sizes[i];
     size_t alphabet_size = alphabet_sizes[i];
 
     std::unordered_map<TypeParam, size_t> hist_should;
-    auto [alphabet, data] = generateRandomAlphabetDataAndHist<TypeParam>(
+    auto [alphabet, data] = utils::generateRandomAlphabetDataAndHist<TypeParam>(
         alphabet_size, data_size, hist_should);
 
     alphabet_size = alphabet.size();
@@ -415,8 +417,8 @@ TYPED_TEST(WaveletTreeTestFixture, TestGlobalHistogramRandom) {
       WaveletTreeTest<TypeParam> wt(data.data(), data_size,
                                     std::move(alphabet_copy), kGPUIndex);
 
-      wt.computeGlobalHistogram(isPowTwo<TypeParam>(alphabet_size), data_size,
-                                d_data, d_alphabet, d_histogram);
+      wt.computeGlobalHistogram(utils::isPowTwo<TypeParam>(alphabet_size),
+                                data_size, d_data, d_alphabet, d_histogram);
 
       // Pass the histogram to the host
       std::vector<size_t> h_histogram(alphabet_size);
@@ -711,7 +713,7 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
   gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
 
   auto [alphabet_sizes, data_sizes] =
-      generateRandomAlphabetAndDataSizes<TypeParam, true>(
+      utils::generateRandomAlphabetAndDataSizes<TypeParam, true>(
           1000, free_mem / sizeof(TypeParam), kNumIters);
 
   std::vector<RankSelectQuery<TypeParam>> rank_queries(kNumQueries);
@@ -723,15 +725,15 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
     size_t alphabet_size = alphabet_sizes[i];
     size_t const num_queries = std::min(data_size / 2, kNumQueries);
 
-    auto alphabet = generateRandomAlphabet<TypeParam>(alphabet_size);
-    auto data = generateRandomDataAndRSQueries<TypeParam>(
+    auto alphabet = utils::generateRandomAlphabet<TypeParam>(alphabet_size);
+    auto data = utils::generateRandomDataAndRSQueries<TypeParam>(
         alphabet, data_size, num_queries, rank_queries, select_queries,
         rank_results, select_results);
 
     try {
       WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                                 kGPUIndex);
-      auto indices = generateRandomAccessQueries(data_size, num_queries);
+      auto indices = utils::generateRandomAccessQueries(data_size, num_queries);
       compareAccessResults<TypeParam>(wt, indices, data);
 
       compareRankResults<TypeParam>(wt, rank_queries, rank_results,
@@ -750,17 +752,17 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
     size_t data_size = free_mem / (2 * sizeof(TypeParam));
     size_t const num_queries = std::min(data_size / 2, kNumQueries);
     for (size_t const alphabet_size :
-         std::vector<size_t>{kMinAlphabetSize, 4, 32, 128, 256}) {
+         std::vector<size_t>{utils::kMinAlphabetSize, 4, 32, 128, 256}) {
       std::vector<TypeParam> alphabet(alphabet_size);
       std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-      auto data = generateRandomDataAndRSQueries<TypeParam>(
+      auto data = utils::generateRandomDataAndRSQueries<TypeParam>(
           alphabet, data_size, num_queries, rank_queries, select_queries,
           rank_results, select_results);
 
       WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                                 kGPUIndex);
 
-      auto indices = generateRandomAccessQueries(data_size, num_queries);
+      auto indices = utils::generateRandomAccessQueries(data_size, num_queries);
       compareAccessResults<TypeParam>(wt, indices, data);
 
       compareRankResults<TypeParam>(wt, rank_queries, rank_results,
@@ -775,13 +777,13 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
     size_t alphabet_size = 1 << 16;
     std::vector<TypeParam> alphabet(alphabet_size);
     std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-    auto data = generateRandomDataAndRSQueries<TypeParam>(
+    auto data = utils::generateRandomDataAndRSQueries<TypeParam>(
         alphabet, data_size, num_queries, rank_queries, select_queries,
         rank_results, select_results);
 
     WaveletTree<TypeParam> wt(data.data(), data.size(), std::move(alphabet),
                               kGPUIndex);
-    auto indices = generateRandomAccessQueries(data_size, num_queries);
+    auto indices = utils::generateRandomAccessQueries(data_size, num_queries);
     compareAccessResults<TypeParam>(wt, indices, data);
 
     compareRankResults<TypeParam>(wt, rank_queries, rank_results, num_queries);
@@ -794,8 +796,8 @@ TYPED_TEST(WaveletTreeTestFixture, queriesRandom) {
 TYPED_TEST(WaveletTreeTestFixture, genAlphabetRandom) {
   size_t constexpr kNumIters = 20;
   std::vector<size_t> alphabet_sizes(kNumIters);
-  generateRandomNums<size_t>(
-      alphabet_sizes, kMinAlphabetSize,
+  utils::generateRandomNums<size_t>(
+      alphabet_sizes, utils::kMinAlphabetSize,
       std::min(static_cast<size_t>(std::numeric_limits<TypeParam>::max()),
                size_t(100'000)));
 
@@ -803,7 +805,7 @@ TYPED_TEST(WaveletTreeTestFixture, genAlphabetRandom) {
     size_t const alphabet_size = alphabet_sizes[i];
     std::vector<TypeParam> alphabet(alphabet_size);
     std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-    auto data = generateRandomData<TypeParam>(alphabet, 10'000'000);
+    auto data = utils::generateRandomData<TypeParam>(alphabet, 10'000'000);
     // Add alphabet at the end to make sure all symbols are present
     data.insert(data.end(), alphabet.begin(), alphabet.end());
     WaveletTreeTest<TypeParam> wt(data.data(), data.size(),

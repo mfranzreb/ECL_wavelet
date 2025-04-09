@@ -12,9 +12,9 @@ void profileRank(size_t const data_size, size_t const alphabet_size,
   std::vector<T> data;
   alphabet = std::vector<T>(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-  data = ecl::generateRandomData<T>(alphabet, data_size);
-  auto const queries =
-      ecl::generateRandomRankQueries<T>(data_size, num_queries, alphabet);
+  data = ecl::utils::generateRandomData<T>(alphabet, data_size);
+  auto const queries = ecl::utils::generateRandomRankQueries<T>(
+      data_size, num_queries, alphabet);
   ecl::WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), 0);
 
   auto queries_copy = queries;

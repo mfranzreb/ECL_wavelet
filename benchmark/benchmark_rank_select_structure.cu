@@ -29,7 +29,7 @@ __global__ LB(MAX_TPB, MIN_BPM) void binarySelectKernel(
 }
 
 static void BM_RankSelectConstruction(benchmark::State& state) {
-  checkWarpSize(0);
+  utils::checkWarpSize(0);
   size_t const size = state.range(0);
   bool const is_adversarial = state.range(1);
   auto const fill_rate = state.range(2);
@@ -43,9 +43,9 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
     size_t max_memory_usage = 0;
     std::atomic_bool done{false};
     std::atomic_bool can_start{false};
-    auto ba = createRandomBitArray(size, 1, is_adversarial, fill_rate);
-    std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                  std::ref(max_memory_usage), 0);
+    auto ba = utils::createRandomBitArray(size, 1, is_adversarial, fill_rate);
+    std::thread t(utils::measureMemoryUsage, std::ref(done),
+                  std::ref(can_start), std::ref(max_memory_usage), 0);
     while (not can_start) {
       std::this_thread::yield();
     }
@@ -55,7 +55,8 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
     state.counters["memory_usage"] = max_memory_usage;
   }
 
-  auto og_bit_array = createRandomBitArray(size, 1, is_adversarial, fill_rate);
+  auto og_bit_array =
+      utils::createRandomBitArray(size, 1, is_adversarial, fill_rate);
 
   // ccreate as many copys as the number of iterations
   std::vector<BitArray> bit_arrays(state.max_iterations,
@@ -73,7 +74,7 @@ static void BM_RankSelectConstruction(benchmark::State& state) {
 
 template <int Value>
 static void BM_binaryRank(benchmark::State& state) {
-  checkWarpSize(0);
+  utils::checkWarpSize(0);
   size_t const size = state.range(0);
   bool const is_adversarial = state.range(1);
   auto const fill_rate = state.range(2);
@@ -83,7 +84,8 @@ static void BM_binaryRank(benchmark::State& state) {
   state.counters["param.is_adversarial"] = is_adversarial;
   state.counters["param.fill_rate"] = fill_rate;
   state.counters["param.num_queries"] = num_queries;
-  auto bit_array = createRandomBitArray(size, 1, is_adversarial, fill_rate);
+  auto bit_array =
+      utils::createRandomBitArray(size, 1, is_adversarial, fill_rate);
   RankSelect rs(std::move(bit_array), 0);
 
   std::random_device rd;
@@ -106,18 +108,18 @@ static void BM_binaryRank(benchmark::State& state) {
   struct cudaFuncAttributes attr;
   cudaFuncGetAttributes(&attr, binaryRankKernel<Value>);
   auto max_block_size =
-      std::min(kMaxTPB, static_cast<uint32_t>(attr.maxThreadsPerBlock));
+      std::min(utils::kMaxTPB, static_cast<uint32_t>(attr.maxThreadsPerBlock));
 
-  max_block_size = findLargestDivisor(kMaxTPB, max_block_size);
+  max_block_size = utils::findLargestDivisor(utils::kMaxTPB, max_block_size);
 
-  auto const& prop = getDeviceProperties();
+  auto const& prop = utils::getDeviceProperties();
 
   size_t const num_warps = std::min(
       num_queries,
       static_cast<size_t>(
           (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount) / WS));
   auto const [num_blocks, block_size] =
-      getLaunchConfig(num_warps, kMinTPB, max_block_size);
+      utils::getLaunchConfig(num_warps, utils::kMinTPB, max_block_size);
 
   for (auto _ : state) {
     gpuErrchk(cudaEventRecord(start));
@@ -148,7 +150,7 @@ static void BM_binaryRank(benchmark::State& state) {
 
 template <int Value>
 static void BM_binarySelect(benchmark::State& state) {
-  checkWarpSize(0);
+  utils::checkWarpSize(0);
   size_t const size = state.range(0);
   bool const is_adversarial = state.range(1);
   auto const fill_rate = state.range(2);
@@ -159,8 +161,8 @@ static void BM_binarySelect(benchmark::State& state) {
   state.counters["param.fill_rate"] = fill_rate;
   state.counters["param.num_queries"] = num_queries;
   size_t one_bits = 0;
-  auto bit_array =
-      createRandomBitArray(size, 1, is_adversarial, fill_rate, &one_bits);
+  auto bit_array = utils::createRandomBitArray(size, 1, is_adversarial,
+                                               fill_rate, &one_bits);
   RankSelect rs(std::move(bit_array), 0);
 
   std::random_device rd;
@@ -188,18 +190,18 @@ static void BM_binarySelect(benchmark::State& state) {
   struct cudaFuncAttributes attr;
   cudaFuncGetAttributes(&attr, binaryRankKernel<Value>);
   auto max_block_size =
-      std::min(kMaxTPB, static_cast<uint32_t>(attr.maxThreadsPerBlock));
+      std::min(utils::kMaxTPB, static_cast<uint32_t>(attr.maxThreadsPerBlock));
 
-  max_block_size = findLargestDivisor(kMaxTPB, max_block_size);
+  max_block_size = utils::findLargestDivisor(utils::kMaxTPB, max_block_size);
 
-  auto const& prop = getDeviceProperties();
+  auto const& prop = utils::getDeviceProperties();
 
   size_t const num_warps = std::min(
       num_queries,
       static_cast<size_t>(
           (prop.maxThreadsPerMultiProcessor * prop.multiProcessorCount) / WS));
   auto const [num_blocks, block_size] =
-      getLaunchConfig(num_warps, kMinTPB, max_block_size);
+      utils::getLaunchConfig(num_warps, utils::kMinTPB, max_block_size);
 
   for (auto _ : state) {
     gpuErrchk(cudaEventRecord(start));

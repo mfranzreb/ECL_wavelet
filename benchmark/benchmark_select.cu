@@ -18,7 +18,7 @@ static void BM_Select(benchmark::State& state) {
 
   auto alphabet = std::vector<T>(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-  auto [data, hist] = generateRandomDataAndHist<T>(alphabet, data_size);
+  auto [data, hist] = utils::generateRandomDataAndHist<T>(alphabet, data_size);
 
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;
@@ -26,7 +26,8 @@ static void BM_Select(benchmark::State& state) {
   state.counters["param.pin_memory"] = pin_memory;
   state.counters["param.sort_queries"] = sort_queries;
 
-  auto queries = generateRandomSelectQueries<T>(hist, num_queries, alphabet);
+  auto queries =
+      utils::generateRandomSelectQueries<T>(hist, num_queries, alphabet);
   if (pin_memory) {
     gpuErrchk(cudaHostRegister(queries.data(), num_queries * sizeof(size_t),
                                cudaHostRegisterPortable));

@@ -39,6 +39,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
+namespace utils {
 __global__ void writeWordsParallelKernel(BitArray bit_array, size_t array_index,
                                          uint32_t* words, size_t num_words) {
   size_t num_threads = blockDim.x * gridDim.x;
@@ -192,4 +193,5 @@ std::vector<size_t> generateRandomAccessQueries(size_t const data_size,
 
   return queries;
 }
+}  // namespace utils
 }  // namespace ecl

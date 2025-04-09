@@ -191,10 +191,10 @@ class RankSelect {
       }
       result = warpReduce<size_t, NumThreads>(mask, result);
       // communicate the result to all threads
-      shareVar<size_t>(t_id == 0, result, mask);
+      utils::shareVar<size_t>(t_id == 0, result, mask);
 
       if constexpr (GetBit) {
-        shareVar<uint8_t>(has_last_word, bit_at_index, mask);
+        utils::shareVar<uint8_t>(has_last_word, bit_at_index, mask);
       }
     }
 
@@ -349,7 +349,7 @@ class RankSelect {
       }
 
       if constexpr (NumThreads > 1) {
-        shareVar<size_t>(has_i_before != 0, has_i_before, mask);
+        utils::shareVar<size_t>(has_i_before != 0, has_i_before, mask);
       }
     }
     if (has_i_before != 0) {
@@ -413,7 +413,7 @@ class RankSelect {
     }
 
     if constexpr (NumThreads > 1) {
-      shareVar<size_t>(has_i_before != 0, has_i_before, mask);
+      utils::shareVar<size_t>(has_i_before != 0, has_i_before, mask);
     }
     if (has_i_before != 0) {
       result += (has_i_before - l1_block_start - 1) * RSConfig::L2_BIT_SIZE;
@@ -479,13 +479,13 @@ class RankSelect {
                    getNBitPos<Value, uint64_t>(i, word) + 1;
         }
         // communicate the result to all threads
-        shareVar<size_t>(result != 0, result, mask);
+        utils::shareVar<size_t>(result != 0, result, mask);
         if (result != 0) {
           break;
         }
         // if no result found, update i
         i -= cum_vals;
-        shareVar<size_t>(local_t_id == (NumThreads - 1), i, mask);
+        utils::shareVar<size_t>(local_t_id == (NumThreads - 1), i, mask);
       }
     } else {
       RSConfig::L2_TYPE num_vals = 0;

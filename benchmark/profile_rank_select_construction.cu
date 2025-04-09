@@ -12,8 +12,8 @@ int main([[maybe_unused]] int argc, char** argv) {
   auto const size = std::stoul(argv[1]);
   auto const num_levels = std::stoul(argv[2]);
   auto const GPU_index = std::stoi(argv[3]);
-  ecl::checkWarpSize(GPU_index);
-  auto bit_array = ecl::createRandomBitArray(size, num_levels);
+  ecl::utils::checkWarpSize(GPU_index);
+  auto bit_array = ecl::utils::createRandomBitArray(size, num_levels);
 
   cudaProfilerStart();
   ecl::RankSelect rs(std::move(bit_array), GPU_index);

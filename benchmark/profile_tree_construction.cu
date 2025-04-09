@@ -15,10 +15,11 @@ int main([[maybe_unused]] int argc, char** argv) {
     if (use_min_alphabet) {
       alphabet = std::vector<uint8_t>(alphabet_size);
       std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-      data = ecl::generateRandomData<uint8_t>(alphabet, data_size);
+      data = ecl::utils::generateRandomData<uint8_t>(alphabet, data_size);
     } else {
-      std::tie(alphabet, data) = ecl::generateRandomAlphabetAndData<uint8_t>(
-          alphabet_size, data_size, true);
+      std::tie(alphabet, data) =
+          ecl::utils::generateRandomAlphabetAndData<uint8_t>(alphabet_size,
+                                                             data_size, true);
     }
     ecl::WaveletTree<uint8_t> wt(data.data(), data_size, std::move(alphabet),
                                  0);
@@ -28,10 +29,11 @@ int main([[maybe_unused]] int argc, char** argv) {
     if (use_min_alphabet) {
       alphabet = std::vector<uint16_t>(alphabet_size);
       std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-      data = ecl::generateRandomData<uint16_t>(alphabet, data_size);
+      data = ecl::utils::generateRandomData<uint16_t>(alphabet, data_size);
     } else {
-      std::tie(alphabet, data) = ecl::generateRandomAlphabetAndData<uint16_t>(
-          alphabet_size, data_size, true);
+      std::tie(alphabet, data) =
+          ecl::utils::generateRandomAlphabetAndData<uint16_t>(alphabet_size,
+                                                              data_size, true);
     }
     ecl::WaveletTree<uint16_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);
@@ -41,10 +43,11 @@ int main([[maybe_unused]] int argc, char** argv) {
     if (use_min_alphabet) {
       alphabet = std::vector<uint32_t>(alphabet_size);
       std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-      data = ecl::generateRandomData<uint32_t>(alphabet, data_size);
+      data = ecl::utils::generateRandomData<uint32_t>(alphabet, data_size);
     } else {
-      std::tie(alphabet, data) = ecl::generateRandomAlphabetAndData<uint32_t>(
-          alphabet_size, data_size, true);
+      std::tie(alphabet, data) =
+          ecl::utils::generateRandomAlphabetAndData<uint32_t>(alphabet_size,
+                                                              data_size, true);
     }
     ecl::WaveletTree<uint32_t> wt(data.data(), data_size, std::move(alphabet),
                                   0);

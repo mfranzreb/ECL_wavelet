@@ -1,8 +1,9 @@
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <random>
 #include <vector>
-#include <algorithm>
+
 #include "sdsl/wavelet_trees.hpp"
 #include "sdsl/wt_blcd.hpp"
 
@@ -18,7 +19,7 @@ std::vector<size_t> generateRandomQueries(size_t const data_size,
 }
 
 template <typename T>
-std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
+std::pair<std::vector<T>, std::vector<T>> utils::generateRandomAlphabetAndData(
     size_t const alphabet_size, size_t const data_size,
     bool enforce_alphabet_size = false) {
   if (alphabet_size < 3) {
@@ -55,31 +56,30 @@ std::pair<std::vector<T>, std::vector<T>> generateRandomAlphabetAndData(
 
 int main(int argc, char *argv[]) {
   size_t data_size = std::stoull(argv[1]);
-    size_t alphabet_size = std::stoull(argv[2]);
-    size_t num_queries = std::stoull(argv[3]);
+  size_t alphabet_size = std::stoull(argv[2]);
+  size_t num_queries = std::stoull(argv[3]);
 
-    auto queries = generateRandomQueries(data_size, num_queries);
+  auto queries = generateRandomQueries(data_size, num_queries);
 
-    using T = uint16_t;
+  using T = uint16_t;
 
-    auto [alphabet, data] =
-      generateRandomAlphabetAndData<T>(alphabet_size, data_size, true);
+  auto [alphabet, data] =
+      utils::generateRandomAlphabetAndData<T>(alphabet_size, data_size, true);
 
-      //Check that data is only formed of elements in the alphabet
-      for (auto const &d : data) {
-        assert(std::find(alphabet.begin(), alphabet.end(), d) != alphabet.end());
-      }
+  // Check that data is only formed of elements in the alphabet
+  for (auto const &d : data) {
+    assert(std::find(alphabet.begin(), alphabet.end(), d) != alphabet.end());
+  }
 
-// write data to file
+  // write data to file
   std::ofstream data_file("data_file");
-  data_file.write(reinterpret_cast<const char*>(data.data()),
+  data_file.write(reinterpret_cast<const char *>(data.data()),
                   data.size() * sizeof(T));
   data_file.close();
-  
+
   if constexpr (sizeof(T) == 1) {
-    sdsl::wt_pc<sdsl::balanced_shape,
-      sdsl::bit_vector,
-      sdsl::rank_support_v5<>> wt;
+    sdsl::wt_pc<sdsl::balanced_shape, sdsl::bit_vector, sdsl::rank_support_v5<>>
+        wt;
     sdsl::construct(wt, "data_file", sizeof(T));
     // delete file
     std::remove("data_file");
@@ -88,12 +88,11 @@ int main(int argc, char *argv[]) {
       assert(wt[i] == data[i]);
     }
   } else {
-    sdsl::wt_pc<sdsl::balanced_shape,
-      sdsl::bit_vector,
-      sdsl::rank_support_v5<>,
-      sdsl::wt_pc<sdsl::balanced_shape>::select_1_type,
-      sdsl::wt_pc<sdsl::balanced_shape>::select_0_type,
-      sdsl::int_tree<>> wt;
+    sdsl::wt_pc<sdsl::balanced_shape, sdsl::bit_vector, sdsl::rank_support_v5<>,
+                sdsl::wt_pc<sdsl::balanced_shape>::select_1_type,
+                sdsl::wt_pc<sdsl::balanced_shape>::select_0_type,
+                sdsl::int_tree<>>
+        wt;
     sdsl::construct(wt, "data_file", sizeof(T));
 
     // delete file

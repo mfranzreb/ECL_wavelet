@@ -33,7 +33,8 @@ static void BM_Select(T const* data, size_t const data_size,
       hist[symbol] = wt.getTotalAppearances(symbol);
     }
 
-    auto queries = generateRandomSelectQueries(hist, query_num, alphabet);
+    auto queries =
+        utils::generateRandomSelectQueries(hist, query_num, alphabet);
 
     for (auto const sort_queries : {false, true}) {
       if (sort_queries) {
@@ -90,7 +91,7 @@ int main(int argc, char** argv) {
   std::string const input_dir = argv[3];
   std::string const output_dir = argv[4];
 
-  ecl::checkWarpSize(GPU_index);
+  ecl::utils::checkWarpSize(GPU_index);
 
   std::vector<size_t> const data_sizes = {1ULL << 28, 1ULL << 29, 1ULL << 30,
                                           1ULL << 31, 1ULL << 32, 1ULL << 33,
@@ -113,8 +114,8 @@ int main(int argc, char** argv) {
     out.close();
 
     for (auto const data_size : data_sizes) {
-      auto data = ecl::readDataFromFile<uint8_t>(data_file, data_size);
-      ecl::convertDataToMinAlphabet(data.data(), data_size);
+      auto data = ecl::utils::readDataFromFile<uint8_t>(data_file, data_size);
+      ecl::utils::convertDataToMinAlphabet(data.data(), data_size);
 
       ecl::BM_Select<uint8_t>(data.data(), data_size, num_queries, GPU_index,
                               num_iters, output);

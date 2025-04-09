@@ -13,9 +13,10 @@ void profileSelect(size_t const data_size, size_t const alphabet_size,
   std::iota(alphabet.begin(), alphabet.end(),
             0);  // Min alphabet so that queries dont change
 
-  auto [data, hist] = ecl::generateRandomDataAndHist<T>(alphabet, data_size);
+  auto [data, hist] =
+      ecl::utils::generateRandomDataAndHist<T>(alphabet, data_size);
   auto queries =
-      ecl::generateRandomSelectQueries<T>(hist, num_queries, alphabet);
+      ecl::utils::generateRandomSelectQueries<T>(hist, num_queries, alphabet);
   ecl::WaveletTree<T> wt(data.data(), data_size, std::move(alphabet), 0);
 
   auto queries_copy = queries;

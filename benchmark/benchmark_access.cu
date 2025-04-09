@@ -17,14 +17,14 @@ static void BM_Access(benchmark::State& state) {
 
   auto alphabet = std::vector<T>(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-  auto data = generateRandomData<T>(alphabet, data_size);
+  auto data = utils::generateRandomData<T>(alphabet, data_size);
 
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;
   state.counters["param.num_queries"] = num_queries;
   state.counters["param.pin_memory"] = pin_memory;
 
-  auto queries = generateRandomAccessQueries(data_size, num_queries);
+  auto queries = utils::generateRandomAccessQueries(data_size, num_queries);
   if (pin_memory) {
     gpuErrchk(cudaHostRegister(queries.data(), num_queries * sizeof(size_t),
                                cudaHostRegisterPortable));

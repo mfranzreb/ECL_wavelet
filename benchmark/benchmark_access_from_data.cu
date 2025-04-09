@@ -18,7 +18,7 @@ static void BM_Access(T const* data, size_t const data_size,
                 << std::endl;
       continue;
     }
-    auto queries = generateRandomAccessQueries(data_size, query_num);
+    auto queries = utils::generateRandomAccessQueries(data_size, query_num);
 
     WaveletTree<T> wt(data, data_size, std::vector<T>{}, GPU_index);
 
@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
   std::string const input_dir = argv[3];
   std::string const output_dir = argv[4];
 
-  ecl::checkWarpSize(GPU_index);
+  ecl::utils::checkWarpSize(GPU_index);
 
   std::vector<size_t> const data_sizes = {1ULL << 28, 1ULL << 29, 1ULL << 30,
                                           1ULL << 31, 1ULL << 32, 1ULL << 33,
@@ -91,12 +91,14 @@ int main(int argc, char** argv) {
 
     for (auto const data_size : data_sizes) {
       if (data_file == input_dir + "/russian_CC.txt") {
-        auto const data = ecl::readDataFromFile<uint16_t>(data_file, data_size);
+        auto const data =
+            ecl::utils::readDataFromFile<uint16_t>(data_file, data_size);
 
         ecl::BM_Access<uint16_t>(data.data(), data_size, num_queries, GPU_index,
                                  num_iters, output);
       } else {
-        auto const data = ecl::readDataFromFile<uint8_t>(data_file, data_size);
+        auto const data =
+            ecl::utils::readDataFromFile<uint8_t>(data_file, data_size);
 
         ecl::BM_Access<uint8_t>(data.data(), data_size, num_queries, GPU_index,
                                 num_iters, output);

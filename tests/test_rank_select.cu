@@ -408,7 +408,7 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
   std::vector<RankSelectHelper> helpers;
   // Sizes are random between 2000 and 10^6
   std::vector<uint32_t> random_nums(num_arrays);
-  generateRandomNums<uint32_t>(random_nums, 2000, 1e6);
+  utils::generateRandomNums<uint32_t>(random_nums, 2000, 1e6);
 
   size_t max_size = 0;
   for (uint32_t i = 0; i < num_arrays; ++i) {
@@ -420,7 +420,8 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
   // For each array, go through each word and set it to a random number
   random_nums.resize((max_size + (sizeof(uint32_t) * 8 - 1)) /
                      (sizeof(uint32_t) * 8));
-  generateRandomNums(random_nums, 0U, std::numeric_limits<uint32_t>::max());
+  utils::generateRandomNums(random_nums, 0U,
+                            std::numeric_limits<uint32_t>::max());
 
   uint32_t *d_words_arr;
   gpuErrchk(cudaMalloc(&d_words_arr, ((max_size + (sizeof(uint32_t) * 8 - 1)) /
@@ -435,9 +436,9 @@ TEST_F(RankSelectBlocksTest, RankSelectIndicesRandom) {
     size_t num_words =
         (sizes[i] + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8);
     auto [blocks, threads] =
-        getLaunchConfig((num_words + WS - 1) / WS, 256, kMaxTPB);
-    writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
-                                                  num_words);
+        utils::getLaunchConfig((num_words + WS - 1) / WS, 256, utils::kMaxTPB);
+    utils::writeWordsParallelKernel<<<blocks, threads>>>(
+        bit_array, i, d_words_arr, num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
       helpers[i].writeWord(j, random_nums[j]);
     }
@@ -483,7 +484,7 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesRandom) {
     std::vector<RankSelectHelper> helpers;
     // Sizes are random between 200 and 10^6
     std::vector<uint32_t> random_nums(num_arrays);
-    generateRandomNums<uint32_t>(random_nums, 200, 1e6);
+    utils::generateRandomNums<uint32_t>(random_nums, 200, 1e6);
 
     size_t max_size = 0;
     for (uint32_t i = 0; i < num_arrays; ++i) {
@@ -495,7 +496,8 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesRandom) {
     // For each array, go through each word and set it to a random number
     random_nums.resize((max_size + (sizeof(uint32_t) * 8 - 1)) /
                        (sizeof(uint32_t) * 8));
-    generateRandomNums(random_nums, 0U, std::numeric_limits<uint32_t>::max());
+    utils::generateRandomNums(random_nums, 0U,
+                              std::numeric_limits<uint32_t>::max());
 
     uint32_t *d_words_arr;
     gpuErrchk(cudaMalloc(
@@ -510,10 +512,10 @@ TEST_F(RankSelectBlocksTest, RankSelectSamplesRandom) {
     for (uint32_t i = 0; i < num_arrays; ++i) {
       size_t num_words =
           (sizes[i] + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8);
-      auto [blocks, threads] =
-          getLaunchConfig((num_words + WS - 1) / WS, 256, kMaxTPB);
-      writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
-                                                    num_words);
+      auto [blocks, threads] = utils::getLaunchConfig((num_words + WS - 1) / WS,
+                                                      256, utils::kMaxTPB);
+      utils::writeWordsParallelKernel<<<blocks, threads>>>(
+          bit_array, i, d_words_arr, num_words);
       for (uint32_t j = 0; j < num_words; ++j) {
         helpers[i].writeWord(j, random_nums[j]);
       }
@@ -681,9 +683,9 @@ TEST_F(RankSelectBlocksTest, RankSelectOperations) {
     gpuErrchk(cudaMemcpy(d_words_arr, words.data(),
                          num_words * sizeof(uint32_t), cudaMemcpyHostToDevice));
     auto [blocks, threads] =
-        getLaunchConfig((num_words + WS - 1) / WS, 256, kMaxTPB);
-    writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
-                                                  num_words);
+        utils::getLaunchConfig((num_words + WS - 1) / WS, 256, utils::kMaxTPB);
+    utils::writeWordsParallelKernel<<<blocks, threads>>>(
+        bit_array, i, d_words_arr, num_words);
     for (uint32_t j = 0; j < num_words; ++j) {
       helpers[i].writeWord(j, word);
     }
@@ -765,7 +767,7 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
     std::vector<RankSelectHelper> helpers;
     // Sizes are random between 2000 and 10^6
     std::vector<uint32_t> random_nums(num_arrays);
-    generateRandomNums<uint32_t>(random_nums, 2000, 1e6);
+    utils::generateRandomNums<uint32_t>(random_nums, 2000, 1e6);
 
     size_t max_size = 0;
     for (uint32_t i = 0; i < num_arrays; ++i) {
@@ -777,7 +779,8 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
     // For each array, go through each word and set it to a random number
     random_nums.resize((max_size + (sizeof(uint32_t) * 8 - 1)) /
                        (sizeof(uint32_t) * 8));
-    generateRandomNums(random_nums, 0U, std::numeric_limits<uint32_t>::max());
+    utils::generateRandomNums(random_nums, 0U,
+                              std::numeric_limits<uint32_t>::max());
 
     uint32_t *d_words_arr;
     gpuErrchk(cudaMalloc(
@@ -792,10 +795,10 @@ TEST_F(RankSelectBlocksTest, RankSelectOperationsRandom) {
     for (uint32_t i = 0; i < num_arrays; ++i) {
       size_t num_words =
           (sizes[i] + (sizeof(uint32_t) * 8 - 1)) / (sizeof(uint32_t) * 8);
-      auto [blocks, threads] =
-          getLaunchConfig((num_words + WS - 1) / WS, 256, kMaxTPB);
-      writeWordsParallelKernel<<<blocks, threads>>>(bit_array, i, d_words_arr,
-                                                    num_words);
+      auto [blocks, threads] = utils::getLaunchConfig((num_words + WS - 1) / WS,
+                                                      256, utils::kMaxTPB);
+      utils::writeWordsParallelKernel<<<blocks, threads>>>(
+          bit_array, i, d_words_arr, num_words);
       for (uint32_t j = 0; j < num_words; ++j) {
         helpers[i].writeWord(j, random_nums[j]);
       }

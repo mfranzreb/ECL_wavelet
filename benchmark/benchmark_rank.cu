@@ -18,7 +18,7 @@ static void BM_Rank(benchmark::State& state) {
 
   auto alphabet = std::vector<T>(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-  auto data = generateRandomData<T>(alphabet, data_size);
+  auto data = utils::generateRandomData<T>(alphabet, data_size);
 
   state.counters["param.data_size"] = data_size;
   state.counters["param.alphabet_size"] = alphabet_size;
@@ -26,7 +26,8 @@ static void BM_Rank(benchmark::State& state) {
   state.counters["param.pin_memory"] = pin_memory;
   state.counters["param.sort_queries"] = sort_queries;
 
-  auto queries = generateRandomRankQueries<T>(data_size, num_queries, alphabet);
+  auto queries =
+      utils::generateRandomRankQueries<T>(data_size, num_queries, alphabet);
   if (pin_memory) {
     gpuErrchk(cudaHostRegister(queries.data(), num_queries * sizeof(size_t),
                                cudaHostRegisterPortable));

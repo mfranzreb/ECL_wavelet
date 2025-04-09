@@ -147,7 +147,8 @@ __host__ [[nodiscard]] size_t BitArray::getNeededGPUMemory(
   total_size +=
       num_arrays *
       (((size + 7) / 8) +
-       kBankSizeBytes * kBanksPerLine);  // Upper bound of memory for d_data_
+       utils::kBankSizeBytes *
+           utils::kBanksPerLine);  // Upper bound of memory for d_data_
   total_size += num_arrays * sizeof(size_t);  // Memory for d_offsets_
   return total_size;
 }

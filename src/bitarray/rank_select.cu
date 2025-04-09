@@ -50,7 +50,7 @@ using namespace detail;
 __host__ RankSelect::RankSelect(BitArray&& bit_array,
                                 uint32_t const GPU_index) noexcept
     : bit_array_(std::move(bit_array)), is_copy_(false) {
-  checkWarpSize(GPU_index);
+  utils::checkWarpSize(GPU_index);
 
   auto const num_arrays = bit_array_.numArrays();
 
@@ -162,17 +162,17 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, calculateL2EntriesKernel));
 
-  auto max_block_size =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  auto max_block_size = std::min(
+      utils::kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
 
-  max_block_size = findLargestDivisor(kMaxTPB, max_block_size);
+  max_block_size = utils::findLargestDivisor(utils::kMaxTPB, max_block_size);
 
-  auto const& prop = getDeviceProperties();
+  auto const& prop = utils::getDeviceProperties();
 
-  auto min_block_size = kMinTPB;
+  auto min_block_size = utils::kMinTPB;
   while (prop.maxBlocksPerMultiProcessor * funcAttrib.sharedSizeBytes >
          prop.sharedMemPerMultiprocessor) {
-    min_block_size += kMinTPB;
+    min_block_size += utils::kMinTPB;
   }
   gpuErrchk(cudaMalloc(&d_total_num_ones_, num_arrays * sizeof(size_t)));
   kernelCheck();
@@ -200,7 +200,8 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
           bit_array_.size(i));
       kernelStreamCheck(cudaStreamPerThread);
     } else {
-      IdealConfigs const& ideal_configs = getIdealConfigs(prop.name);
+      utils::IdealConfigs const& ideal_configs =
+          utils::getIdealConfigs(prop.name);
       uint32_t const block_size =
           ideal_configs.ideal_TPB_calculateL2EntriesKernel != 0
               ? ideal_configs.ideal_TPB_calculateL2EntriesKernel
@@ -223,8 +224,9 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
     }
   }
   gpuErrchk(cudaFreeAsync(d_temp_storage, cudaStreamDefault));
-  addNumOnesKernel<<<1, std::min(kMaxTPB, static_cast<uint32_t>(num_arrays)), 0,
-                     cudaStreamDefault>>>(*this, num_arrays);
+  addNumOnesKernel<<<
+      1, std::min(utils::kMaxTPB, static_cast<uint32_t>(num_arrays)), 0,
+      cudaStreamDefault>>>(*this, num_arrays);
   // Get the number of ones per bit array
   std::vector<size_t> num_ones_per_array(num_arrays);
   gpuErrchk(cudaMemcpyAsync(num_ones_per_array.data(), d_total_num_ones_,
@@ -272,7 +274,8 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   kernelCheck();
 
   if (total_ones_samples > 0 or total_zeros_samples > 0) {
-    IdealConfigs const& ideal_configs = getIdealConfigs(prop.name);
+    utils::IdealConfigs const& ideal_configs =
+        utils::getIdealConfigs(prop.name);
 #pragma omp parallel for num_threads(num_arrays)
     for (uint8_t i = 0; i < num_arrays; i++) {
       gpuErrchk(cudaSetDevice(GPU_index));
@@ -304,11 +307,12 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
                       num_ones_samples + num_zeros_samples);
         auto const [blocks, threads] =
             ideal_configs.ideal_TPB_calculateSelectSamplesKernel != 0
-                ? getLaunchConfig(
+                ? utils::getLaunchConfig(
                       num_warps,
                       ideal_configs.ideal_TPB_calculateSelectSamplesKernel,
                       ideal_configs.ideal_TPB_calculateSelectSamplesKernel)
-                : getLaunchConfig(num_warps, kMinTPB, kMaxTPB);
+                : utils::getLaunchConfig(num_warps, utils::kMinTPB,
+                                         utils::kMaxTPB);
 
         calculateSelectSamplesKernel<<<blocks, threads>>>(
             *this, i, blocks * threads, num_ones_samples, num_zeros_samples);

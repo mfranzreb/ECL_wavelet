@@ -40,6 +40,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ecl_wavelet/utils/utils.cuh"
 
 namespace ecl {
+namespace utils {
 
 /*!
  * \brief Write words to a bit array in parallel.
@@ -676,4 +677,5 @@ size_t convertDataToMinAlphabet(T* data, size_t const data_size,
   }
   return alphabet.size();
 }
+}  // namespace utils
 }  // namespace ecl

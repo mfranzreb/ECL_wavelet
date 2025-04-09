@@ -15,7 +15,7 @@ static void BM_Construction(T* data, size_t const data_size,
   std::vector<size_t> times(num_iters);
 
   // using min alphabet as in the PWM paper
-  size_t const alphabet_size = convertDataToMinAlphabet(data, data_size);
+  size_t const alphabet_size = utils::convertDataToMinAlphabet(data, data_size);
 
   // Memory usage
   size_t max_memory_usage = 0;
@@ -25,8 +25,8 @@ static void BM_Construction(T* data, size_t const data_size,
   {
     std::atomic_bool done{false};
     std::atomic_bool can_start{false};
-    std::thread t(measureMemoryUsage, std::ref(done), std::ref(can_start),
-                  std::ref(max_memory_usage), GPU_index);
+    std::thread t(utils::measureMemoryUsage, std::ref(done),
+                  std::ref(can_start), std::ref(max_memory_usage), GPU_index);
     while (not can_start) {
       std::this_thread::yield();
     }
@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
   std::string const input_dir = argv[3];
   std::string const output_dir = argv[4];
 
-  ecl::checkWarpSize(GPU_index);
+  ecl::utils::checkWarpSize(GPU_index);
 
   std::vector<size_t> const data_sizes = {1ULL << 28, 1ULL << 29, 1ULL << 30,
                                           1ULL << 31, 1ULL << 32, 1ULL << 33,
@@ -93,12 +93,13 @@ int main(int argc, char** argv) {
 
     for (auto const data_size : data_sizes) {
       if (data_file == input_dir + "/russian_CC.txt") {
-        auto data = ecl::readDataFromFile<uint16_t>(data_file, data_size);
+        auto data =
+            ecl::utils::readDataFromFile<uint16_t>(data_file, data_size);
 
         ecl::BM_Construction<uint16_t>(data.data(), data_size, GPU_index,
                                        num_iters, output);
       } else {
-        auto data = ecl::readDataFromFile<uint8_t>(data_file, data_size);
+        auto data = ecl::utils::readDataFromFile<uint8_t>(data_file, data_size);
 
         ecl::BM_Construction<uint8_t>(data.data(), data_size, GPU_index,
                                       num_iters, output);

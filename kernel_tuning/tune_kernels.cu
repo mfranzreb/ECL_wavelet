@@ -22,19 +22,19 @@ class WaveletTreeTest : public WaveletTree<T> {
 
 void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
-  auto const& prop = getDeviceProperties();
+  auto const& prop = utils::getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
                                   accessKernel<uint8_t, true, 1, true, true>));
-  uint32_t max_size_access =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  uint32_t max_size_access = std::min(
+      utils::kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
                                   rankKernel<uint8_t, true, 1, true, true>));
-  uint32_t max_size_rank =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  uint32_t max_size_rank = std::min(
+      utils::kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib, selectKernel<uint8_t, 1, true>));
-  uint32_t max_size_select =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  uint32_t max_size_select = std::min(
+      utils::kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   size_t const data_size = prop.totalGlobalMem / 10;
 
   auto const GPU_name = prop.name;
@@ -61,7 +61,7 @@ void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
 
   std::vector<uint8_t> alphabet(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-  auto [data, hist] = generateRandomDataAndHist(alphabet, data_size);
+  auto [data, hist] = utils::generateRandomDataAndHist(alphabet, data_size);
   auto alphabet_copy = alphabet;
 
   WaveletTree<uint8_t> wt(data.data(), data_size, std::move(alphabet_copy),
@@ -73,13 +73,13 @@ void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
   }
 
   std::chrono::high_resolution_clock::time_point start_time, end_time;
-  IdealConfigs& ideal_configs = getIdealConfigs(GPU_name);
+  utils::IdealConfigs& ideal_configs = utils::getIdealConfigs(GPU_name);
   for (uint32_t num_query : num_queries_vec) {
-    auto access_queries =
-        generateRandomAccessQueries(data_size, static_cast<size_t>(num_query));
-    auto rank_queries = generateRandomRankQueries(
+    auto access_queries = utils::generateRandomAccessQueries(
+        data_size, static_cast<size_t>(num_query));
+    auto rank_queries = utils::generateRandomRankQueries(
         data_size, static_cast<size_t>(num_query), alphabet);
-    auto select_queries = generateRandomSelectQueries(
+    auto select_queries = utils::generateRandomSelectQueries(
         hist, static_cast<size_t>(num_query), alphabet);
     gpuErrchk(cudaHostRegister(access_queries.data(),
                                num_query * sizeof(size_t),
@@ -170,12 +170,12 @@ void tuneQueries(std::string out_dir, uint32_t const GPU_index) {
 
 void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
-  auto const& prop = getDeviceProperties();
+  auto const& prop = utils::getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(
       cudaFuncGetAttributes(&funcAttrib, detail::calculateL2EntriesKernel));
-  uint32_t max_size =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  uint32_t max_size = std::min(
+      utils::kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   size_t const data_size = prop.totalGlobalMem / 10;
 
   auto const GPU_name = prop.name;
@@ -187,10 +187,10 @@ void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
   file.close();
 
   std::vector<size_t> threads_per_block_vec;
-  for (size_t i = max_size; i >= kMinTPB; i /= 2) {
+  for (size_t i = max_size; i >= utils::kMinTPB; i /= 2) {
     threads_per_block_vec.push_back(i);
   }
-  BitArray bit_array = createRandomBitArray(data_size, 1);
+  BitArray bit_array = utils::createRandomBitArray(data_size, 1);
   RankSelect rs(std::move(bit_array), GPU_index);
   auto num_last_l2_blocks =
       (data_size % RSConfig::L1_BIT_SIZE + RSConfig::L2_BIT_SIZE - 1) /
@@ -235,12 +235,12 @@ void tuneL2entriesKernel(std::string out_dir, uint32_t const GPU_index) {
 
 void tuneFillLevelKernel(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
-  auto const& prop = getDeviceProperties();
+  auto const& prop = utils::getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(cudaFuncGetAttributes(&funcAttrib,
                                   detail::fillLevelKernel<uint16_t, true>));
-  uint32_t max_size =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  uint32_t max_size = std::min(
+      utils::kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   size_t const data_size = prop.totalGlobalMem / 10;
 
   auto const GPU_name = prop.name;
@@ -252,19 +252,19 @@ void tuneFillLevelKernel(std::string out_dir, uint32_t const GPU_index) {
   file.close();
 
   std::vector<size_t> threads_per_block_vec;
-  for (size_t i = max_size; i >= kMinTPB; i /= 2) {
+  for (size_t i = max_size; i >= utils::kMinTPB; i /= 2) {
     threads_per_block_vec.push_back(i);
   }
 
   size_t const alphabet_size = 4;
-  IdealConfigs& ideal_configs = getIdealConfigs(GPU_name);
+  utils::IdealConfigs& ideal_configs = utils::getIdealConfigs(GPU_name);
 
   BitArray bit_array(std::vector<size_t>{data_size}, false);
 
   using T = uint8_t;
   std::vector<T> alphabet(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-  auto data = generateRandomData(alphabet, data_size);
+  auto data = utils::generateRandomData(alphabet, data_size);
   WaveletTreeTest<T> wt(data.data(), data_size, std::move(alphabet), GPU_index);
   T* d_data;
   gpuErrchk(cudaMalloc(&d_data, data_size * sizeof(T)));
@@ -309,12 +309,12 @@ __global__ static void getTotalNumValsKernel(RankSelect rank_select,
 
 void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
   uint8_t const num_iters = 100;
-  auto const& prop = getDeviceProperties();
+  auto const& prop = utils::getDeviceProperties();
   struct cudaFuncAttributes funcAttrib;
   gpuErrchk(
       cudaFuncGetAttributes(&funcAttrib, detail::calculateSelectSamplesKernel));
-  uint32_t max_size =
-      std::min(kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
+  uint32_t max_size = std::min(
+      utils::kMaxTPB, static_cast<uint32_t>(funcAttrib.maxThreadsPerBlock));
   size_t const data_size = prop.totalGlobalMem / 10;
 
   auto const GPU_name = prop.name;
@@ -326,12 +326,12 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
   file.close();
 
   std::vector<size_t> threads_per_block_vec;
-  for (size_t i = max_size; i >= kMinTPB; i /= 2) {
+  for (size_t i = max_size; i >= utils::kMinTPB; i /= 2) {
     threads_per_block_vec.push_back(i);
   }
   auto const num_warps =
       (prop.maxThreadsPerBlock * prop.multiProcessorCount + WS - 1) / WS;
-  auto bit_array = createRandomBitArray(data_size, 1);
+  auto bit_array = utils::createRandomBitArray(data_size, 1);
   RankSelect rs(std::move(bit_array), GPU_index);
 
   cudaEvent_t start, stop;
@@ -347,7 +347,8 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
       (data_size - *num_ones) / RSConfig::SELECT_SAMPLE_RATE;
   gpuErrchk(cudaFree(num_ones));
   for (auto const tpb : threads_per_block_vec) {
-    auto const [num_blocks, block_size] = getLaunchConfig(num_warps, tpb, tpb);
+    auto const [num_blocks, block_size] =
+        utils::getLaunchConfig(num_warps, tpb, tpb);
 
     if (num_blocks == -1 or block_size == -1) {
       continue;
@@ -392,7 +393,7 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
   }
   for (auto const tot_threads : tot_threads_vec) {
     auto const [num_blocks, block_size] =
-        getLaunchConfig(tot_threads / WS, max_size, max_size);
+        utils::getLaunchConfig(tot_threads / WS, max_size, max_size);
     if (num_blocks == -1 or block_size == -1) {
       continue;
     }
@@ -428,7 +429,7 @@ void tuneSamplesKernel(std::string out_dir, uint32_t const GPU_index) {
 int main([[maybe_unused]] int argc, char* argv[]) {
   auto const parent_dir = argv[1];
   auto const GPU_index = std::stoi(argv[2]);
-  ecl::checkWarpSize(GPU_index);
+  ecl::utils::checkWarpSize(GPU_index);
   ecl::tuneQueries(std::string(parent_dir), GPU_index);
   ecl::tuneL2entriesKernel(std::string(parent_dir), GPU_index);
   ecl::tuneFillLevelKernel(std::string(parent_dir), GPU_index);

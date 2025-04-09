@@ -37,20 +37,18 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "ecl_wavelet/utils/utils.cuh"
 
-namespace ecl {
-namespace internal {
+namespace ecl::utils {
 static cudaDeviceProp prop;
 static IdealConfigs ideal_configs;
-}  // namespace internal
 
 __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
                                              int const min_block_size,
                                              int max_block_size) {
-  assert(internal::prop.totalGlobalMem != 0);
+  assert(prop.totalGlobalMem != 0);
   assert(max_block_size >= min_block_size);
   int const min_block_size_warps = min_block_size / WS;
-  int const warps_per_sm = internal::prop.maxThreadsPerMultiProcessor / WS;
-  int const warps_per_block = internal::prop.maxThreadsPerBlock / WS;
+  int const warps_per_sm = prop.maxThreadsPerMultiProcessor / WS;
+  int const warps_per_block = prop.maxThreadsPerBlock / WS;
   // find max block size that can still fully load an SM
   max_block_size = std::min(warps_per_block, max_block_size / WS);
   while (warps_per_sm % max_block_size != 0) {
@@ -98,28 +96,27 @@ __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
 }
 
 __host__ cudaDeviceProp &getDeviceProperties() {
-  assert(internal::prop.totalGlobalMem != 0);
-  return internal::prop;
+  assert(prop.totalGlobalMem != 0);
+  return prop;
 }
 
 __host__ void checkWarpSize(uint32_t const GPU_index) {
-  if (internal::prop.totalGlobalMem == 0) {
+  if (prop.totalGlobalMem == 0) {
     gpuErrchk(cudaSetDevice(GPU_index));
-    cudaGetDeviceProperties(&internal::prop, GPU_index);
-    auto const threads_per_sm = internal::prop.maxThreadsPerMultiProcessor;
-    kMaxTPB = internal::prop.maxThreadsPerBlock;
+    cudaGetDeviceProperties(&prop, GPU_index);
+    auto const threads_per_sm = prop.maxThreadsPerMultiProcessor;
+    kMaxTPB = prop.maxThreadsPerBlock;
     // find max block size that can still fully load an SM
     while (threads_per_sm % kMaxTPB != 0) {
       kMaxTPB -= WS;
     }
     assert(kMaxTPB > WS);
     kMinBPM = threads_per_sm / kMaxTPB;
-    auto const max_blocks_per_sm = internal::prop.maxBlocksPerMultiProcessor;
+    auto const max_blocks_per_sm = prop.maxBlocksPerMultiProcessor;
     kMinTPB = threads_per_sm / max_blocks_per_sm;
   }
-  if (internal::prop.warpSize != WS) {
-    fprintf(stderr, "Warp size must be 32, but is %d\n",
-            internal::prop.warpSize);
+  if (prop.warpSize != WS) {
+    fprintf(stderr, "Warp size must be 32, but is %d\n", prop.warpSize);
     exit(EXIT_FAILURE);
   }
 }
@@ -135,9 +132,9 @@ __host__ IdealConfigs &getIdealConfigs(const std::string &GPU_name) {
   static bool first_call = true;
   if (first_call) {
     first_call = false;
-    internal::ideal_configs = get_configs(GPU_name);
+    ideal_configs = get_configs(GPU_name);
   }
-  return internal::ideal_configs;
+  return ideal_configs;
 }
 
 int64_t getAvailableMemoryLinux() {
@@ -158,4 +155,4 @@ int64_t getAvailableMemoryLinux() {
 
   return -1;  // Could not determine available memory
 }
-}  // namespace ecl
+}  // namespace ecl::utils

@@ -69,18 +69,20 @@ static void BM_queries(size_t const data_size, size_t const alphabet_size,
                        std::string const& output) {
   std::vector<T> alphabet(alphabet_size);
   std::iota(alphabet.begin(), alphabet.end(), 0ULL);
-  auto const [data, hist] = generateRandomDataAndHist(alphabet, data_size);
+  auto const [data, hist] =
+      utils::generateRandomDataAndHist(alphabet, data_size);
 
   auto alphabet_copy = alphabet;
   WaveletTree<T> wt(data.data(), data_size, std::move(alphabet_copy),
                     GPU_index);
 
   for (auto const num_queries : num_queries_vec) {
-    auto access_queries = generateRandomAccessQueries(data_size, num_queries);
+    auto access_queries =
+        utils::generateRandomAccessQueries(data_size, num_queries);
     auto rank_queries =
-        generateRandomRankQueries(data_size, num_queries, alphabet);
+        utils::generateRandomRankQueries(data_size, num_queries, alphabet);
     auto select_queries =
-        generateRandomSelectQueries(hist, num_queries, alphabet);
+        utils::generateRandomSelectQueries(hist, num_queries, alphabet);
 
     size_t const median_access_time =
         processAccessQueries(wt, access_queries, num_iters);

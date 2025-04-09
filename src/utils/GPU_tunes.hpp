@@ -6,5 +6,5 @@
 
 namespace ecl {
 
-std::unordered_map<std::string, IdealConfigs> configs{};
+std::unordered_map<std::string, utils::IdealConfigs> configs{};
 }  // namespace ecl

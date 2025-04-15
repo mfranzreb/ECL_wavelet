@@ -117,8 +117,14 @@ int main(int argc, char** argv) {
       auto data = ecl::utils::readDataFromFile<uint8_t>(data_file, data_size);
       ecl::utils::convertDataToMinAlphabet(data.data(), data_size);
 
-      ecl::BM_Select<uint8_t>(data.data(), data_size, num_queries, GPU_index,
-                              num_iters, output);
+      try {
+        ecl::BM_Select<uint8_t>(data.data(), data_size, num_queries, GPU_index,
+                                num_iters, output);
+      } catch (std::exception const& e) {
+        std::cout << "Benchmark of select failed for data size " << data_size
+                  << " and file " << data_file << ": " << e.what() << std::endl;
+        break;
+      }
     }
   }
   return EXIT_SUCCESS;

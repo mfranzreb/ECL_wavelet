@@ -79,9 +79,9 @@ int main(int argc, char** argv) {
                                           1ULL << 31, 1ULL << 32, 1ULL << 33,
                                           1ULL << 34};
 
-  std::vector<std::string> const data_files = {
-      input_dir + "/dna.txt", input_dir + "/common_crawl.txt",
-      input_dir + "/prot.txt", input_dir + "/russian_CC.txt"};
+  std::vector<std::string> const data_files = {input_dir + "/dna.txt",
+                                               input_dir + "/common_crawl.txt",
+                                               input_dir + "/prot.txt"};
 
   for (auto const& data_file : data_files) {
     std::string const output =
@@ -92,17 +92,16 @@ int main(int argc, char** argv) {
     out.close();
 
     for (auto const data_size : data_sizes) {
-      if (data_file == input_dir + "/russian_CC.txt") {
-        auto data =
-            ecl::utils::readDataFromFile<uint16_t>(data_file, data_size);
+      auto data = ecl::utils::readDataFromFile<uint8_t>(data_file, data_size);
 
-        ecl::BM_Construction<uint16_t>(data.data(), data_size, GPU_index,
-                                       num_iters, output);
-      } else {
-        auto data = ecl::utils::readDataFromFile<uint8_t>(data_file, data_size);
-
+      try {
         ecl::BM_Construction<uint8_t>(data.data(), data_size, GPU_index,
                                       num_iters, output);
+      } catch (std::bad_alloc const& e) {
+        std::cout << "Benchmark of tree construction failed for data size "
+                  << data_size << " and file " << data_file << ": " << e.what()
+                  << std::endl;
+        break;
       }
     }
   }

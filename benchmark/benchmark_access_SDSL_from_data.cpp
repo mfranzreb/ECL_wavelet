@@ -149,9 +149,9 @@ int main(int argc, char** argv) {
   std::vector<size_t> const num_queries = {100'000, 500'000, 1'000'000,
                                            5'000'000, 10'000'000};
 
-  std::vector<std::string> const data_files = {
-      input_dir + "/dna.txt", input_dir + "/prot.txt",
-      input_dir + "/common_crawl.txt", input_dir + "/russian_CC.txt"};
+  std::vector<std::string> const data_files = {input_dir + "/dna.txt",
+                                               input_dir + "/prot.txt",
+                                               input_dir + "/common_crawl.txt"};
 
   for (auto const& data_file : data_files) {
     std::string const output =
@@ -162,15 +162,9 @@ int main(int argc, char** argv) {
     out.close();
 
     for (auto const data_size : data_sizes) {
-      if (data_file == input_dir + "/russian_CC.txt") {
-        auto const data = readDataFromFile<uint16_t>(data_file, data_size);
-        BM_Access<uint16_t>(data.data(), data_size, num_queries, num_iters,
-                            output);
-      } else {
-        auto const data = readDataFromFile<uint8_t>(data_file, data_size);
-        BM_Access<uint8_t>(data.data(), data_size, num_queries, num_iters,
-                           output);
-      }
+      auto const data = readDataFromFile<uint8_t>(data_file, data_size);
+      BM_Access<uint8_t>(data.data(), data_size, num_queries, num_iters,
+                         output);
     }
   }
   return EXIT_SUCCESS;

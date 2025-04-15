@@ -112,6 +112,14 @@ int main(int argc, char** argv) {
 
       ecl::utils::convertDataToMinAlphabet(data.data(), data_size);
 
+      try {
+        ecl::BM_Rank<uint8_t>(data.data(), data_size, num_queries, GPU_index,
+                              num_iters, output);
+      } catch (std::exception const& e) {
+        std::cout << "Benchmark of rank failed for data size " << data_size
+                  << " and file " << data_file << ": " << e.what() << std::endl;
+        break;
+      }
       ecl::BM_Rank<uint8_t>(data.data(), data_size, num_queries, GPU_index,
                             num_iters, output);
     }

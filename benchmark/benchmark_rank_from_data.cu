@@ -120,8 +120,6 @@ int main(int argc, char** argv) {
                   << " and file " << data_file << ": " << e.what() << std::endl;
         break;
       }
-      ecl::BM_Rank<uint8_t>(data.data(), data_size, num_queries, GPU_index,
-                            num_iters, output);
     }
   }
   return EXIT_SUCCESS;

@@ -41,7 +41,7 @@ static void BM_Access(T const* data, size_t const data_size,
       size_t const num_iters =
           std::max<size_t>(1, kBenchmarkTime / (warmup_time / 5));
       times.resize(num_iters);
-      for (int i = 0; i < num_iters; ++i) {
+      for (size_t i = 0; i < num_iters; ++i) {
         start = std::chrono::high_resolution_clock::now();
         auto results = wt.access(queries.data(), query_num);
         end = std::chrono::high_resolution_clock::now();

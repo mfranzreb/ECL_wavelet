@@ -62,7 +62,7 @@ static void BM_Select(T const* data, size_t const data_size,
         size_t const num_iters =
             std::max<size_t>(1, kBenchmarkTime / (warmup_time / 5));
         times.resize(num_iters);
-        for (int i = 0; i < num_iters; ++i) {
+        for (size_t i = 0; i < num_iters; ++i) {
           start = std::chrono::high_resolution_clock::now();
           auto results = wt.select(queries.data(), query_num);
           end = std::chrono::high_resolution_clock::now();
@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
 
       try {
         ecl::BM_Select<uint8_t>(data.data(), data_size, num_queries, GPU_index,
-                                num_iters, output);
+                                output);
       } catch (std::exception const& e) {
         std::cout << "Benchmark of select failed for data size " << data_size
                   << " and file " << data_file << ": " << e.what() << std::endl;

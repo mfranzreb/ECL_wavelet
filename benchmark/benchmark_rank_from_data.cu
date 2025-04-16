@@ -6,11 +6,13 @@
 
 namespace ecl {
 
+size_t constexpr kBenchmarkTime = 1'000'000;  // 1 second
+
 template <typename T>
 static void BM_Rank(T const* data, size_t const data_size,
                     std::vector<size_t> const& num_queries, int const GPU_index,
-                    int const num_iters, std::string const& output) {
-  std::vector<size_t> times(num_iters);
+                    std::string const& output) {
+  std::vector<size_t> times;
   for (auto const query_num : num_queries) {
     if (query_num > data_size) {
       std::cerr << "Query size is larger than the data size, skipping..."
@@ -44,13 +46,21 @@ static void BM_Rank(T const* data, size_t const data_size,
                                      cudaHostRegisterPortable));
         }
         // warmup
+        auto start = std::chrono::high_resolution_clock::now();
         for (int i = 0; i < 5; ++i) {
           auto results = wt.rank(queries.data(), query_num);
         }
+        auto end = std::chrono::high_resolution_clock::now();
+        auto const warmup_time =
+            std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+                .count();
+        size_t const num_iters =
+            std::max<size_t>(1, kBenchmarkTime / (warmup_time / 5));
+        times.resize(num_iters);
         for (int i = 0; i < num_iters; ++i) {
-          auto start = std::chrono::high_resolution_clock::now();
+          start = std::chrono::high_resolution_clock::now();
           auto results = wt.rank(queries.data(), query_num);
-          auto end = std::chrono::high_resolution_clock::now();
+          end = std::chrono::high_resolution_clock::now();
           times[i] =
               std::chrono::duration_cast<std::chrono::microseconds>(end - start)
                   .count();
@@ -73,17 +83,15 @@ static void BM_Rank(T const* data, size_t const data_size,
 }  // namespace ecl
 
 int main(int argc, char** argv) {
-  if (argc != 5) {
-    std::cerr << "Usage: " << argv[0]
-              << " <GPU_index> <num_iters> <input_dir> <output_dir>"
+  if (argc != 4) {
+    std::cerr << "Usage: " << argv[0] << " <GPU_index> <input_dir> <output_dir>"
               << std::endl;
     return EXIT_FAILURE;
   }
 
   uint32_t const GPU_index = std::stoi(argv[1]);
-  uint32_t const num_iters = std::stoi(argv[2]);
-  std::string const input_dir = argv[3];
-  std::string const output_dir = argv[4];
+  std::string const input_dir = argv[2];
+  std::string const output_dir = argv[3];
 
   ecl::utils::checkWarpSize(GPU_index);
 
@@ -114,7 +122,7 @@ int main(int argc, char** argv) {
 
       try {
         ecl::BM_Rank<uint8_t>(data.data(), data_size, num_queries, GPU_index,
-                              num_iters, output);
+                              output);
       } catch (std::exception const& e) {
         std::cout << "Benchmark of rank failed for data size " << data_size
                   << " and file " << data_file << ": " << e.what() << std::endl;

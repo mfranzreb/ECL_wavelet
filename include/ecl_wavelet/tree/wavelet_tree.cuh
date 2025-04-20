@@ -961,12 +961,10 @@ class WaveletTree {
     uint8_t constexpr NumThreads = 1;
 
     assert(num_indices > 0);
-    utils::IdealConfigs const& ideal_configs =
-        utils::getIdealConfigs(utils::getDeviceProperties().name);
     size_t free_mem, total_mem;
     gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
 
-    size_t constexpr kMaxNumChunks = 40;
+    size_t constexpr kMaxNumChunks = 10;
     size_t const needed_memory =
         num_indices * sizeof(T) +
         3 * (num_indices / kMaxNumChunks + num_indices % kMaxNumChunks) *
@@ -998,32 +996,7 @@ class WaveletTree {
                               cudaHostAllocPortable));
     }
 
-    //  Divide indices into chunks
-    uint32_t num_chunks;
-    if (ideal_configs.accessKernel_logrel.slope != 0.0f) {
-      auto log_rel = ideal_configs.accessKernel_logrel;
-      int result =
-          std::max(2, static_cast<int>(log_rel.slope * std::log(num_indices) +
-                                       log_rel.intercept));
-      result = std::min(result, 20);
-      // Round to next multiple of 2
-      result = (result + 1) & ~1;
-      num_chunks = num_indices < static_cast<uint32_t>(result)
-                       ? 1
-                       : static_cast<uint32_t>(result);
-
-    } else {
-      num_chunks = num_indices < 10 ? 1 : 10;
-    }
-    while (num_chunks < kMaxNumChunks and
-           num_indices * sizeof(T) +
-                   std::min(num_chunks, 2U) *
-                       (num_indices / num_chunks + num_indices % num_chunks) *
-                       sizeof(size_t) >
-               free_mem) {
-      num_chunks++;
-    }
-    assert(num_chunks <= kMaxNumChunks);
+    uint32_t const num_chunks = num_indices < kMaxNumChunks ? 1 : kMaxNumChunks;
     uint8_t const num_buffers = std::min(num_chunks, 2U);
     size_t const chunk_size = num_indices / num_chunks;
     size_t const last_chunk_size = chunk_size + num_indices % num_chunks;
@@ -1281,13 +1254,11 @@ class WaveletTree {
                        [&](const RankSelectQuery<T>& s) {
                          return s.index_ < rank_select_.bit_array_.size(0);
                        }));
-    utils::IdealConfigs const& ideal_configs =
-        utils::getIdealConfigs(utils::getDeviceProperties().name);
 
     size_t free_mem, total_mem;
     gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
 
-    size_t constexpr kMaxNumChunks = 40;
+    size_t constexpr kMaxNumChunks = 10;
     size_t const needed_memory =
         num_queries * sizeof(size_t) +
         3 * (num_queries / kMaxNumChunks + num_queries % kMaxNumChunks) *
@@ -1321,31 +1292,7 @@ class WaveletTree {
     }
 
     //  Divide indices into chunks
-    uint32_t num_chunks;
-    if (ideal_configs.rankKernel_logrel.slope != 0.0f) {
-      auto log_rel = ideal_configs.rankKernel_logrel;
-      int result =
-          std::max(2, static_cast<int>(log_rel.slope * std::log(num_queries) +
-                                       log_rel.intercept));
-      result = std::min(result, 20);
-      // Round to next multiple of 2
-      result = (result + 1) & ~1;
-      num_chunks = num_queries < static_cast<uint32_t>(result)
-                       ? 1
-                       : static_cast<uint32_t>(result);
-
-    } else {
-      num_chunks = num_queries < 10 ? 1 : 10;
-    }
-    while (num_chunks < kMaxNumChunks and
-           num_queries * sizeof(size_t) +
-                   std::min(num_chunks, 2U) *
-                       (num_queries / num_chunks + num_queries % num_chunks) *
-                       sizeof(RankSelectQuery<T>) >
-               free_mem) {
-      num_chunks++;
-    }
-    assert(num_chunks <= kMaxNumChunks);
+    uint32_t const num_chunks = num_queries < kMaxNumChunks ? 1 : kMaxNumChunks;
     uint8_t const num_buffers = std::min(num_chunks, 2U);
     size_t const chunk_size = num_queries / num_chunks;
     size_t const last_chunk_size = chunk_size + num_queries % num_chunks;
@@ -1626,8 +1573,6 @@ class WaveletTree {
     assert(
         std::all_of(queries, queries + num_queries,
                     [](const RankSelectQuery<T>& s) { return s.index_ > 0; }));
-    utils::IdealConfigs const& ideal_configs =
-        utils::getIdealConfigs(utils::getDeviceProperties().name);
 
     size_t free_mem, total_mem;
     gpuErrchk(cudaMemGetInfo(&free_mem, &total_mem));
@@ -1666,30 +1611,7 @@ class WaveletTree {
     }
 
     //  Divide indices into chunks
-    uint32_t num_chunks;
-    if (ideal_configs.selectKernel_logrel.slope != 0.0f) {
-      auto log_rel = ideal_configs.selectKernel_logrel;
-      int result =
-          std::max(2, static_cast<int>(log_rel.slope * std::log(num_queries) +
-                                       log_rel.intercept));
-      result = std::min(result, 20);
-      // Round to next multiple of 2
-      result = (result + 1) & ~1;
-      num_chunks = num_queries < static_cast<uint32_t>(result)
-                       ? 1
-                       : static_cast<uint32_t>(result);
-
-    } else {
-      num_chunks = num_queries < 10 ? 1 : 10;
-    }
-    while (num_chunks < kMaxNumChunks and
-           num_queries * sizeof(size_t) +
-                   std::min(num_chunks, 2U) *
-                       (num_queries / num_chunks + num_queries % num_chunks) *
-                       sizeof(RankSelectQuery<T>) >
-               free_mem) {
-      num_chunks++;
-    }
+    uint32_t const num_chunks = num_queries < kMaxNumChunks ? 1 : kMaxNumChunks;
     uint8_t const num_buffers = std::min(num_chunks, 2U);
     size_t const chunk_size = num_queries / num_chunks;
     size_t const last_chunk_size = chunk_size + num_queries % num_chunks;
@@ -2546,22 +2468,13 @@ class WaveletTree {
 
     int num_blocks, threads_per_block;
 
-    utils::IdealConfigs const& ideal_configs =
-        utils::getIdealConfigs(prop.name);
-
     size_t const num_warps = std::min(
         (data_size + WS - 1) / WS,
         static_cast<size_t>(
             (max_threads_per_SM * prop.multiProcessorCount + WS - 1) / WS));
-    if (ideal_configs.ideal_TPB_fillLevelKernel > 0) {
-      std::tie(num_blocks, threads_per_block) = utils::getLaunchConfig(
-          num_warps, ideal_configs.ideal_TPB_fillLevelKernel,
-          ideal_configs.ideal_TPB_fillLevelKernel);
 
-    } else {
-      std::tie(num_blocks, threads_per_block) = utils::getLaunchConfig(
-          num_warps, utils::kMinTPB, maxThreadsPerBlockFillLevel);
-    }
+    std::tie(num_blocks, threads_per_block) = utils::getLaunchConfig(
+        num_warps, utils::kMinTPB, maxThreadsPerBlockFillLevel);
 
     if (enough_shmem) {
       detail::fillLevelKernel<T, true>

@@ -200,12 +200,7 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
           bit_array_.size(i));
       kernelStreamCheck(cudaStreamPerThread);
     } else {
-      utils::IdealConfigs const& ideal_configs =
-          utils::getIdealConfigs(prop.name);
-      uint32_t const block_size =
-          ideal_configs.ideal_TPB_calculateL2EntriesKernel != 0
-              ? ideal_configs.ideal_TPB_calculateL2EntriesKernel
-              : min_block_size;
+      uint32_t const block_size = min_block_size;
       // calculate L2 entries for all L1 blocks
       calculateL2EntriesKernel<<<num_l1_blocks, block_size>>>(
           *this, i, num_last_l2_blocks[i], num_l1_blocks,
@@ -274,8 +269,6 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
   kernelCheck();
 
   if (total_ones_samples > 0 or total_zeros_samples > 0) {
-    utils::IdealConfigs const& ideal_configs =
-        utils::getIdealConfigs(prop.name);
 #pragma omp parallel for num_threads(num_arrays)
     for (uint8_t i = 0; i < num_arrays; i++) {
       gpuErrchk(cudaSetDevice(GPU_index));
@@ -293,26 +286,13 @@ __host__ RankSelect::RankSelect(BitArray&& bit_array,
 
       if (num_ones_samples > 0 or num_zeros_samples > 0) {
         size_t const num_warps =
-            ideal_configs.ideal_tot_threads_calculateSelectSamplesKernel != 0
-                ? std::min(
-                      num_ones_samples + num_zeros_samples,
-                      ideal_configs
-                              .ideal_tot_threads_calculateSelectSamplesKernel /
-                          WS)
-                : std::min(
-                      static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
-                                               prop.multiProcessorCount +
-                                           WS - 1) /
-                                          WS),
-                      num_ones_samples + num_zeros_samples);
+            std::min(static_cast<size_t>((prop.maxThreadsPerMultiProcessor *
+                                              prop.multiProcessorCount +
+                                          WS - 1) /
+                                         WS),
+                     num_ones_samples + num_zeros_samples);
         auto const [blocks, threads] =
-            ideal_configs.ideal_TPB_calculateSelectSamplesKernel != 0
-                ? utils::getLaunchConfig(
-                      num_warps,
-                      ideal_configs.ideal_TPB_calculateSelectSamplesKernel,
-                      ideal_configs.ideal_TPB_calculateSelectSamplesKernel)
-                : utils::getLaunchConfig(num_warps, utils::kMinTPB,
-                                         utils::kMaxTPB);
+            utils::getLaunchConfig(num_warps, utils::kMinTPB, utils::kMaxTPB);
 
         calculateSelectSamplesKernel<<<blocks, threads>>>(
             *this, i, blocks * threads, num_ones_samples, num_zeros_samples);

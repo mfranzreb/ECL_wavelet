@@ -239,34 +239,6 @@ __host__ __device__ uint8_t ceilLog2(T n) {
 #endif
 }
 
-struct LogRel {
-  float slope;
-  float intercept;
-};
-
-struct IdealConfigs {
-  LogRel accessKernel_logrel = {0.0f, 0.0f};
-
-  LogRel rankKernel_logrel = {0.0f, 0.0f};
-
-  LogRel selectKernel_logrel = {0.0f, 0.0f};
-
-  uint32_t ideal_TPB_calculateL2EntriesKernel = 0;
-
-  uint32_t ideal_TPB_calculateSelectSamplesKernel = 0;
-  size_t ideal_tot_threads_calculateSelectSamplesKernel = 0;
-
-  uint32_t ideal_TPB_fillLevelKernel = 0;
-};
-
-/*!
- * \brief Get the ideal configurations for a given GPU. Only valid if GPU has
- * been tuned.
- * \param GPU_name Name of the GPU to get the configurations for.
- * \return Ideal configurations for the given GPU.
- */
-__host__ IdealConfigs &getIdealConfigs(const std::string &GPU_name);
-
 /*!
  * \brief Find the largest divisor of \c n that is smaller than \c divisor.
  * \tparam T Type of the number to find the divisor for.

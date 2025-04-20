@@ -28,7 +28,6 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-#include <GPU_tunes.hpp>
 #include <bit>
 #include <cassert>
 #include <cstdio>
@@ -39,7 +38,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace ecl::utils {
 static cudaDeviceProp prop;
-static IdealConfigs ideal_configs;
 
 __host__ std::pair<int, int> getLaunchConfig(size_t const num_warps,
                                              int const min_block_size,
@@ -119,22 +117,6 @@ __host__ void checkWarpSize(uint32_t const GPU_index) {
     fprintf(stderr, "Warp size must be 32, but is %d\n", prop.warpSize);
     exit(EXIT_FAILURE);
   }
-}
-
-__host__ IdealConfigs &getIdealConfigs(const std::string &GPU_name) {
-  auto get_configs = [](std::string GPU_name) {
-    if (configs.find(GPU_name) != configs.end()) {
-      return configs[GPU_name];
-    } else {
-      return IdealConfigs();
-    }
-  };
-  static bool first_call = true;
-  if (first_call) {
-    first_call = false;
-    ideal_configs = get_configs(GPU_name);
-  }
-  return ideal_configs;
 }
 
 int64_t getAvailableMemoryLinux() {

@@ -314,40 +314,6 @@
       "preLaunchTask": "build access bm from data"
     },
     {
-      "name": "Debug kernel tuner CUDA",
-      "type": "cuda-gdb",
-      "request": "launch",
-      "program": "${workspaceFolder}/build/kernel_tuning/ecl_tune_kernels",
-      "args": [". 0"],
-      "stopAtEntry": false,
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "build kernel tuner"
-    },
-    {
-      "name": "Debug kernel tuner",
-      "type": "cppdbg",
-      "request": "launch",
-      "program": "${workspaceFolder}/build/kernel_tuning/ecl_tune_kernels",
-      "args": [".", "0"],
-      "stopAtEntry": false,
-      "cwd": "${workspaceFolder}",
-      "MIMode": "gdb",
-      "miDebuggerPath": "/usr/bin/gdb",
-      "setupCommands": [
-        {
-          "description": "Enable pretty-printing for gdb",
-          "text": "-enable-pretty-printing",
-          "ignoreFailures": true
-        },
-        {
-          "description": "Set Disassembly Flavor to Intel",
-          "text": "-gdb-set disassembly-flavor intel",
-          "ignoreFailures": true
-        }
-      ],
-      "preLaunchTask": "build kernel tuner"
-    },
-    {
       "name": "Debug access profile CUDA",
       "type": "cuda-gdb",
       "request": "launch",

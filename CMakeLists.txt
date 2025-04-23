@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 3.25)
 
 project(ECLWavelet VERSION 0.1.0 LANGUAGES CXX CUDA)
 
-option(BUILD_TESTS "Build tests" ON)
-option(BUILD_BENCHMARKS "Build benchmarks" ON)
-option(PROFILE "Enable profiling" ON)
+option(BUILD_TESTS "Build tests" OFF)
+option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(PROFILE "Enable profiling" OFF)
 
 find_package(OpenMP REQUIRED)
 
@@ -38,7 +38,7 @@ endif(NOT CMAKE_BUILD_TYPE)
 
 
 if(PROFILE AND CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo --ptxas-options=-v")
 endif()
 
 add_subdirectory(include/ecl_wavelet)

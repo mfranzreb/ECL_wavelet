@@ -4,8 +4,7 @@ cmake_minimum_required(VERSION 3.25)
 project(ECLWavelet VERSION 0.1.0 LANGUAGES CXX CUDA)
 
 option(BUILD_TESTS "Build tests" OFF)
-option(BUILD_BENCHMARKS "Build benchmarks" OFF)
-option(PROFILE "Enable profiling" OFF)
+option(BUILD_EXAMPLES "Build examples" OFF)
 
 find_package(OpenMP REQUIRED)
 
@@ -37,23 +36,12 @@ if(NOT CMAKE_BUILD_TYPE)
 endif(NOT CMAKE_BUILD_TYPE)
 
 
-if(PROFILE AND CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo --ptxas-options=-v")
-endif()
-
 add_subdirectory(include/ecl_wavelet)
 
 add_subdirectory(src)
 
 message(STATUS "OpenMP_CXX_FLAGS: ${OpenMP_CXX_FLAGS}")
 message(STATUS "CUDAToolkit_FLAGS: ${CMAKE_CUDA_FLAGS}")
-
-if(BUILD_BENCHMARKS)
-    set(BENCHMARK_ENABLE_TESTING OFF)
-    add_subdirectory(third_party/benchmark)
-    add_subdirectory(benchmark)
-    set(GPU_ARCHITECTURE "sm_62")
-endif()
 
 
 if(BUILD_TESTS)

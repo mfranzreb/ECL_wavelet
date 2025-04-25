@@ -8,7 +8,10 @@ import os
 
 basedir = os.path.dirname(os.path.abspath(__file__))
 
-cpu_bms_files = {"CPU": basedir + "/results/benchmarks_RS_pasta.json"}
+cpu_bms_files = {
+    "CPU-wide": basedir + "/results/benchmarks_RS_pasta.json",
+    "CPU-flat": basedir + "/results/benchmarks_RS_pasta_flat.json",
+}
 gpu_bms_files = {
     "A100": basedir + "/results/benchmark_RS_512_16384_A100.json",
     "3090": basedir + "/results/benchmark_RS_512_16384_3090.json",
@@ -73,13 +76,33 @@ for row, is_adversarial in enumerate([0, 1]):
             ax.set_ylabel(
                 f"Time (ms) - {'Adversarial' if is_adversarial else 'Uniform'} distribution"
             )
-            if row == 0:
-                ax.legend(loc="upper left", bbox_to_anchor=(0.0, 1))
         ax.set_xscale("log", base=2)
         ax.set_yscale("log")
         ax.grid()
 
+# add legend of first subfigure
+handles = [
+    plt.Line2D([0], [0], color="blue", lw=2),
+    plt.Line2D([0], [0], color="red", lw=2),
+    plt.Line2D([0], [0], color="green", lw=2),
+]
+labels = [
+    "CPU",
+    "A100",
+    "3090",
+]
+fig.legend(
+    handles,
+    labels,
+    loc="lower center",
+    bbox_to_anchor=(0.5, 0.0),
+    ncol=3,
+    fontsize=14,
+)
+
 fig.tight_layout()
+# add extra space at the bottom
+fig.subplots_adjust(bottom=0.1)
 plt.savefig(basedir + "/results/RS_construction.png", dpi=300)
 
 cpu_rank_dfs = {}
@@ -195,7 +218,7 @@ for row, is_adversarial in enumerate([0, 1]):
                     1000
                     * (subgroup["param.num_queries"] / subgroup["median_real_time"]),
                     marker="o",
-                    color="blue",
+                    color="blue" if name == "CPU-wide" else "black",
                     linestyle="--" if query_type == 0 else "-",
                 )
         for name, df in gpu_select_dfs.items():
@@ -229,13 +252,15 @@ for row, is_adversarial in enumerate([0, 1]):
 # manual legend
 handles = [
     plt.Line2D([0], [0], color="blue", lw=2),
+    plt.Line2D([0], [0], color="black", lw=2),
     plt.Line2D([0], [0], color="red", lw=2),
     plt.Line2D([0], [0], color="green", lw=2),
     plt.Line2D([0], [0], color="black", lw=2, linestyle="--"),
     plt.Line2D([0], [0], color="black", lw=2),
 ]
 labels = [
-    "CPU",
+    "CPU-wide",
+    "CPU-flat",
     "A100",
     "3090",
     r"Select$_0$",
@@ -246,7 +271,7 @@ fig.legend(
     labels,
     loc="lower center",
     bbox_to_anchor=(0.5, 0.0),
-    ncol=5,
+    ncol=6,
     fontsize=14,
 )
 fig.tight_layout()

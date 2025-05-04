@@ -10,15 +10,21 @@ Given enough parallelism, this implementation is at least twice as fast as the [
 
 ![Time taken to process different numbers of access queries coming from the CPU
 by my implementation and by SDSL, on uniformly randomly distributed texts
-of 6GB in size for a variety of alphabet sizes.](results/wt_access_results.png)
+of 6GB in size for a variety of alphabet sizes.](results/wt_access_results.png "Time taken to process different numbers of access queries coming from the CPU
+by my implementation and by SDSL, on uniformly randomly distributed texts
+of 6GB in size for a variety of alphabet sizes.")
 
 ![Time taken to process different numbers of rank queries coming from the CPU
 by my implementation and by SDSL, on uniformly randomly distributed texts
-of 6GB in size for a variety of alphabet sizes.](results/wt_rank_results.png)
+of 6GB in size for a variety of alphabet sizes.](results/wt_rank_results.png "Time taken to process different numbers of rank queries coming from the CPU
+by my implementation and by SDSL, on uniformly randomly distributed texts
+of 6GB in size for a variety of alphabet sizes.")
 
 ![Time taken to process different numbers of select queries coming from the CPU
 by my implementation and by SDSL, on uniformly randomly distributed texts
-of 6GB in size for a variety of alphabet sizes.](results/wt_select_results.png)
+of 6GB in size for a variety of alphabet sizes.](results/wt_select_results.png "Time taken to process different numbers of select queries coming from the CPU
+by my implementation and by SDSL, on uniformly randomly distributed texts
+of 6GB in size for a variety of alphabet sizes.")
 
 The underlying binary rank and select support structures have at least 10x more throughput on an NVIDIA RTX 3090 compared to `pasta-wide` and `pasta-flat` from [here](https://github.com/pasta-toolbox/bit_vector) on an AMD Ryzen Threadripper 3970X with 32 cores.
 

@@ -122,7 +122,6 @@ class RankSelect {
    * \return Number of \c Value occurrences (rank) before position \c index,
    * i.e. in the slice [0, i).
    */
-  // TODO: try to make loop coalesced
   template <int NumThreads, bool GetBit, int Value>
   __device__ [[nodiscard]] auto rank(uint8_t const array_index,
                                      size_t const index, size_t const offset) {
@@ -820,7 +819,6 @@ class RankSelect {
       size_t const size, uint8_t const num_arrays) noexcept;
 
  private:
-  // TODO: num_l1_blocks and l2 blocks not necessary
   RSConfig::L1_TYPE* d_l1_indices_ =
       nullptr; /*!< Device pointer to L1 indices for all arrays.*/
   RSConfig::L2_TYPE* d_l2_indices_ =

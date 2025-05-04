@@ -688,8 +688,8 @@ class WaveletTree {
       }
     }
 
-    // TODO: see if still necessary
-    //  Placeholder allocation for bit array
+    //  Placeholder allocation for bit array to avoid memory fragmentation
+    //  problems
     void* d_placeholder;
     gpuErrchk(cudaMalloc(&d_placeholder, num_levels_ * data_size / 8));
 
@@ -945,7 +945,7 @@ class WaveletTree {
   /*!
    * \brief Access the symbols at the given indices in the wavelet tree.
    * \details For best performance, allocate the indices array in pinned
-   * memory.
+   * memory. For this, the \c PinnedVector class can be used.
    * \throws std::runtime_error if not enough GPU memory is available for the
    * queries. If it happens, try to process the queries in smaller batches.
    * \param indices Pointer to the indices of the symbols to be accessed.
@@ -953,8 +953,7 @@ class WaveletTree {
    * \return Access to the memory pool containing the accessed symbols.
    * Processing new access queries may overwrite old ones.
    */
-  // TODO: make const?
-  __host__ [[nodiscard]] std::span<T> access(size_t* indices,
+  __host__ [[nodiscard]] std::span<T> access(size_t const* indices,
                                              size_t const num_indices) {
     // Number of threads per query, set to 1 since it showed the best
     // performance
@@ -1235,7 +1234,8 @@ class WaveletTree {
    * \brief Rank queries on the wavelet tree. Number of occurrences of a
    * symbol up to a given index (exclusive).
    * \details For best performance, allocate the queries array in pinned
-   * memory.
+   * memory. For this, the \c PinnedVector class can be used. Creating the
+   * queries sorted by symbol can also speed up the processing.
    * \throws std::runtime_error if not enough GPU memory is available for the
    * queries. If it happens, try to process the queries in smaller batches.
    * \param queries Array of rank queries. For best performance, allocate the
@@ -1554,7 +1554,8 @@ class WaveletTree {
    * \brief Select queries on the wavelet tree. Find the index of the k-th
    * occurrence of a symbol. Starts counting from 1.
    * \details For best performance, allocate the queries array in pinned
-   * memory.
+   * memory. For this, the \c PinnedVector class can be used. Creating the
+   * queries sorted by symbol can also speed up the processing.
    * \throws std::runtime_error if not enough GPU memory is available for the
    * queries. If it happens, try to process the queries in smaller batches.
    * \param queries Array of select queries. For best performance, allocate
@@ -1563,7 +1564,6 @@ class WaveletTree {
    * \return Access to the memory pool containing the select results.
    * Processing new select queries may overwrite old ones.
    */
-  // TODO: when documenting, emphasize the power of sorting queries
   __host__ [[nodiscard]] std::span<size_t> select(RankSelectQuery<T>* queries,
                                                   size_t const num_queries) {
     // Number of threads per query, set to 1 since it showed the best

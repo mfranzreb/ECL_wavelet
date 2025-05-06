@@ -34,7 +34,7 @@ of 6GB in size for a variety of alphabet sizes.
 
 The underlying binary rank and select support structures have at least 10x more throughput on an NVIDIA RTX 3090 compared to `pasta-wide` and `pasta-flat` from [here](https://github.com/pasta-toolbox/bit_vector) on an AMD Ryzen Threadripper 3970X with 32 cores.
 
-For more information on the implementation and performance results, refer to the Master's thesis (link coming soon) the project is based on.
+For more information on the implementation and performance results, refer to the [Master's thesis](Master_thesis_Marco_Franzreb.pdf) the project is based on.
 
 ## Usage
 

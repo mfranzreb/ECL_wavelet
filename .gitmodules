@@ -16,3 +16,6 @@
 [submodule "third_party/pasta_utils"]
 	path = third_party/pasta_utils
 	url = https://github.com/pasta-toolbox/utils.git
+[submodule "third_party/sdsl-lite"]
+	path = third_party/sdsl-lite
+	url = https://github.com/simongog/sdsl-lite.git

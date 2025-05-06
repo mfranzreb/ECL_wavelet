@@ -953,7 +953,7 @@ class WaveletTree {
    * \return Access to the memory pool containing the accessed symbols.
    * Processing new access queries may overwrite old ones.
    */
-  __host__ [[nodiscard]] std::span<T> access(size_t const* indices,
+  __host__ [[nodiscard]] std::span<T> access(size_t* indices,
                                              size_t const num_indices) {
     // Number of threads per query, set to 1 since it showed the best
     // performance
